@@ -91,6 +91,21 @@ main(task="T2")
 main(task="T3")
 ```
 
+### Train on AICD-Bench (separate benchmark)
+
+```bash
+python experiment/exp00_codeorigin.py --benchmark aicd --task T1
+```
+
+### Train on DroidCollection (separate benchmark)
+
+```bash
+python experiment/exp00_codeorigin.py --benchmark droid --task T1
+```
+
+- Each run uses exactly one benchmark (`aicd` or `droid`).
+- Train/validation/test are all from the selected benchmark.
+
 ### Custom Configuration
 
 ```python
