@@ -21,10 +21,45 @@ import math
 import random
 import logging
 import warnings
+import importlib.util
+import subprocess
+import sys
 from datetime import datetime
 from typing import Optional, Dict, List, Tuple
 from dataclasses import dataclass, field
 from collections import defaultdict, Counter
+
+
+def ensure_runtime_dependencies():
+    """
+    Install missing runtime dependencies on-the-fly (Kaggle-friendly).
+    This runs before third-party imports so the script is standalone.
+    """
+    required = [
+        ("numpy", "numpy"),
+        ("torch", "torch"),
+        ("datasets", "datasets"),
+        ("transformers", "transformers"),
+        ("sklearn", "scikit-learn"),
+        ("accelerate", "accelerate"),
+        ("tree_sitter", "tree-sitter"),
+        ("tree_sitter_languages", "tree-sitter-languages"),
+    ]
+    missing = [pip_name for import_name, pip_name in required if importlib.util.find_spec(import_name) is None]
+    if not missing:
+        return
+
+    print(f"[bootstrap] Installing missing packages: {missing}")
+    try:
+        subprocess.check_call([sys.executable, "-m", "pip", "install", "-q", *missing])
+    except Exception as e:
+        raise RuntimeError(
+            f"Failed to auto-install dependencies {missing}. "
+            f"Please install manually via pip before running."
+        ) from e
+
+
+ensure_runtime_dependencies()
 
 import numpy as np
 import torch
@@ -38,10 +73,12 @@ except ImportError:
     from torch.cuda.amp import autocast as _autocast, GradScaler  # PyTorch < 2.0
     _NEW_AMP = False
 
-def autocast(device_type="cuda", enabled=True):
+def autocast(device_type="cuda", enabled=True, dtype=None):
     """Compatible autocast wrapper for PyTorch < 2.0 and >= 2.0."""
     if _NEW_AMP:
-        return _autocast(device_type=device_type, enabled=enabled)
+        if dtype is None:
+            return _autocast(device_type=device_type, enabled=enabled)
+        return _autocast(device_type=device_type, enabled=enabled, dtype=dtype)
     else:
         # Old API: only supports CUDA, ignore device_type
         return _autocast(enabled=enabled)
@@ -61,6 +98,52 @@ logger = logging.getLogger(__name__)
 
 class PreflightError(RuntimeError):
     """Raised when preflight checks fail and training must stop."""
+
+
+def _get_gpu_name() -> str:
+    if not torch.cuda.is_available():
+        return "cpu"
+    try:
+        return torch.cuda.get_device_name(0)
+    except Exception:
+        return "cuda"
+
+
+def apply_hardware_profile(config: "Config") -> "Config":
+    """
+    Apply runtime tuning for available hardware.
+    On Kaggle H100 80GB, increase throughput defaults safely.
+    """
+    if config.device == "cuda":
+        torch.backends.cuda.matmul.allow_tf32 = True
+        torch.backends.cudnn.allow_tf32 = True
+        torch.backends.cudnn.benchmark = True
+        try:
+            torch.set_float32_matmul_precision("high")
+        except Exception:
+            pass
+
+    if not (config.auto_h100_profile and config.device == "cuda"):
+        return config
+
+    gpu_name = _get_gpu_name().upper()
+    if "H100" not in gpu_name:
+        return config
+
+    # H100 profile: prioritize throughput while staying stable for seq_len=512.
+    config.precision = "bf16" if config.precision == "auto" else config.precision
+    config.batch_size = max(config.batch_size, 64)
+    config.grad_accum_steps = 1
+    config.num_workers = max(config.num_workers, 8)
+    config.prefetch_factor = max(config.prefetch_factor, 4)
+    config.log_every = max(config.log_every, 200)
+    config.eval_every = max(config.eval_every, 2000)
+
+    logger.info(
+        "Applied H100 profile | precision=%s | batch_size=%d | accum=%d | workers=%d | prefetch=%d",
+        config.precision, config.batch_size, config.grad_accum_steps, config.num_workers, config.prefetch_factor,
+    )
+    return config
 
 # ============================================================================
 # Configuration
@@ -93,9 +176,9 @@ class Config:
     num_domains: int = 3    # algorithmic, research, general-purpose
 
     # Training
-    epochs: int = 5
-    batch_size: int = 32  # Kaggle-friendly
-    grad_accum_steps: int = 2  # effective batch = 64
+    epochs: int = 3  # aligned with paper-style baseline setting
+    batch_size: int = 32  # auto-upscaled for H100 profile
+    grad_accum_steps: int = 2  # effective batch = 64 (or 64x1 on H100)
     lr_encoder: float = 2e-5
     lr_heads: float = 1e-4
     weight_decay: float = 0.01
@@ -127,11 +210,16 @@ class Config:
         "test": "test",
     })
     num_workers: int = 2
+    prefetch_factor: int = 2
 
     # Misc
     seed: int = 42
-    fp16: bool = True
+    precision: str = "auto"  # auto, bf16, fp16, fp32
+    auto_h100_profile: bool = True
+    require_tree_sitter: bool = True  # strict preflight for paper-grade AST features
     device: str = "cuda" if torch.cuda.is_available() else "cpu"
+    pin_memory: bool = True
+    non_blocking: bool = True
     save_dir: str = "./codeorigin_checkpoints"
     log_every: int = 100
     eval_every: int = 1000
@@ -179,7 +267,7 @@ AST_NODE_VOCAB = {
 def try_load_tree_sitter():
     """Try to import tree-sitter. Returns parser function or None."""
     try:
-        import tree_sitter_languages
+        import tree_sitter_languages  # type: ignore[reportMissingImports]
 
         LANG_MAP = {
             "python": "python", "java": "java", "cpp": "cpp", "c": "c",
@@ -503,6 +591,12 @@ def preflight_single_benchmark(config: Config) -> Dict[str, object]:
     logger.info(f"PREFLIGHT START | benchmark={config.benchmark} | task={config.task}")
     logger.info("=" * 70)
 
+    if config.require_tree_sitter and _ast_parser is None:
+        raise PreflightError(
+            "tree-sitter-languages is unavailable. Install tree-sitter + tree-sitter-languages "
+            "or disable strict mode by setting require_tree_sitter=False."
+        )
+
     if config.benchmark == "aicd":
         train_data, val_data, test_data, num_classes = load_aicd_data(config)
     elif config.benchmark == "droid":
@@ -560,7 +654,12 @@ def preflight_single_benchmark(config: Config) -> Dict[str, object]:
         "train_label_counts": {str(k): int(v) for k, v in sorted(label_counts.items())},
         "quick_code_stats": code_stats,
         "device": config.device,
+        "gpu_name": _get_gpu_name(),
         "encoder_name": config.encoder_name,
+        "precision": config.precision,
+        "batch_size": config.batch_size,
+        "grad_accum_steps": config.grad_accum_steps,
+        "num_workers": config.num_workers,
     }
 
     logger.info(
@@ -581,6 +680,7 @@ def preflight_benchmark_suite(task: str, base_config: Config) -> Dict[str, objec
         cfg = Config(**vars(base_config))
         cfg.task = task
         cfg.benchmark = bench
+        cfg = apply_hardware_profile(cfg)
         reports[bench] = preflight_single_benchmark(cfg)
 
     # Copy/paste block for research logs
@@ -1150,9 +1250,15 @@ class Trainer:
             self.optimizer, warmup_steps, total_steps,
         )
 
-        use_amp = config.fp16 and config.device == "cuda"
+        precision = config.precision.lower()
+        if precision == "auto":
+            precision = "bf16" if config.device == "cuda" else "fp32"
+        self.precision = precision
+
+        use_amp = config.device == "cuda" and precision in ("bf16", "fp16")
         self.use_amp = use_amp
-        self.scaler = GradScaler(enabled=use_amp)
+        self.amp_dtype = torch.bfloat16 if precision == "bf16" else torch.float16
+        self.scaler = GradScaler(enabled=(use_amp and precision == "fp16"))
         self.focal_loss = FocalLoss(gamma=2.0, weight=self.class_weights)
         self.best_f1 = 0.0
         self.global_step = 0
@@ -1173,14 +1279,14 @@ class Trainer:
 
         for batch_idx, batch in enumerate(self.train_loader):
             # Move to device
-            input_ids = batch["input_ids"].to(self.config.device)
-            attention_mask = batch["attention_mask"].to(self.config.device)
-            ast_seq = batch["ast_seq"].to(self.config.device)
-            struct_feat = batch["struct_feat"].to(self.config.device)
-            labels = batch["label"].to(self.config.device)
+            input_ids = batch["input_ids"].to(self.config.device, non_blocking=self.config.non_blocking)
+            attention_mask = batch["attention_mask"].to(self.config.device, non_blocking=self.config.non_blocking)
+            ast_seq = batch["ast_seq"].to(self.config.device, non_blocking=self.config.non_blocking)
+            struct_feat = batch["struct_feat"].to(self.config.device, non_blocking=self.config.non_blocking)
+            labels = batch["label"].to(self.config.device, non_blocking=self.config.non_blocking)
 
             # Forward with mixed precision
-            with autocast(device_type=self.config.device, enabled=self.use_amp):
+            with autocast(device_type=self.config.device, enabled=self.use_amp, dtype=self.amp_dtype):
                 outputs = self.model(input_ids, attention_mask, ast_seq, struct_feat, labels)
                 losses = compute_all_losses(self.model, outputs, labels, self.config, self.focal_loss)
                 loss = losses["total"] / self.config.grad_accum_steps
@@ -1232,13 +1338,13 @@ class Trainer:
         num_batches = 0
 
         for batch in dataloader:
-            input_ids = batch["input_ids"].to(self.config.device)
-            attention_mask = batch["attention_mask"].to(self.config.device)
-            ast_seq = batch["ast_seq"].to(self.config.device)
-            struct_feat = batch["struct_feat"].to(self.config.device)
-            labels = batch["label"].to(self.config.device)
+            input_ids = batch["input_ids"].to(self.config.device, non_blocking=self.config.non_blocking)
+            attention_mask = batch["attention_mask"].to(self.config.device, non_blocking=self.config.non_blocking)
+            ast_seq = batch["ast_seq"].to(self.config.device, non_blocking=self.config.non_blocking)
+            struct_feat = batch["struct_feat"].to(self.config.device, non_blocking=self.config.non_blocking)
+            labels = batch["label"].to(self.config.device, non_blocking=self.config.non_blocking)
 
-            with autocast(device_type=self.config.device, enabled=self.use_amp):
+            with autocast(device_type=self.config.device, enabled=self.use_amp, dtype=self.amp_dtype):
                 outputs = self.model(input_ids, attention_mask, ast_seq, struct_feat, labels)
 
             # Normalize both to same scale before ensembling
@@ -1300,7 +1406,7 @@ class Trainer:
         logger.info(f"Starting CodeOrigin Training - Task {self.config.task}")
         logger.info(f"Num classes: {self.model.num_classes}")
         logger.info(f"Device: {self.config.device}")
-        logger.info(f"FP16: {self.config.fp16}")
+        logger.info(f"Precision: {self.precision}")
         logger.info(f"Batch size: {self.config.batch_size} x {self.config.grad_accum_steps} = {self.config.batch_size * self.config.grad_accum_steps}")
         logger.info("=" * 60)
 
@@ -1363,12 +1469,14 @@ def main(task: str = "T1", config: Optional[Config] = None):
     # Config
     if config is None:
         config = Config(task=task)
+    config = apply_hardware_profile(config)
     set_seed(config.seed)
 
     logger.info(f"{'='*60}")
     logger.info(f"CodeOrigin - AI-Generated Code Detection")
     logger.info(f"Task: {config.task}")
     logger.info(f"Benchmark: {config.benchmark}")
+    logger.info(f"GPU: {_get_gpu_name()}")
     logger.info(f"{'='*60}")
 
     # Load one benchmark only (separate model per benchmark).
@@ -1398,24 +1506,29 @@ def main(task: str = "T1", config: Optional[Config] = None):
     logger.info(f"Class weights: {class_weights.numpy()}")
 
     # DataLoaders
-    pin = config.device == "cuda"
+    pin = config.pin_memory and config.device == "cuda"
+    common_loader_kwargs = {
+        "num_workers": config.num_workers,
+        "pin_memory": pin,
+        "persistent_workers": config.num_workers > 0,
+    }
+    if config.num_workers > 0:
+        common_loader_kwargs["prefetch_factor"] = config.prefetch_factor
+
     train_loader = DataLoader(
         train_dataset, batch_size=config.batch_size,
-        shuffle=True, num_workers=config.num_workers,
-        pin_memory=pin, drop_last=True,
-        persistent_workers=config.num_workers > 0,
+        shuffle=True, drop_last=True,
+        **common_loader_kwargs,
     )
     val_loader = DataLoader(
         val_dataset, batch_size=config.batch_size * 2,
-        shuffle=False, num_workers=config.num_workers,
-        pin_memory=pin,
-        persistent_workers=config.num_workers > 0,
+        shuffle=False,
+        **common_loader_kwargs,
     )
     test_loader = DataLoader(
         test_dataset, batch_size=config.batch_size * 2,
-        shuffle=False, num_workers=config.num_workers,
-        pin_memory=pin,
-        persistent_workers=config.num_workers > 0,
+        shuffle=False,
+        **common_loader_kwargs,
     )
 
     # Model
@@ -1457,6 +1570,7 @@ def run_benchmark_suite(task: str = "T1", base_config: Optional[Config] = None):
         cfg = Config(**vars(base_config))
         cfg.task = task
         cfg.benchmark = bench
+        cfg = apply_hardware_profile(cfg)
         # Keep checkpoints fully separated between benchmarks.
         cfg.save_dir = os.path.join(original_save_dir, f"{bench}_{task}")
 
@@ -1519,12 +1633,19 @@ if __name__ == "__main__":
     cfg = Config(
         task=TASK,
         benchmark=BENCHMARK,
-        epochs=5,
+        epochs=3,
         batch_size=32,
+        grad_accum_steps=2,
+        precision="auto",
+        auto_h100_profile=True,
+        num_workers=4,
+        prefetch_factor=2,
         max_train_samples=100_000,
         max_val_samples=20_000,
         max_test_samples=50_000,
+        require_tree_sitter=True,
     )
+    cfg = apply_hardware_profile(cfg)
 
     try:
         if RUN_PREFLIGHT_CHECK:
