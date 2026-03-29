@@ -3,7 +3,9 @@ CodeOrigin: Domain-Invariant AI-Generated Code Detection via
 Style-Content Disentanglement and Hierarchical Contrastive Learning
 
 Single-file implementation for Kaggle.
-Target: AICD-Bench (https://huggingface.co/AICD-bench/AICD-Bench)
+Target: AICD-Bench + DroidCollection
+(https://huggingface.co/AICD-bench/AICD-Bench)
+(https://huggingface.co/datasets/project-droid/DroidCollection)
 
 Usage on Kaggle:
     1. Upload this file to a Kaggle notebook
@@ -14,13 +16,15 @@ Author: [Your Name]
 """
 
 import os
+import json
 import math
 import random
 import logging
 import warnings
+from datetime import datetime
 from typing import Optional, Dict, List, Tuple
 from dataclasses import dataclass, field
-from collections import defaultdict
+from collections import defaultdict, Counter
 
 import numpy as np
 import torch
@@ -54,6 +58,10 @@ warnings.filterwarnings("ignore")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
 
+
+class PreflightError(RuntimeError):
+    """Raised when preflight checks fail and training must stop."""
+
 # ============================================================================
 # Configuration
 # ============================================================================
@@ -62,6 +70,7 @@ logger = logging.getLogger(__name__)
 class Config:
     # Task
     task: str = "T1"  # T1, T2, T3
+    benchmark: str = "aicd"  # aicd, droid
 
     # Model
     encoder_name: str = "answerdotai/ModernBERT-base"
@@ -110,6 +119,13 @@ class Config:
     max_train_samples: int = 100_000  # subsample for Kaggle feasibility
     max_val_samples: int = 20_000
     max_test_samples: int = 50_000
+    droid_dataset_id: str = "project-droid/DroidCollection"
+    droid_config_name: str = "default"
+    droid_split_map: Dict[str, str] = field(default_factory=lambda: {
+        "train": "train",
+        "validation": "dev",
+        "test": "test",
+    })
     num_workers: int = 2
 
     # Misc
@@ -396,6 +412,187 @@ def load_aicd_data(config: Config):
     logger.info(f"Number of classes: {num_classes}, Labels: {sorted(all_labels)}")
 
     return train_data, val_data, test_data, num_classes
+
+
+def _sample_dataset(dataset, max_samples: int):
+    """Randomly sample at most max_samples rows from a HF dataset."""
+    if max_samples <= 0 or len(dataset) <= max_samples:
+        return dataset
+    indices = random.sample(range(len(dataset)), max_samples)
+    return dataset.select(indices)
+
+
+def _map_droid_label_to_task(label: str, task: str) -> int:
+    """Map DroidCollection labels to AICD task labels."""
+    normalized = str(label).upper()
+    if task == "T1":
+        return 0 if normalized == "HUMAN_GENERATED" else 1
+    if task == "T3":
+        if normalized == "HUMAN_GENERATED":
+            return 0
+        if normalized == "MACHINE_GENERATED":
+            return 1
+        if normalized == "MACHINE_REFINED":
+            return 2
+        if "ADVERSARIAL" in normalized:
+            return 3
+        return -1
+    # T2 family IDs are benchmark-specific, so we do not merge Droid by default.
+    return -1
+
+
+def load_droid_data(config: Config):
+    """Load DroidCollection and convert to common {code, label} schema."""
+    if config.task == "T2":
+        raise ValueError("Task T2 is AICD-specific. Use T1/T3 for Droid benchmark.")
+
+    def _convert_split(split_name: str, max_samples: int):
+        source_split = config.droid_split_map[split_name]
+        logger.info(f"Loading Droid split '{source_split}' for {split_name}...")
+        ds = load_dataset(config.droid_dataset_id, name=config.droid_config_name, split=source_split)
+        ds = _sample_dataset(ds, max_samples)
+
+        def _convert_row(row):
+            mapped_label = _map_droid_label_to_task(row.get("Label", ""), config.task)
+            return {
+                "code": row.get("Code", "") or "",
+                "label": mapped_label,
+            }
+
+        converted = ds.map(_convert_row, remove_columns=ds.column_names)
+        converted = converted.filter(lambda x: x["label"] >= 0 and len(x["code"].strip()) > 0)
+        return converted
+
+    train_data = _convert_split("train", config.max_train_samples)
+    val_data = _convert_split("validation", config.max_val_samples)
+    test_data = _convert_split("test", config.max_test_samples)
+
+    labels = set(train_data["label"])
+    num_classes = len(labels)
+    logger.info(
+        f"Droid sizes - Train: {len(train_data)}, Val: {len(val_data)}, Test: {len(test_data)}"
+    )
+    logger.info(f"Droid classes: {num_classes}, Labels: {sorted(labels)}")
+    return train_data, val_data, test_data, num_classes
+
+
+def _quick_code_stats(dataset, code_key: str = "code", sample_size: int = 512) -> Dict[str, float]:
+    """Compute lightweight code stats for sanity checks."""
+    n = min(len(dataset), sample_size)
+    if n == 0:
+        return {"samples": 0, "avg_chars": 0.0, "avg_lines": 0.0, "empty_ratio": 1.0}
+    sample = dataset.select(range(n))
+    codes = sample[code_key]
+    lengths = [len(c) for c in codes]
+    lines = [c.count("\n") + 1 for c in codes]
+    empty = sum(1 for c in codes if len(c.strip()) == 0)
+    return {
+        "samples": n,
+        "avg_chars": float(np.mean(lengths)),
+        "avg_lines": float(np.mean(lines)),
+        "empty_ratio": float(empty / n),
+    }
+
+
+def preflight_single_benchmark(config: Config) -> Dict[str, object]:
+    """
+    Run strict preflight checks before training one benchmark.
+    Raises PreflightError on failure.
+    """
+    logger.info("\n" + "=" * 70)
+    logger.info(f"PREFLIGHT START | benchmark={config.benchmark} | task={config.task}")
+    logger.info("=" * 70)
+
+    if config.benchmark == "aicd":
+        train_data, val_data, test_data, num_classes = load_aicd_data(config)
+    elif config.benchmark == "droid":
+        train_data, val_data, test_data, num_classes = load_droid_data(config)
+    else:
+        raise PreflightError(f"Unsupported benchmark: {config.benchmark}")
+
+    # Basic split sanity
+    if len(train_data) == 0 or len(val_data) == 0 or len(test_data) == 0:
+        raise PreflightError("One or more splits are empty.")
+    if num_classes < 2:
+        raise PreflightError(f"Invalid class count: {num_classes}")
+
+    # Label distribution sanity (training set)
+    label_counts = Counter(train_data["label"])
+    if any(v <= 0 for v in label_counts.values()):
+        raise PreflightError("Detected invalid label counts.")
+
+    # Code/text sanity
+    code_stats = _quick_code_stats(train_data, code_key="code", sample_size=512)
+    if code_stats["empty_ratio"] > 0.05:
+        raise PreflightError(f"Too many empty code samples: {code_stats['empty_ratio']:.3f}")
+
+    # Tokenizer sanity
+    logger.info(f"Preflight tokenizer check: {config.encoder_name}")
+    tokenizer = AutoTokenizer.from_pretrained(config.encoder_name)
+    probe_code = train_data[0]["code"]
+    encoded = tokenizer(
+        probe_code,
+        max_length=config.max_length,
+        padding="max_length",
+        truncation=True,
+        return_tensors="pt",
+    )
+    if encoded["input_ids"].shape[-1] != config.max_length:
+        raise PreflightError("Tokenizer output length mismatch.")
+
+    # Feature extraction sanity
+    ast_seq = extract_ast_sequence(probe_code, config.ast_seq_len)
+    struct_feat = extract_structural_features(probe_code)
+    if len(ast_seq) != config.ast_seq_len:
+        raise PreflightError("AST sequence length mismatch.")
+    if len(struct_feat) != STRUCTURAL_FEATURE_DIM:
+        raise PreflightError("Structural feature dimension mismatch.")
+
+    report = {
+        "benchmark": config.benchmark,
+        "task": config.task,
+        "num_classes": int(num_classes),
+        "sizes": {
+            "train": int(len(train_data)),
+            "validation": int(len(val_data)),
+            "test": int(len(test_data)),
+        },
+        "train_label_counts": {str(k): int(v) for k, v in sorted(label_counts.items())},
+        "quick_code_stats": code_stats,
+        "device": config.device,
+        "encoder_name": config.encoder_name,
+    }
+
+    logger.info(
+        f"PREFLIGHT OK | {config.benchmark.upper()} | "
+        f"sizes={report['sizes']} | classes={report['num_classes']}"
+    )
+    return report
+
+
+def preflight_benchmark_suite(task: str, base_config: Config) -> Dict[str, object]:
+    """Run preflight checks for all requested benchmarks and print copyable summary."""
+    reports: Dict[str, object] = {}
+    planned = ["aicd", "droid"]
+    if task == "T2":
+        planned = ["aicd"]  # Droid label space does not match T2 family attribution.
+
+    for bench in planned:
+        cfg = Config(**vars(base_config))
+        cfg.task = task
+        cfg.benchmark = bench
+        reports[bench] = preflight_single_benchmark(cfg)
+
+    # Copy/paste block for research logs
+    payload = {
+        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "task": task,
+        "preflight_reports": reports,
+    }
+    logger.info("\n=== PREFLIGHT_REPORT_START ===")
+    logger.info(json.dumps(payload, ensure_ascii=True, indent=2))
+    logger.info("=== PREFLIGHT_REPORT_END ===")
+    return payload
 
 
 # ============================================================================
@@ -959,6 +1156,7 @@ class Trainer:
         self.focal_loss = FocalLoss(gamma=2.0, weight=self.class_weights)
         self.best_f1 = 0.0
         self.global_step = 0
+        self.last_eval_metrics: Dict[str, Dict[str, float]] = {}
 
     def train_epoch(self, epoch: int):
         self.model.train()
@@ -1058,9 +1256,18 @@ class Trainer:
 
         # Macro F1
         macro_f1 = f1_score(all_labels, all_preds, average="macro")
+        weighted_f1 = f1_score(all_labels, all_preds, average="weighted")
         avg_loss = total_loss / max(num_batches, 1)
 
-        logger.info(f"{split_name} | Loss: {avg_loss:.4f} | Macro-F1: {macro_f1:.4f}")
+        logger.info(
+            f"{split_name} | Loss: {avg_loss:.4f} | Macro-F1: {macro_f1:.4f} | "
+            f"Weighted-F1: {weighted_f1:.4f}"
+        )
+        self.last_eval_metrics[split_name] = {
+            "loss": float(avg_loss),
+            "macro_f1": float(macro_f1),
+            "weighted_f1": float(weighted_f1),
+        }
 
         # Per-class report
         if split_name == "Test":
@@ -1130,8 +1337,13 @@ class Trainer:
             logger.warning("No best checkpoint found, evaluating current model")
             test_f1 = self.evaluate(self.test_loader, "Test")
 
-        logger.info(f"\n*** Final Test Macro-F1: {test_f1:.4f} ***")
-        return test_f1
+        test_weighted = self.last_eval_metrics.get("Test", {}).get("weighted_f1", test_f1)
+        logger.info(f"\n*** Final Test Macro-F1: {test_f1:.4f} | Weighted-F1: {test_weighted:.4f} ***")
+        return {
+            "test_f1": float(test_f1),
+            "test_weighted_f1": float(test_weighted),
+            "best_val_f1": float(self.best_f1),
+        }
 
 
 # ============================================================================
@@ -1156,10 +1368,16 @@ def main(task: str = "T1", config: Optional[Config] = None):
     logger.info(f"{'='*60}")
     logger.info(f"CodeOrigin - AI-Generated Code Detection")
     logger.info(f"Task: {config.task}")
+    logger.info(f"Benchmark: {config.benchmark}")
     logger.info(f"{'='*60}")
 
-    # Load data
-    train_data, val_data, test_data, num_classes = load_aicd_data(config)
+    # Load one benchmark only (separate model per benchmark).
+    if config.benchmark == "aicd":
+        train_data, val_data, test_data, num_classes = load_aicd_data(config)
+    elif config.benchmark == "droid":
+        train_data, val_data, test_data, num_classes = load_droid_data(config)
+    else:
+        raise ValueError(f"Unsupported benchmark: {config.benchmark}")
 
     # Update num_classes from actual data
     logger.info(f"Detected {num_classes} classes")
@@ -1214,9 +1432,75 @@ def main(task: str = "T1", config: Optional[Config] = None):
     trainer = Trainer(config, model, train_loader, val_loader, test_loader, class_weights)
 
     # Train
-    test_f1 = trainer.train()
+    run_stats = trainer.train()
 
-    return test_f1
+    return run_stats
+
+
+def run_benchmark_suite(task: str = "T1", base_config: Optional[Config] = None):
+    """
+    Train the same method on two independent benchmarks sequentially.
+    Each benchmark run initializes a fresh model and optimizer state.
+    """
+    if base_config is None:
+        base_config = Config(task=task)
+
+    results: Dict[str, Dict[str, float]] = {}
+    benchmarks = ["aicd", "droid"]
+    original_save_dir = base_config.save_dir
+
+    for bench in benchmarks:
+        if bench == "droid" and task == "T2":
+            logger.warning("Skipping Droid for T2 (label space mismatch).")
+            continue
+
+        cfg = Config(**vars(base_config))
+        cfg.task = task
+        cfg.benchmark = bench
+        # Keep checkpoints fully separated between benchmarks.
+        cfg.save_dir = os.path.join(original_save_dir, f"{bench}_{task}")
+
+        logger.info("\n" + "=" * 70)
+        logger.info(f"BENCHMARK SUITE RUN: {bench.upper()} | task={task}")
+        logger.info("=" * 70)
+        results[bench] = main(task=task, config=cfg)
+
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+
+    logger.info("\nBenchmark suite summary:")
+    for bench, stats in results.items():
+        logger.info(
+            f"{bench.upper()} -> best_val_f1={stats['best_val_f1']:.4f}, "
+            f"test_f1={stats['test_f1']:.4f}"
+        )
+
+    # Copy-paste friendly block for tracker logging.
+    ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    logger.info("\n=== SUITE_RESULTS_START ===")
+    logger.info(f"timestamp={ts} | task={task} | method=CodeOrigin")
+    logger.info("| benchmark | task | best_val_f1 | test_f1 |")
+    logger.info("|---|---|---:|---:|")
+    for bench in ["aicd", "droid"]:
+        if bench in results:
+            logger.info(
+                f"| {bench.upper()} | {task} | "
+                f"{results[bench]['best_val_f1']:.4f} | {results[bench]['test_f1']:.4f} |"
+            )
+            if "test_weighted_f1" in results[bench]:
+                logger.info(
+                    f"{bench.upper()} weighted_test_f1={results[bench]['test_weighted_f1']:.4f}"
+                )
+    logger.info("=== SUITE_RESULTS_END ===")
+
+    machine_block = {
+        "timestamp": ts,
+        "task": task,
+        "method": "CodeOrigin",
+        "results": results,
+    }
+    logger.info("SUITE_RESULTS_JSON=" + json.dumps(machine_block, ensure_ascii=True))
+    return results
 
 
 # ============================================================================
@@ -1224,4 +1508,35 @@ def main(task: str = "T1", config: Optional[Config] = None):
 # ============================================================================
 
 if __name__ == "__main__":
-    main(task="T1")
+    # Kaggle standalone defaults:
+    # - No CLI/terminal arguments required.
+    # - Edit this block directly, then run the script.
+    RUN_MODE = "both"  # "single" or "both"
+    TASK = "T1"        # "T1", "T2", "T3"
+    BENCHMARK = "aicd" # used only when RUN_MODE == "single"
+    RUN_PREFLIGHT_CHECK = True  # If True, stop training immediately when any check fails.
+
+    cfg = Config(
+        task=TASK,
+        benchmark=BENCHMARK,
+        epochs=5,
+        batch_size=32,
+        max_train_samples=100_000,
+        max_val_samples=20_000,
+        max_test_samples=50_000,
+    )
+
+    try:
+        if RUN_PREFLIGHT_CHECK:
+            if RUN_MODE == "both":
+                preflight_benchmark_suite(task=cfg.task, base_config=cfg)
+            else:
+                preflight_single_benchmark(cfg)
+
+        if RUN_MODE == "both":
+            run_benchmark_suite(task=cfg.task, base_config=cfg)
+        else:
+            main(task=cfg.task, config=cfg)
+    except PreflightError as e:
+        logger.error(f"PRE-FLIGHT FAILED: {e}")
+        raise SystemExit(1)
