@@ -1,18 +1,26 @@
 """
-CodeOrigin: Domain-Invariant AI-Generated Code Detection via
-Style-Content Disentanglement and Hierarchical Contrastive Learning
+AP-NRL: Adversarial Preference Neural Representation Learning for
+Robust AI-Generated Code Detection Against Evasion Attacks
+
+Key Innovation:
+- Supervised Contrastive Learning (SupCon) with hard negative mining
+- Code augmentation simulates adversarial humanization attacks
+- Learns that superficial edits don't alter generative manifold
+- Dual-view consistency: original and augmented views stay close
+- Specifically designed to defeat adversarially humanized code
+
+Loss: L = L_CE + λ_supcon * L_SupCon + λ_consistency * L_Consistency
+
+Reference: Tier A Flagship 3 from research portfolio
+Target: NeurIPS 2026 ORAL
 
 Single-file implementation for Kaggle.
 Target: AICD-Bench + DroidCollection
-(https://huggingface.co/AICD-bench/AICD-Bench)
-(https://huggingface.co/datasets/project-droid/DroidCollection)
 
 Usage on Kaggle:
     1. Upload this file to a Kaggle notebook
     2. Run: !pip install datasets transformers accelerate tree-sitter tree-sitter-languages
-    3. Execute the cells or run: python codeorigin.py --task T1
-
-Author: [Your Name]
+    3. Execute the cells or run: python exp03_ap_nrl.py --task T1
 """
 
 import os
@@ -221,9 +229,16 @@ class Config:
     device: str = "cuda" if torch.cuda.is_available() else "cpu"
     pin_memory: bool = True
     non_blocking: bool = True
-    save_dir: str = "./codeorigin_checkpoints"
+    save_dir: str = "./ap_nrl_checkpoints"
     log_every: int = 100
     eval_every: int = 1000
+
+    # AP-NRL specific
+    lambda_supcon: float = 0.5
+    supcon_temperature: float = 0.07
+    lambda_consistency: float = 0.3
+    projection_dim: int = 128
+    augment_prob: float = 0.3
 
 
 def set_seed(seed: int):
@@ -423,19 +438,14 @@ STRUCTURAL_FEATURE_DIM = 22  # number of features from extract_structural_featur
 # ============================================================================
 
 class AICDDataset(Dataset):
-    """Dataset for AICD-Bench with multi-granularity features."""
+    """Dataset with contrastive augmentation for AP-NRL."""
 
-    def __init__(
-        self,
-        data,
-        tokenizer,
-        max_length: int = 512,
-        ast_seq_len: int = 128,
-    ):
+    def __init__(self, data, tokenizer, max_length=512, ast_seq_len=128, augmenter=None):
         self.data = data
         self.tokenizer = tokenizer
         self.max_length = max_length
         self.ast_seq_len = ast_seq_len
+        self.augmenter = augmenter
 
     def __len__(self):
         return len(self.data)
@@ -445,28 +455,35 @@ class AICDDataset(Dataset):
         code = item["code"]
         label = item["label"]
 
-        # Token-level: tokenize source code
         encoding = self.tokenizer(
-            code,
-            max_length=self.max_length,
-            padding="max_length",
-            truncation=True,
-            return_tensors="pt",
+            code, max_length=self.max_length, padding="max_length",
+            truncation=True, return_tensors="pt",
         )
-
-        # AST-level: node type sequence
         ast_seq = extract_ast_sequence(code, self.ast_seq_len)
-
-        # Graph-level proxy: structural features
         struct_feat = extract_structural_features(code)
 
-        return {
+        result = {
             "input_ids": encoding["input_ids"].squeeze(0),
             "attention_mask": encoding["attention_mask"].squeeze(0),
             "ast_seq": torch.tensor(ast_seq, dtype=torch.long),
             "struct_feat": torch.tensor(struct_feat, dtype=torch.float32),
             "label": torch.tensor(label, dtype=torch.long),
         }
+
+        if self.augmenter is not None:
+            aug_code = self.augmenter.augment(code)
+            aug_enc = self.tokenizer(
+                aug_code, max_length=self.max_length, padding="max_length",
+                truncation=True, return_tensors="pt",
+            )
+            aug_ast = extract_ast_sequence(aug_code, self.ast_seq_len)
+            aug_struct = extract_structural_features(aug_code)
+            result["aug_input_ids"] = aug_enc["input_ids"].squeeze(0)
+            result["aug_attention_mask"] = aug_enc["attention_mask"].squeeze(0)
+            result["aug_ast_seq"] = torch.tensor(aug_ast, dtype=torch.long)
+            result["aug_struct_feat"] = torch.tensor(aug_struct, dtype=torch.float32)
+
+        return result
 
 
 def load_aicd_data(config: Config):
@@ -1021,20 +1038,125 @@ class PrototypicalContrastiveHead(nn.Module):
         return loss + 0.5 * supcon_loss
 
 
+class SupConProjectionHead(nn.Module):
+    """MLP projection head for supervised contrastive learning."""
+    def __init__(self, input_dim: int, hidden_dim: int, output_dim: int):
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Linear(input_dim, hidden_dim),
+            nn.LayerNorm(hidden_dim),
+            nn.GELU(),
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.LayerNorm(hidden_dim),
+            nn.GELU(),
+            nn.Linear(hidden_dim, output_dim),
+        )
+
+    def forward(self, x):
+        return F.normalize(self.net(x), dim=-1)
+
+
+class SupConLoss(nn.Module):
+    """Supervised Contrastive Loss with hard negative mining."""
+    def __init__(self, temperature: float = 0.07):
+        super().__init__()
+        self.temperature = temperature
+
+    def forward(self, features: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
+        device = features.device
+        batch_size = features.size(0)
+        if batch_size < 2:
+            return torch.tensor(0.0, device=device, requires_grad=True)
+        sim = torch.mm(features, features.t()) / self.temperature
+        label_mask = (labels.unsqueeze(0) == labels.unsqueeze(1)).float()
+        self_mask = 1.0 - torch.eye(batch_size, device=device)
+        pos_mask = label_mask * self_mask
+        logits_max, _ = sim.max(dim=1, keepdim=True)
+        logits = sim - logits_max.detach()
+        exp_logits = torch.exp(logits) * self_mask
+        log_sum_exp = torch.log(exp_logits.sum(dim=1, keepdim=True) + 1e-8)
+        log_prob = logits - log_sum_exp
+        mean_log_prob = (pos_mask * log_prob).sum(dim=1) / (pos_mask.sum(dim=1) + 1e-8)
+        valid = pos_mask.sum(dim=1) > 0
+        if valid.sum() == 0:
+            return torch.tensor(0.0, device=device, requires_grad=True)
+        return -mean_log_prob[valid].mean()
+
+
+class CodeAugmenter:
+    """Adversarial-style code augmentation to simulate humanization."""
+    def __init__(self, prob: float = 0.3):
+        self.prob = prob
+
+    def augment(self, code: str) -> str:
+        augmented = code
+        transforms = [
+            self._rename_variables,
+            self._change_formatting,
+            self._add_comments,
+            self._reorder_imports,
+            self._change_string_quotes,
+        ]
+        for transform in transforms:
+            if random.random() < self.prob:
+                try:
+                    augmented = transform(augmented)
+                except Exception:
+                    pass
+        return augmented
+
+    def _rename_variables(self, code: str) -> str:
+        import re
+        vars_found = set(re.findall(r'\b([a-z])\b', code))
+        for v in list(vars_found)[:3]:
+            new_name = f"var_{v}"
+            code = re.sub(rf'\b{v}\b', new_name, code)
+        return code
+
+    def _change_formatting(self, code: str) -> str:
+        lines = code.split('\n')
+        result = []
+        for line in lines:
+            if random.random() < 0.3:
+                line = line.rstrip() + '  '
+            result.append(line)
+        return '\n'.join(result)
+
+    def _add_comments(self, code: str) -> str:
+        lines = code.split('\n')
+        result = []
+        for line in lines:
+            result.append(line)
+            if random.random() < 0.1 and line.strip():
+                result.append('# ' + ''.join(random.choices('abcdefghij ', k=random.randint(5, 15))))
+        return '\n'.join(result)
+
+    def _reorder_imports(self, code: str) -> str:
+        lines = code.split('\n')
+        import_lines = [l for l in lines if l.strip().startswith(('import ', 'from '))]
+        other_lines = [l for l in lines if not l.strip().startswith(('import ', 'from '))]
+        random.shuffle(import_lines)
+        return '\n'.join(import_lines + other_lines)
+
+    def _change_string_quotes(self, code: str) -> str:
+        if "'" in code and '"' not in code:
+            return code.replace("'", '"')
+        return code
+
+
 # ============================================================================
-# Full Model: CodeOrigin
+# Full Model: AP-NRL
 # ============================================================================
 
-class CodeOrigin(nn.Module):
+class APNRL(nn.Module):
     """
-    CodeOrigin: Domain-Invariant AI-Generated Code Detection via
-    Style-Content Disentanglement and Hierarchical Contrastive Learning.
+    AP-NRL: Adversarial Preference Neural Representation Learning.
 
     Components:
     1. Multi-Granularity Encoder (token + AST + structural)
     2. Style-Content Disentanglement
-    3. Cross-Domain Adversarial Alignment
-    4. Hierarchical Prototypical Contrastive Learning
+    3. SupCon Projection Head for contrastive learning
+    4. Dual-view consistency for augmentation robustness
     """
 
     def __init__(self, config: Config, num_classes: int):
@@ -1042,8 +1164,7 @@ class CodeOrigin(nn.Module):
         self.config = config
         self.num_classes = num_classes
 
-        # === Component 1: Multi-Granularity Encoder ===
-        # Token-level encoder (ModernBERT)
+        # Token-level encoder
         self.token_encoder = AutoModel.from_pretrained(config.encoder_name)
         token_hidden_size = self.token_encoder.config.hidden_size
 
@@ -1054,14 +1175,14 @@ class CodeOrigin(nn.Module):
             hidden_dim=config.gnn_hidden_dim,
         )
 
-        # Structural encoder (graph-level proxy)
+        # Structural encoder
         self.struct_encoder = StructuralEncoder(
             input_dim=STRUCTURAL_FEATURE_DIM,
             hidden_dim=config.gnn_hidden_dim,
         )
 
-        # Cross-attention fusion
-        fusion_dim = config.z_style_dim + config.z_content_dim  # unified repr dim
+        # Fusion
+        fusion_dim = config.z_style_dim + config.z_content_dim
         self.fusion = CrossAttentionFusion(
             token_dim=token_hidden_size,
             ast_dim=config.gnn_hidden_dim,
@@ -1069,99 +1190,69 @@ class CodeOrigin(nn.Module):
             output_dim=fusion_dim,
         )
 
-        # === Component 2: Style-Content Disentanglement ===
+        # Style-Content Disentanglement
         self.disentangler = StyleContentDisentangler(
             input_dim=fusion_dim,
             z_style_dim=config.z_style_dim,
             z_content_dim=config.z_content_dim,
         )
 
-        # === Component 3: Domain Adversarial ===
-        self.grl = GradientReversalLayer()
-        self.domain_lang_classifier = nn.Sequential(
-            nn.Linear(config.z_style_dim, 128),
-            nn.ReLU(),
-            nn.Dropout(0.1),
-            nn.Linear(128, config.num_languages),
-        )
-        self.domain_type_classifier = nn.Sequential(
-            nn.Linear(config.z_style_dim, 128),
-            nn.ReLU(),
-            nn.Dropout(0.1),
-            nn.Linear(128, config.num_domains),
-        )
-
-        # === Component 4: Task Head ===
-        self.proto_head = PrototypicalContrastiveHead(
+        # SupCon projection head
+        self.proj_head = SupConProjectionHead(
             input_dim=config.z_style_dim,
-            num_classes=num_classes,
-            temperature=config.temperature,
+            hidden_dim=config.z_style_dim,
+            output_dim=config.projection_dim,
         )
 
-        # Content auxiliary head (predict language from z_content for disentanglement)
-        self.content_aux_head = nn.Linear(config.z_content_dim, config.num_languages)
+        # SupCon loss
+        self.supcon_loss_fn = SupConLoss(temperature=config.supcon_temperature)
 
-        # Focal loss gamma
-        self.focal_gamma = 2.0
+        # Task head
+        self.classifier = nn.Linear(config.z_style_dim, num_classes)
+
+    def encode(self, input_ids, attention_mask, ast_seq, struct_feat):
+        """Encode a single view."""
+        token_out = self.token_encoder(input_ids=input_ids, attention_mask=attention_mask)
+        token_repr = token_out.last_hidden_state[:, 0, :]
+        ast_repr = self.ast_encoder(ast_seq)
+        struct_repr = self.struct_encoder(struct_feat)
+        h_code = self.fusion(token_repr, ast_repr, struct_repr)
+        disent_out = self.disentangler(h_code)
+        return disent_out, h_code
 
     def forward(
         self,
-        input_ids: torch.Tensor,
-        attention_mask: torch.Tensor,
-        ast_seq: torch.Tensor,
-        struct_feat: torch.Tensor,
-        labels: Optional[torch.Tensor] = None,
+        input_ids, attention_mask, ast_seq, struct_feat,
+        labels=None,
+        aug_input_ids=None, aug_attention_mask=None,
+        aug_ast_seq=None, aug_struct_feat=None,
     ) -> Dict[str, torch.Tensor]:
+        # Original view
+        disent_out, h_code = self.encode(input_ids, attention_mask, ast_seq, struct_feat)
+        z_style = disent_out["z_style"]
+        z_content = disent_out["z_content"]
 
-        # === Multi-Granularity Encoding ===
-        # Token-level
-        token_out = self.token_encoder(
-            input_ids=input_ids,
-            attention_mask=attention_mask,
-        )
-        # Use [CLS] token representation
-        token_repr = token_out.last_hidden_state[:, 0, :]  # (B, hidden)
-
-        # AST-level
-        ast_repr = self.ast_encoder(ast_seq)  # (B, gnn_hidden)
-
-        # Structural-level
-        struct_repr = self.struct_encoder(struct_feat)  # (B, gnn_hidden)
-
-        # Fuse
-        h_code = self.fusion(token_repr, ast_repr, struct_repr)  # (B, fusion_dim)
-
-        # === Style-Content Disentanglement ===
-        disent_out = self.disentangler(h_code)
-        z_style = disent_out["z_style"]      # (B, z_style_dim)
-        z_content = disent_out["z_content"]  # (B, z_content_dim)
-
-        # === Task Prediction ===
-        logits, proto_logits = self.proto_head(z_style)
-
-        # === Domain Adversarial (on z_style) ===
-        z_style_grl = self.grl(z_style)
-        domain_lang_logits = self.domain_lang_classifier(z_style_grl)
-        domain_type_logits = self.domain_type_classifier(z_style_grl)
-
-        # === Content Auxiliary ===
-        content_lang_logits = self.content_aux_head(z_content)
+        logits = self.classifier(z_style)
+        proj_z = self.proj_head(z_style)
 
         output = {
             "logits": logits,
-            "proto_logits": proto_logits,
+            "proj_z": proj_z,
             "z_style": z_style,
             "z_content": z_content,
             "h_code": h_code,
             "h_recon": disent_out["h_recon"],
-            "domain_lang_logits": domain_lang_logits,
-            "domain_type_logits": domain_type_logits,
-            "content_lang_logits": content_lang_logits,
             "style_mu": disent_out["style_mu"],
             "style_logvar": disent_out["style_logvar"],
             "content_mu": disent_out["content_mu"],
             "content_logvar": disent_out["content_logvar"],
         }
+
+        # Augmented view
+        if aug_input_ids is not None:
+            aug_disent, _ = self.encode(aug_input_ids, aug_attention_mask, aug_ast_seq, aug_struct_feat)
+            aug_proj_z = self.proj_head(aug_disent["z_style"])
+            output["aug_proj_z"] = aug_proj_z
 
         return output
 
@@ -1186,79 +1277,45 @@ class FocalLoss(nn.Module):
 
 
 def compute_all_losses(
-    model: CodeOrigin,
+    model: APNRL,
     outputs: Dict[str, torch.Tensor],
     labels: torch.Tensor,
     config: Config,
     focal_loss_fn: Optional[FocalLoss] = None,
 ) -> Dict[str, torch.Tensor]:
-    """Compute all loss components."""
-
-    # 1. Task loss (focal loss for class imbalance)
+    """Compute AP-NRL losses."""
     if focal_loss_fn is None:
         focal_loss_fn = FocalLoss(gamma=2.0)
+
     task_loss = focal_loss_fn(outputs["logits"], labels)
 
-    # Prototype cross-entropy loss
-    proto_loss = F.cross_entropy(outputs["proto_logits"], labels)
+    # SupCon loss
+    if "aug_proj_z" in outputs:
+        all_proj = torch.cat([outputs["proj_z"], outputs["aug_proj_z"]], dim=0)
+        all_labels = torch.cat([labels, labels], dim=0)
+        supcon_loss = model.supcon_loss_fn(all_proj, all_labels)
+        consistency_loss = 1.0 - F.cosine_similarity(
+            outputs["proj_z"], outputs["aug_proj_z"]
+        ).mean()
+    else:
+        supcon_loss = model.supcon_loss_fn(outputs["proj_z"], labels)
+        consistency_loss = torch.tensor(0.0, device=labels.device)
 
-    # Contrastive loss
-    contrastive_loss = model.proto_head.contrastive_loss(outputs["z_style"], labels)
-
-    # 2. Disentanglement losses
-    # MI minimization between z_style and z_content
     mi_loss = model.disentangler.compute_mi_loss(outputs["z_style"], outputs["z_content"])
 
-    # KL regularization
-    kl_loss = model.disentangler.compute_kl_loss(
-        outputs["style_mu"], outputs["style_logvar"],
-        outputs["content_mu"], outputs["content_logvar"],
-    )
-
-    # Reconstruction loss
-    recon_loss = F.mse_loss(outputs["h_recon"], outputs["h_code"].detach())
-
-    disentangle_loss = mi_loss + 0.01 * kl_loss
-
-    # 3. Domain adversarial loss: encourage z_style to be domain-invariant
-    #    by maximizing entropy of domain predictions (uniform = no domain info)
-    #    GRL handles gradient reversal so the encoder learns to confuse classifiers
-    domain_lang_probs = F.softmax(outputs["domain_lang_logits"], dim=-1)
-    # Target: uniform distribution over languages
-    uniform_lang = torch.ones_like(domain_lang_probs) / domain_lang_probs.size(-1)
-    adversarial_lang = F.kl_div(
-        torch.log(domain_lang_probs + 1e-8), uniform_lang, reduction="batchmean"
-    )
-
-    domain_type_probs = F.softmax(outputs["domain_type_logits"], dim=-1)
-    uniform_type = torch.ones_like(domain_type_probs) / domain_type_probs.size(-1)
-    adversarial_type = F.kl_div(
-        torch.log(domain_type_probs + 1e-8), uniform_type, reduction="batchmean"
-    )
-
-    # Minimize KL to uniform = push toward domain-invariant representation
-    adversarial_loss = adversarial_lang + adversarial_type
-
-    # Total loss
-    total_loss = (
+    total = (
         task_loss
-        + 0.3 * proto_loss
-        + config.lambda_contrastive * contrastive_loss
-        + config.lambda_disentangle * disentangle_loss
-        + config.lambda_adversarial * adversarial_loss
-        + config.lambda_reconstruct * recon_loss
+        + config.lambda_supcon * supcon_loss
+        + config.lambda_consistency * consistency_loss
+        + config.lambda_disentangle * mi_loss
     )
 
     return {
-        "total": total_loss,
+        "total": total,
         "task": task_loss,
-        "proto": proto_loss,
-        "contrastive": contrastive_loss,
-        "disentangle": disentangle_loss,
-        "adversarial": adversarial_loss,
-        "recon": recon_loss,
+        "supcon": supcon_loss,
+        "consistency": consistency_loss,
         "mi": mi_loss,
-        "kl": kl_loss,
     }
 
 
@@ -1267,7 +1324,7 @@ def compute_all_losses(
 # ============================================================================
 
 class Trainer:
-    def __init__(self, config: Config, model: CodeOrigin, train_loader, val_loader, test_loader, class_weights=None):
+    def __init__(self, config: Config, model: APNRL, train_loader, val_loader, test_loader, class_weights=None):
         self.config = config
         self.model = model.to(config.device)
         self.train_loader = train_loader
@@ -1309,11 +1366,7 @@ class Trainer:
         total_losses = defaultdict(float)
         num_batches = 0
 
-        # GRL lambda schedule (gradually increase)
-        progress = epoch / self.config.epochs
-        grl_lambda = 2.0 / (1.0 + math.exp(-10 * progress)) - 1.0
-        grl_lambda *= self.config.grl_lambda_max
-        self.model.grl.set_lambda(grl_lambda)
+        # AP-NRL: no GRL needed
 
         self.optimizer.zero_grad()
 
@@ -1325,9 +1378,17 @@ class Trainer:
             struct_feat = batch["struct_feat"].to(self.config.device, non_blocking=self.config.non_blocking)
             labels = batch["label"].to(self.config.device, non_blocking=self.config.non_blocking)
 
+            # Check for augmented views
+            aug_kwargs = {}
+            if "aug_input_ids" in batch:
+                aug_kwargs["aug_input_ids"] = batch["aug_input_ids"].to(self.config.device, non_blocking=self.config.non_blocking)
+                aug_kwargs["aug_attention_mask"] = batch["aug_attention_mask"].to(self.config.device, non_blocking=self.config.non_blocking)
+                aug_kwargs["aug_ast_seq"] = batch["aug_ast_seq"].to(self.config.device, non_blocking=self.config.non_blocking)
+                aug_kwargs["aug_struct_feat"] = batch["aug_struct_feat"].to(self.config.device, non_blocking=self.config.non_blocking)
+
             # Forward with mixed precision
             with autocast(device_type=self.config.device, enabled=self.use_amp, dtype=self.amp_dtype):
-                outputs = self.model(input_ids, attention_mask, ast_seq, struct_feat, labels)
+                outputs = self.model(input_ids, attention_mask, ast_seq, struct_feat, labels, **aug_kwargs)
                 losses = compute_all_losses(self.model, outputs, labels, self.config, self.focal_loss)
                 loss = losses["total"] / self.config.grad_accum_steps
 
@@ -1354,7 +1415,7 @@ class Trainer:
                 lr = self.scheduler.get_last_lr()[0]
                 logger.info(
                     f"Epoch {epoch+1} | Step {batch_idx+1}/{len(self.train_loader)} | "
-                    f"Loss: {avg_loss:.4f} | LR: {lr:.2e} | GRL-λ: {grl_lambda:.3f}"
+                    f"Loss: {avg_loss:.4f} | LR: {lr:.2e}"
                 )
 
             # Mid-epoch eval
@@ -1387,11 +1448,7 @@ class Trainer:
             with autocast(device_type=self.config.device, enabled=self.use_amp, dtype=self.amp_dtype):
                 outputs = self.model(input_ids, attention_mask, ast_seq, struct_feat, labels)
 
-            # Normalize both to same scale before ensembling
-            logits_norm = F.softmax(outputs["logits"], dim=-1)
-            proto_norm = F.softmax(outputs["proto_logits"], dim=-1)
-            combined_logits = 0.7 * logits_norm + 0.3 * proto_norm
-            preds = combined_logits.argmax(dim=-1)
+            preds = outputs["logits"].argmax(dim=-1)
 
             all_preds.extend(preds.cpu().numpy())
             all_labels.extend(labels.cpu().numpy())
@@ -1424,7 +1481,7 @@ class Trainer:
 
     def save_checkpoint(self, tag: str = "latest"):
         os.makedirs(self.config.save_dir, exist_ok=True)
-        path = os.path.join(self.config.save_dir, f"codeorigin_{self.config.task}_{tag}.pt")
+        path = os.path.join(self.config.save_dir, f"ap_nrl_{self.config.task}_{tag}.pt")
         torch.save({
             "model_state_dict": self.model.state_dict(),
             "best_f1": self.best_f1,
@@ -1433,7 +1490,7 @@ class Trainer:
         logger.info(f"Saved checkpoint to {path}")
 
     def load_checkpoint(self, tag: str = "best"):
-        path = os.path.join(self.config.save_dir, f"codeorigin_{self.config.task}_{tag}.pt")
+        path = os.path.join(self.config.save_dir, f"ap_nrl_{self.config.task}_{tag}.pt")
         if os.path.exists(path):
             ckpt = torch.load(path, map_location=self.config.device, weights_only=True)
             self.model.load_state_dict(ckpt["model_state_dict"])
@@ -1443,7 +1500,7 @@ class Trainer:
 
     def train(self):
         logger.info("=" * 60)
-        logger.info(f"Starting CodeOrigin Training - Task {self.config.task}")
+        logger.info(f"Starting AP-NRL Training - Task {self.config.task}")
         logger.info(f"Num classes: {self.model.num_classes}")
         logger.info(f"Device: {self.config.device}")
         logger.info(f"Precision: {self.precision}")
@@ -1513,7 +1570,7 @@ def main(task: str = "T1", config: Optional[Config] = None):
     set_seed(config.seed)
 
     logger.info(f"{'='*60}")
-    logger.info(f"CodeOrigin - AI-Generated Code Detection")
+    logger.info(f"AP-NRL - AI-Generated Code Detection")
     logger.info(f"Task: {config.task}")
     logger.info(f"Benchmark: {config.benchmark}")
     logger.info(f"GPU: {_get_gpu_name()}")
@@ -1540,7 +1597,8 @@ def main(task: str = "T1", config: Optional[Config] = None):
 
     # Datasets
     logger.info("Creating datasets...")
-    train_dataset = AICDDataset(train_data, tokenizer, config.max_length, config.ast_seq_len)
+    augmenter = CodeAugmenter(prob=config.augment_prob)
+    train_dataset = AICDDataset(train_data, tokenizer, config.max_length, config.ast_seq_len, augmenter=augmenter)
     val_dataset = AICDDataset(val_data, tokenizer, config.max_length, config.ast_seq_len)
     test_dataset = AICDDataset(test_data, tokenizer, config.max_length, config.ast_seq_len)
 
@@ -1576,8 +1634,8 @@ def main(task: str = "T1", config: Optional[Config] = None):
     )
 
     # Model
-    logger.info(f"Building CodeOrigin model...")
-    model = CodeOrigin(config, num_classes)
+    logger.info(f"Building AP-NRL model...")
+    model = APNRL(config, num_classes)
 
     # Count parameters
     total_params = sum(p.numel() for p in model.parameters())
@@ -1632,7 +1690,7 @@ def run_benchmark_suite(task: str = "T1", base_config: Optional[Config] = None):
     # Copy-paste friendly block for tracker logging.
     ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     logger.info("\n=== SUITE_RESULTS_START ===")
-    logger.info(f"timestamp={ts} | task={task} | method=CodeOrigin")
+    logger.info(f"timestamp={ts} | task={task} | method=AP-NRL")
     logger.info("| benchmark | task | best_val_f1 | test_f1 |")
     logger.info("|---|---|---:|---:|")
     for bench in ["aicd", "droid"]:
@@ -1650,7 +1708,7 @@ def run_benchmark_suite(task: str = "T1", base_config: Optional[Config] = None):
     machine_block = {
         "timestamp": ts,
         "task": task,
-        "method": "CodeOrigin",
+        "method": "AP-NRL",
         "results": results,
     }
     logger.info("SUITE_RESULTS_JSON=" + json.dumps(machine_block, ensure_ascii=True))

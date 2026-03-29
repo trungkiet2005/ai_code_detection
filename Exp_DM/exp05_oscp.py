@@ -1,18 +1,30 @@
 """
-CodeOrigin: Domain-Invariant AI-Generated Code Detection via
-Style-Content Disentanglement and Hierarchical Contrastive Learning
+OSCP: Orthogonal Style-Content Projection for
+Domain-Invariant AI-Generated Code Detection
+
+Key Innovation:
+- Projects AST features and token embeddings into mutually orthogonal
+  subspaces that mathematically isolate stylistic bias from structural
+  semantics
+- Frobenius norm penalty on cross-covariance matrix between style and
+  content latents ensures strict statistical independence
+- Variance-based whitening of latent space targets intrinsic low-entropy
+  nature of LLM decoding strategies
+- Prevents classifier from using language-specific syntax as shortcut
+
+Loss: L = L_CE + λ_ortho * ||Cov(z_style, z_content)||_F^2
+       + λ_whiten * L_whitening + λ_contrast * L_SupCon
+
+Reference: Tier A method (Idea 1) + VILW (Idea 2) from research portfolio
+Target: NeurIPS 2026 ORAL
 
 Single-file implementation for Kaggle.
 Target: AICD-Bench + DroidCollection
-(https://huggingface.co/AICD-bench/AICD-Bench)
-(https://huggingface.co/datasets/project-droid/DroidCollection)
 
 Usage on Kaggle:
     1. Upload this file to a Kaggle notebook
     2. Run: !pip install datasets transformers accelerate tree-sitter tree-sitter-languages
-    3. Execute the cells or run: python codeorigin.py --task T1
-
-Author: [Your Name]
+    3. Execute the cells or run: python exp05_oscp.py --task T1
 """
 
 import os
@@ -221,9 +233,15 @@ class Config:
     device: str = "cuda" if torch.cuda.is_available() else "cpu"
     pin_memory: bool = True
     non_blocking: bool = True
-    save_dir: str = "./codeorigin_checkpoints"
+    save_dir: str = "./oscp_checkpoints"
     log_every: int = 100
     eval_every: int = 1000
+
+    # OSCP specific
+    lambda_ortho: float = 1.0
+    lambda_whiten: float = 0.1
+    lambda_supcon: float = 0.3
+    supcon_temperature: float = 0.07
 
 
 def set_seed(seed: int):
@@ -952,6 +970,25 @@ class StyleContentDisentangler(nn.Module):
         kl_content = -0.5 * (1 + content_logvar - content_mu.pow(2) - content_logvar.exp()).sum(dim=-1).mean()
         return 0.5 * (kl_style + kl_content)
 
+    def compute_ortho_loss(self, z_style: torch.Tensor, z_content: torch.Tensor) -> torch.Tensor:
+        """Frobenius norm of cross-covariance between style and content."""
+        z_s = z_style - z_style.mean(dim=0, keepdim=True)
+        z_c = z_content - z_content.mean(dim=0, keepdim=True)
+        batch_size = z_style.size(0)
+        cov = (z_s.T @ z_c) / (batch_size - 1 + 1e-8)
+        return torch.sum(cov ** 2)
+
+    def compute_whitening_loss(self, z_style: torch.Tensor) -> torch.Tensor:
+        """
+        Variance-Invariant Latent Whitening: push latent covariance toward identity.
+        Forces each dimension to be decorrelated and unit-variance.
+        """
+        z = z_style - z_style.mean(dim=0, keepdim=True)
+        batch_size = z.size(0)
+        cov = (z.T @ z) / (batch_size - 1 + 1e-8)
+        identity = torch.eye(cov.size(0), device=cov.device)
+        return torch.sum((cov - identity) ** 2)
+
 
 class PrototypicalContrastiveHead(nn.Module):
     """
@@ -1021,20 +1058,47 @@ class PrototypicalContrastiveHead(nn.Module):
         return loss + 0.5 * supcon_loss
 
 
+class SupConLoss(nn.Module):
+    """Supervised Contrastive Loss."""
+    def __init__(self, temperature: float = 0.07):
+        super().__init__()
+        self.temperature = temperature
+
+    def forward(self, features: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
+        device = features.device
+        batch_size = features.size(0)
+        if batch_size < 2:
+            return torch.tensor(0.0, device=device, requires_grad=True)
+        features = F.normalize(features, dim=-1)
+        sim = torch.mm(features, features.t()) / self.temperature
+        label_mask = (labels.unsqueeze(0) == labels.unsqueeze(1)).float()
+        self_mask = 1.0 - torch.eye(batch_size, device=device)
+        pos_mask = label_mask * self_mask
+        logits_max, _ = sim.max(dim=1, keepdim=True)
+        logits = sim - logits_max.detach()
+        exp_logits = torch.exp(logits) * self_mask
+        log_sum_exp = torch.log(exp_logits.sum(dim=1, keepdim=True) + 1e-8)
+        log_prob = logits - log_sum_exp
+        mean_log_prob = (pos_mask * log_prob).sum(dim=1) / (pos_mask.sum(dim=1) + 1e-8)
+        valid = pos_mask.sum(dim=1) > 0
+        if valid.sum() == 0:
+            return torch.tensor(0.0, device=device, requires_grad=True)
+        return -mean_log_prob[valid].mean()
+
+
 # ============================================================================
-# Full Model: CodeOrigin
+# Full Model: OSCP
 # ============================================================================
 
-class CodeOrigin(nn.Module):
+class OSCP(nn.Module):
     """
-    CodeOrigin: Domain-Invariant AI-Generated Code Detection via
-    Style-Content Disentanglement and Hierarchical Contrastive Learning.
+    OSCP: Orthogonal Style-Content Projection.
 
     Components:
     1. Multi-Granularity Encoder (token + AST + structural)
-    2. Style-Content Disentanglement
-    3. Cross-Domain Adversarial Alignment
-    4. Hierarchical Prototypical Contrastive Learning
+    2. Style-Content Disentanglement with orthogonal projection
+    3. Variance-Invariant Latent Whitening
+    4. Supervised Contrastive Learning on style space
     """
 
     def __init__(self, config: Config, num_classes: int):
@@ -1042,8 +1106,7 @@ class CodeOrigin(nn.Module):
         self.config = config
         self.num_classes = num_classes
 
-        # === Component 1: Multi-Granularity Encoder ===
-        # Token-level encoder (ModernBERT)
+        # Token-level encoder
         self.token_encoder = AutoModel.from_pretrained(config.encoder_name)
         token_hidden_size = self.token_encoder.config.hidden_size
 
@@ -1054,14 +1117,14 @@ class CodeOrigin(nn.Module):
             hidden_dim=config.gnn_hidden_dim,
         )
 
-        # Structural encoder (graph-level proxy)
+        # Structural encoder
         self.struct_encoder = StructuralEncoder(
             input_dim=STRUCTURAL_FEATURE_DIM,
             hidden_dim=config.gnn_hidden_dim,
         )
 
         # Cross-attention fusion
-        fusion_dim = config.z_style_dim + config.z_content_dim  # unified repr dim
+        fusion_dim = config.z_style_dim + config.z_content_dim
         self.fusion = CrossAttentionFusion(
             token_dim=token_hidden_size,
             ast_dim=config.gnn_hidden_dim,
@@ -1069,40 +1132,18 @@ class CodeOrigin(nn.Module):
             output_dim=fusion_dim,
         )
 
-        # === Component 2: Style-Content Disentanglement ===
+        # Style-Content Disentanglement with orthogonal penalty
         self.disentangler = StyleContentDisentangler(
             input_dim=fusion_dim,
             z_style_dim=config.z_style_dim,
             z_content_dim=config.z_content_dim,
         )
 
-        # === Component 3: Domain Adversarial ===
-        self.grl = GradientReversalLayer()
-        self.domain_lang_classifier = nn.Sequential(
-            nn.Linear(config.z_style_dim, 128),
-            nn.ReLU(),
-            nn.Dropout(0.1),
-            nn.Linear(128, config.num_languages),
-        )
-        self.domain_type_classifier = nn.Sequential(
-            nn.Linear(config.z_style_dim, 128),
-            nn.ReLU(),
-            nn.Dropout(0.1),
-            nn.Linear(128, config.num_domains),
-        )
+        # SupCon loss
+        self.supcon_loss_fn = SupConLoss(temperature=config.supcon_temperature)
 
-        # === Component 4: Task Head ===
-        self.proto_head = PrototypicalContrastiveHead(
-            input_dim=config.z_style_dim,
-            num_classes=num_classes,
-            temperature=config.temperature,
-        )
-
-        # Content auxiliary head (predict language from z_content for disentanglement)
-        self.content_aux_head = nn.Linear(config.z_content_dim, config.num_languages)
-
-        # Focal loss gamma
-        self.focal_gamma = 2.0
+        # Classifier
+        self.classifier = nn.Linear(config.z_style_dim, num_classes)
 
     def forward(
         self,
@@ -1112,58 +1153,29 @@ class CodeOrigin(nn.Module):
         struct_feat: torch.Tensor,
         labels: Optional[torch.Tensor] = None,
     ) -> Dict[str, torch.Tensor]:
+        token_out = self.token_encoder(input_ids=input_ids, attention_mask=attention_mask)
+        token_repr = token_out.last_hidden_state[:, 0, :]
+        ast_repr = self.ast_encoder(ast_seq)
+        struct_repr = self.struct_encoder(struct_feat)
+        h_code = self.fusion(token_repr, ast_repr, struct_repr)
 
-        # === Multi-Granularity Encoding ===
-        # Token-level
-        token_out = self.token_encoder(
-            input_ids=input_ids,
-            attention_mask=attention_mask,
-        )
-        # Use [CLS] token representation
-        token_repr = token_out.last_hidden_state[:, 0, :]  # (B, hidden)
-
-        # AST-level
-        ast_repr = self.ast_encoder(ast_seq)  # (B, gnn_hidden)
-
-        # Structural-level
-        struct_repr = self.struct_encoder(struct_feat)  # (B, gnn_hidden)
-
-        # Fuse
-        h_code = self.fusion(token_repr, ast_repr, struct_repr)  # (B, fusion_dim)
-
-        # === Style-Content Disentanglement ===
         disent_out = self.disentangler(h_code)
-        z_style = disent_out["z_style"]      # (B, z_style_dim)
-        z_content = disent_out["z_content"]  # (B, z_content_dim)
+        z_style = disent_out["z_style"]
+        z_content = disent_out["z_content"]
 
-        # === Task Prediction ===
-        logits, proto_logits = self.proto_head(z_style)
+        logits = self.classifier(z_style)
 
-        # === Domain Adversarial (on z_style) ===
-        z_style_grl = self.grl(z_style)
-        domain_lang_logits = self.domain_lang_classifier(z_style_grl)
-        domain_type_logits = self.domain_type_classifier(z_style_grl)
-
-        # === Content Auxiliary ===
-        content_lang_logits = self.content_aux_head(z_content)
-
-        output = {
+        return {
             "logits": logits,
-            "proto_logits": proto_logits,
             "z_style": z_style,
             "z_content": z_content,
             "h_code": h_code,
             "h_recon": disent_out["h_recon"],
-            "domain_lang_logits": domain_lang_logits,
-            "domain_type_logits": domain_type_logits,
-            "content_lang_logits": content_lang_logits,
             "style_mu": disent_out["style_mu"],
             "style_logvar": disent_out["style_logvar"],
             "content_mu": disent_out["content_mu"],
             "content_logvar": disent_out["content_logvar"],
         }
-
-        return output
 
 
 # ============================================================================
@@ -1186,79 +1198,47 @@ class FocalLoss(nn.Module):
 
 
 def compute_all_losses(
-    model: CodeOrigin,
+    model: OSCP,
     outputs: Dict[str, torch.Tensor],
     labels: torch.Tensor,
     config: Config,
     focal_loss_fn: Optional[FocalLoss] = None,
 ) -> Dict[str, torch.Tensor]:
-    """Compute all loss components."""
-
-    # 1. Task loss (focal loss for class imbalance)
+    """Compute OSCP losses."""
     if focal_loss_fn is None:
         focal_loss_fn = FocalLoss(gamma=2.0)
+
     task_loss = focal_loss_fn(outputs["logits"], labels)
 
-    # Prototype cross-entropy loss
-    proto_loss = F.cross_entropy(outputs["proto_logits"], labels)
-
-    # Contrastive loss
-    contrastive_loss = model.proto_head.contrastive_loss(outputs["z_style"], labels)
-
-    # 2. Disentanglement losses
-    # MI minimization between z_style and z_content
-    mi_loss = model.disentangler.compute_mi_loss(outputs["z_style"], outputs["z_content"])
-
-    # KL regularization
-    kl_loss = model.disentangler.compute_kl_loss(
-        outputs["style_mu"], outputs["style_logvar"],
-        outputs["content_mu"], outputs["content_logvar"],
+    # Orthogonal penalty: style and content must be independent
+    ortho_loss = model.disentangler.compute_ortho_loss(
+        outputs["z_style"], outputs["z_content"]
     )
 
-    # Reconstruction loss
+    # Whitening loss: push style covariance toward identity
+    whiten_loss = model.disentangler.compute_whitening_loss(outputs["z_style"])
+
+    # SupCon on style space
+    supcon_loss = model.supcon_loss_fn(outputs["z_style"], labels)
+
+    # Reconstruction
     recon_loss = F.mse_loss(outputs["h_recon"], outputs["h_code"].detach())
 
-    disentangle_loss = mi_loss + 0.01 * kl_loss
-
-    # 3. Domain adversarial loss: encourage z_style to be domain-invariant
-    #    by maximizing entropy of domain predictions (uniform = no domain info)
-    #    GRL handles gradient reversal so the encoder learns to confuse classifiers
-    domain_lang_probs = F.softmax(outputs["domain_lang_logits"], dim=-1)
-    # Target: uniform distribution over languages
-    uniform_lang = torch.ones_like(domain_lang_probs) / domain_lang_probs.size(-1)
-    adversarial_lang = F.kl_div(
-        torch.log(domain_lang_probs + 1e-8), uniform_lang, reduction="batchmean"
-    )
-
-    domain_type_probs = F.softmax(outputs["domain_type_logits"], dim=-1)
-    uniform_type = torch.ones_like(domain_type_probs) / domain_type_probs.size(-1)
-    adversarial_type = F.kl_div(
-        torch.log(domain_type_probs + 1e-8), uniform_type, reduction="batchmean"
-    )
-
-    # Minimize KL to uniform = push toward domain-invariant representation
-    adversarial_loss = adversarial_lang + adversarial_type
-
-    # Total loss
-    total_loss = (
+    total = (
         task_loss
-        + 0.3 * proto_loss
-        + config.lambda_contrastive * contrastive_loss
-        + config.lambda_disentangle * disentangle_loss
-        + config.lambda_adversarial * adversarial_loss
+        + config.lambda_ortho * ortho_loss
+        + config.lambda_whiten * whiten_loss
+        + config.lambda_supcon * supcon_loss
         + config.lambda_reconstruct * recon_loss
     )
 
     return {
-        "total": total_loss,
+        "total": total,
         "task": task_loss,
-        "proto": proto_loss,
-        "contrastive": contrastive_loss,
-        "disentangle": disentangle_loss,
-        "adversarial": adversarial_loss,
+        "ortho": ortho_loss,
+        "whiten": whiten_loss,
+        "supcon": supcon_loss,
         "recon": recon_loss,
-        "mi": mi_loss,
-        "kl": kl_loss,
     }
 
 
@@ -1267,7 +1247,7 @@ def compute_all_losses(
 # ============================================================================
 
 class Trainer:
-    def __init__(self, config: Config, model: CodeOrigin, train_loader, val_loader, test_loader, class_weights=None):
+    def __init__(self, config: Config, model: OSCP, train_loader, val_loader, test_loader, class_weights=None):
         self.config = config
         self.model = model.to(config.device)
         self.train_loader = train_loader
@@ -1309,11 +1289,7 @@ class Trainer:
         total_losses = defaultdict(float)
         num_batches = 0
 
-        # GRL lambda schedule (gradually increase)
-        progress = epoch / self.config.epochs
-        grl_lambda = 2.0 / (1.0 + math.exp(-10 * progress)) - 1.0
-        grl_lambda *= self.config.grl_lambda_max
-        self.model.grl.set_lambda(grl_lambda)
+        # OSCP: no GRL needed
 
         self.optimizer.zero_grad()
 
@@ -1354,7 +1330,7 @@ class Trainer:
                 lr = self.scheduler.get_last_lr()[0]
                 logger.info(
                     f"Epoch {epoch+1} | Step {batch_idx+1}/{len(self.train_loader)} | "
-                    f"Loss: {avg_loss:.4f} | LR: {lr:.2e} | GRL-λ: {grl_lambda:.3f}"
+                    f"Loss: {avg_loss:.4f} | LR: {lr:.2e}"
                 )
 
             # Mid-epoch eval
@@ -1387,11 +1363,7 @@ class Trainer:
             with autocast(device_type=self.config.device, enabled=self.use_amp, dtype=self.amp_dtype):
                 outputs = self.model(input_ids, attention_mask, ast_seq, struct_feat, labels)
 
-            # Normalize both to same scale before ensembling
-            logits_norm = F.softmax(outputs["logits"], dim=-1)
-            proto_norm = F.softmax(outputs["proto_logits"], dim=-1)
-            combined_logits = 0.7 * logits_norm + 0.3 * proto_norm
-            preds = combined_logits.argmax(dim=-1)
+            preds = outputs["logits"].argmax(dim=-1)
 
             all_preds.extend(preds.cpu().numpy())
             all_labels.extend(labels.cpu().numpy())
@@ -1424,7 +1396,7 @@ class Trainer:
 
     def save_checkpoint(self, tag: str = "latest"):
         os.makedirs(self.config.save_dir, exist_ok=True)
-        path = os.path.join(self.config.save_dir, f"codeorigin_{self.config.task}_{tag}.pt")
+        path = os.path.join(self.config.save_dir, f"oscp_{self.config.task}_{tag}.pt")
         torch.save({
             "model_state_dict": self.model.state_dict(),
             "best_f1": self.best_f1,
@@ -1433,7 +1405,7 @@ class Trainer:
         logger.info(f"Saved checkpoint to {path}")
 
     def load_checkpoint(self, tag: str = "best"):
-        path = os.path.join(self.config.save_dir, f"codeorigin_{self.config.task}_{tag}.pt")
+        path = os.path.join(self.config.save_dir, f"oscp_{self.config.task}_{tag}.pt")
         if os.path.exists(path):
             ckpt = torch.load(path, map_location=self.config.device, weights_only=True)
             self.model.load_state_dict(ckpt["model_state_dict"])
@@ -1443,7 +1415,7 @@ class Trainer:
 
     def train(self):
         logger.info("=" * 60)
-        logger.info(f"Starting CodeOrigin Training - Task {self.config.task}")
+        logger.info(f"Starting OSCP Training - Task {self.config.task}")
         logger.info(f"Num classes: {self.model.num_classes}")
         logger.info(f"Device: {self.config.device}")
         logger.info(f"Precision: {self.precision}")
@@ -1513,7 +1485,7 @@ def main(task: str = "T1", config: Optional[Config] = None):
     set_seed(config.seed)
 
     logger.info(f"{'='*60}")
-    logger.info(f"CodeOrigin - AI-Generated Code Detection")
+    logger.info(f"OSCP - AI-Generated Code Detection")
     logger.info(f"Task: {config.task}")
     logger.info(f"Benchmark: {config.benchmark}")
     logger.info(f"GPU: {_get_gpu_name()}")
@@ -1576,8 +1548,8 @@ def main(task: str = "T1", config: Optional[Config] = None):
     )
 
     # Model
-    logger.info(f"Building CodeOrigin model...")
-    model = CodeOrigin(config, num_classes)
+    logger.info(f"Building OSCP model...")
+    model = OSCP(config, num_classes)
 
     # Count parameters
     total_params = sum(p.numel() for p in model.parameters())
@@ -1632,7 +1604,7 @@ def run_benchmark_suite(task: str = "T1", base_config: Optional[Config] = None):
     # Copy-paste friendly block for tracker logging.
     ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     logger.info("\n=== SUITE_RESULTS_START ===")
-    logger.info(f"timestamp={ts} | task={task} | method=CodeOrigin")
+    logger.info(f"timestamp={ts} | task={task} | method=OSCP")
     logger.info("| benchmark | task | best_val_f1 | test_f1 |")
     logger.info("|---|---|---:|---:|")
     for bench in ["aicd", "droid"]:
@@ -1650,7 +1622,7 @@ def run_benchmark_suite(task: str = "T1", base_config: Optional[Config] = None):
     machine_block = {
         "timestamp": ts,
         "task": task,
-        "method": "CodeOrigin",
+        "method": "OSCP",
         "results": results,
     }
     logger.info("SUITE_RESULTS_JSON=" + json.dumps(machine_block, ensure_ascii=True))

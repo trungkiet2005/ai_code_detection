@@ -1,18 +1,27 @@
 """
-CodeOrigin: Domain-Invariant AI-Generated Code Detection via
-Style-Content Disentanglement and Hierarchical Contrastive Learning
+BH-SCM: Batch-Hard Supervised Contrastive Multi-View for
+Domain-Invariant AI-Generated Code Detection
+
+Key Innovation:
+- Multi-view architecture: Token embeddings + AST embeddings processed
+  independently then aligned via contrastive learning
+- Batch-Hard Triplet Loss mines hardest positives/negatives per anchor
+- Cross-view consistency: same sample's token and AST views must agree
+- Creates an impenetrable latent space robust against token-level
+  perturbations (AST structural view remains anchored)
+
+Loss: L = L_CE + λ_triplet * L_BH_Triplet + λ_xview * L_CrossView
+
+Reference: Tier A method (Idea 21) from research portfolio
+Target: NeurIPS 2026 ORAL
 
 Single-file implementation for Kaggle.
 Target: AICD-Bench + DroidCollection
-(https://huggingface.co/AICD-bench/AICD-Bench)
-(https://huggingface.co/datasets/project-droid/DroidCollection)
 
 Usage on Kaggle:
     1. Upload this file to a Kaggle notebook
     2. Run: !pip install datasets transformers accelerate tree-sitter tree-sitter-languages
-    3. Execute the cells or run: python codeorigin.py --task T1
-
-Author: [Your Name]
+    3. Execute the cells or run: python exp04_bh_scm.py --task T1
 """
 
 import os
@@ -221,9 +230,15 @@ class Config:
     device: str = "cuda" if torch.cuda.is_available() else "cpu"
     pin_memory: bool = True
     non_blocking: bool = True
-    save_dir: str = "./codeorigin_checkpoints"
+    save_dir: str = "./bh_scm_checkpoints"
     log_every: int = 100
     eval_every: int = 1000
+
+    # BH-SCM specific
+    lambda_triplet: float = 0.5
+    lambda_cross_view: float = 0.3
+    triplet_margin: float = 0.3
+    view_proj_dim: int = 128
 
 
 def set_seed(seed: int):
@@ -1021,20 +1036,70 @@ class PrototypicalContrastiveHead(nn.Module):
         return loss + 0.5 * supcon_loss
 
 
+class BatchHardTripletLoss(nn.Module):
+    """Batch-hard triplet mining for robust metric learning."""
+    def __init__(self, margin: float = 0.3):
+        super().__init__()
+        self.margin = margin
+
+    def forward(self, embeddings: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
+        dist_mat = torch.cdist(embeddings, embeddings, p=2)
+        batch_size = embeddings.size(0)
+        mask_pos = (labels.unsqueeze(0) == labels.unsqueeze(1)).float()
+        mask_neg = (labels.unsqueeze(0) != labels.unsqueeze(1)).float()
+        eye = torch.eye(batch_size, device=embeddings.device)
+        mask_pos = mask_pos - eye
+        hard_pos = (dist_mat * mask_pos).max(dim=1)[0]
+        hard_neg_dist = dist_mat + (1 - mask_neg) * 1e6
+        hard_neg = hard_neg_dist.min(dim=1)[0]
+        loss = F.relu(hard_pos - hard_neg + self.margin)
+        valid = (mask_pos.sum(dim=1) > 0) & (mask_neg.sum(dim=1) > 0)
+        if valid.sum() == 0:
+            return torch.tensor(0.0, device=embeddings.device, requires_grad=True)
+        return loss[valid].mean()
+
+
+class CrossViewConsistency(nn.Module):
+    """
+    Cross-view consistency: projects token and AST views into shared
+    space and minimizes distance for same-sample pairs.
+    """
+    def __init__(self, token_dim: int, ast_dim: int, proj_dim: int):
+        super().__init__()
+        self.token_proj = nn.Sequential(
+            nn.Linear(token_dim, proj_dim),
+            nn.LayerNorm(proj_dim),
+            nn.GELU(),
+        )
+        self.ast_proj = nn.Sequential(
+            nn.Linear(ast_dim, proj_dim),
+            nn.LayerNorm(proj_dim),
+            nn.GELU(),
+        )
+
+    def forward(self, token_feat: torch.Tensor, ast_feat: torch.Tensor):
+        t_proj = F.normalize(self.token_proj(token_feat), dim=-1)
+        a_proj = F.normalize(self.ast_proj(ast_feat), dim=-1)
+        return t_proj, a_proj
+
+    def consistency_loss(self, t_proj: torch.Tensor, a_proj: torch.Tensor) -> torch.Tensor:
+        """Same sample's token and AST views should be close."""
+        return 1.0 - F.cosine_similarity(t_proj, a_proj).mean()
+
+
 # ============================================================================
-# Full Model: CodeOrigin
+# Full Model: BH-SCM
 # ============================================================================
 
-class CodeOrigin(nn.Module):
+class BHSCM(nn.Module):
     """
-    CodeOrigin: Domain-Invariant AI-Generated Code Detection via
-    Style-Content Disentanglement and Hierarchical Contrastive Learning.
+    BH-SCM: Batch-Hard Supervised Contrastive Multi-View.
 
     Components:
-    1. Multi-Granularity Encoder (token + AST + structural)
-    2. Style-Content Disentanglement
-    3. Cross-Domain Adversarial Alignment
-    4. Hierarchical Prototypical Contrastive Learning
+    1. Dual-stream encoder (token + AST) with structural features
+    2. Cross-view consistency alignment
+    3. Batch-hard triplet loss for metric learning
+    4. Classification head on fused representation
     """
 
     def __init__(self, config: Config, num_classes: int):
@@ -1042,8 +1107,7 @@ class CodeOrigin(nn.Module):
         self.config = config
         self.num_classes = num_classes
 
-        # === Component 1: Multi-Granularity Encoder ===
-        # Token-level encoder (ModernBERT)
+        # Token-level encoder
         self.token_encoder = AutoModel.from_pretrained(config.encoder_name)
         token_hidden_size = self.token_encoder.config.hidden_size
 
@@ -1054,55 +1118,31 @@ class CodeOrigin(nn.Module):
             hidden_dim=config.gnn_hidden_dim,
         )
 
-        # Structural encoder (graph-level proxy)
+        # Structural encoder
         self.struct_encoder = StructuralEncoder(
             input_dim=STRUCTURAL_FEATURE_DIM,
             hidden_dim=config.gnn_hidden_dim,
         )
 
-        # Cross-attention fusion
-        fusion_dim = config.z_style_dim + config.z_content_dim  # unified repr dim
-        self.fusion = CrossAttentionFusion(
+        # Cross-view consistency
+        self.cross_view = CrossViewConsistency(
             token_dim=token_hidden_size,
             ast_dim=config.gnn_hidden_dim,
-            struct_dim=config.gnn_hidden_dim,
-            output_dim=fusion_dim,
+            proj_dim=config.view_proj_dim,
         )
 
-        # === Component 2: Style-Content Disentanglement ===
-        self.disentangler = StyleContentDisentangler(
-            input_dim=fusion_dim,
-            z_style_dim=config.z_style_dim,
-            z_content_dim=config.z_content_dim,
-        )
+        # Triplet loss
+        self.triplet_loss_fn = BatchHardTripletLoss(margin=config.triplet_margin)
 
-        # === Component 3: Domain Adversarial ===
-        self.grl = GradientReversalLayer()
-        self.domain_lang_classifier = nn.Sequential(
-            nn.Linear(config.z_style_dim, 128),
-            nn.ReLU(),
+        # Fusion and classification
+        fused_dim = token_hidden_size + config.gnn_hidden_dim + config.gnn_hidden_dim
+        self.fusion = nn.Sequential(
+            nn.Linear(fused_dim, config.z_style_dim),
+            nn.LayerNorm(config.z_style_dim),
+            nn.GELU(),
             nn.Dropout(0.1),
-            nn.Linear(128, config.num_languages),
         )
-        self.domain_type_classifier = nn.Sequential(
-            nn.Linear(config.z_style_dim, 128),
-            nn.ReLU(),
-            nn.Dropout(0.1),
-            nn.Linear(128, config.num_domains),
-        )
-
-        # === Component 4: Task Head ===
-        self.proto_head = PrototypicalContrastiveHead(
-            input_dim=config.z_style_dim,
-            num_classes=num_classes,
-            temperature=config.temperature,
-        )
-
-        # Content auxiliary head (predict language from z_content for disentanglement)
-        self.content_aux_head = nn.Linear(config.z_content_dim, config.num_languages)
-
-        # Focal loss gamma
-        self.focal_gamma = 2.0
+        self.classifier = nn.Linear(config.z_style_dim, num_classes)
 
     def forward(
         self,
@@ -1112,58 +1152,30 @@ class CodeOrigin(nn.Module):
         struct_feat: torch.Tensor,
         labels: Optional[torch.Tensor] = None,
     ) -> Dict[str, torch.Tensor]:
+        # Multi-view encoding
+        token_out = self.token_encoder(input_ids=input_ids, attention_mask=attention_mask)
+        token_repr = token_out.last_hidden_state[:, 0, :]
+        ast_repr = self.ast_encoder(ast_seq)
+        struct_repr = self.struct_encoder(struct_feat)
 
-        # === Multi-Granularity Encoding ===
-        # Token-level
-        token_out = self.token_encoder(
-            input_ids=input_ids,
-            attention_mask=attention_mask,
-        )
-        # Use [CLS] token representation
-        token_repr = token_out.last_hidden_state[:, 0, :]  # (B, hidden)
+        # Cross-view projections
+        t_proj, a_proj = self.cross_view(token_repr, ast_repr)
 
-        # AST-level
-        ast_repr = self.ast_encoder(ast_seq)  # (B, gnn_hidden)
+        # Fuse all views
+        fused = torch.cat([token_repr, ast_repr, struct_repr], dim=-1)
+        embedding = self.fusion(fused)
 
-        # Structural-level
-        struct_repr = self.struct_encoder(struct_feat)  # (B, gnn_hidden)
+        # Classify
+        logits = self.classifier(embedding)
 
-        # Fuse
-        h_code = self.fusion(token_repr, ast_repr, struct_repr)  # (B, fusion_dim)
-
-        # === Style-Content Disentanglement ===
-        disent_out = self.disentangler(h_code)
-        z_style = disent_out["z_style"]      # (B, z_style_dim)
-        z_content = disent_out["z_content"]  # (B, z_content_dim)
-
-        # === Task Prediction ===
-        logits, proto_logits = self.proto_head(z_style)
-
-        # === Domain Adversarial (on z_style) ===
-        z_style_grl = self.grl(z_style)
-        domain_lang_logits = self.domain_lang_classifier(z_style_grl)
-        domain_type_logits = self.domain_type_classifier(z_style_grl)
-
-        # === Content Auxiliary ===
-        content_lang_logits = self.content_aux_head(z_content)
-
-        output = {
+        return {
             "logits": logits,
-            "proto_logits": proto_logits,
-            "z_style": z_style,
-            "z_content": z_content,
-            "h_code": h_code,
-            "h_recon": disent_out["h_recon"],
-            "domain_lang_logits": domain_lang_logits,
-            "domain_type_logits": domain_type_logits,
-            "content_lang_logits": content_lang_logits,
-            "style_mu": disent_out["style_mu"],
-            "style_logvar": disent_out["style_logvar"],
-            "content_mu": disent_out["content_mu"],
-            "content_logvar": disent_out["content_logvar"],
+            "embedding": embedding,
+            "t_proj": t_proj,
+            "a_proj": a_proj,
+            "token_repr": token_repr,
+            "ast_repr": ast_repr,
         }
-
-        return output
 
 
 # ============================================================================
@@ -1186,79 +1198,35 @@ class FocalLoss(nn.Module):
 
 
 def compute_all_losses(
-    model: CodeOrigin,
+    model: BHSCM,
     outputs: Dict[str, torch.Tensor],
     labels: torch.Tensor,
     config: Config,
     focal_loss_fn: Optional[FocalLoss] = None,
 ) -> Dict[str, torch.Tensor]:
-    """Compute all loss components."""
-
-    # 1. Task loss (focal loss for class imbalance)
+    """Compute BH-SCM losses."""
     if focal_loss_fn is None:
         focal_loss_fn = FocalLoss(gamma=2.0)
+
     task_loss = focal_loss_fn(outputs["logits"], labels)
 
-    # Prototype cross-entropy loss
-    proto_loss = F.cross_entropy(outputs["proto_logits"], labels)
+    # Batch-hard triplet on fused embedding
+    triplet_loss = model.triplet_loss_fn(outputs["embedding"], labels)
 
-    # Contrastive loss
-    contrastive_loss = model.proto_head.contrastive_loss(outputs["z_style"], labels)
+    # Cross-view consistency
+    xview_loss = model.cross_view.consistency_loss(outputs["t_proj"], outputs["a_proj"])
 
-    # 2. Disentanglement losses
-    # MI minimization between z_style and z_content
-    mi_loss = model.disentangler.compute_mi_loss(outputs["z_style"], outputs["z_content"])
-
-    # KL regularization
-    kl_loss = model.disentangler.compute_kl_loss(
-        outputs["style_mu"], outputs["style_logvar"],
-        outputs["content_mu"], outputs["content_logvar"],
-    )
-
-    # Reconstruction loss
-    recon_loss = F.mse_loss(outputs["h_recon"], outputs["h_code"].detach())
-
-    disentangle_loss = mi_loss + 0.01 * kl_loss
-
-    # 3. Domain adversarial loss: encourage z_style to be domain-invariant
-    #    by maximizing entropy of domain predictions (uniform = no domain info)
-    #    GRL handles gradient reversal so the encoder learns to confuse classifiers
-    domain_lang_probs = F.softmax(outputs["domain_lang_logits"], dim=-1)
-    # Target: uniform distribution over languages
-    uniform_lang = torch.ones_like(domain_lang_probs) / domain_lang_probs.size(-1)
-    adversarial_lang = F.kl_div(
-        torch.log(domain_lang_probs + 1e-8), uniform_lang, reduction="batchmean"
-    )
-
-    domain_type_probs = F.softmax(outputs["domain_type_logits"], dim=-1)
-    uniform_type = torch.ones_like(domain_type_probs) / domain_type_probs.size(-1)
-    adversarial_type = F.kl_div(
-        torch.log(domain_type_probs + 1e-8), uniform_type, reduction="batchmean"
-    )
-
-    # Minimize KL to uniform = push toward domain-invariant representation
-    adversarial_loss = adversarial_lang + adversarial_type
-
-    # Total loss
-    total_loss = (
+    total = (
         task_loss
-        + 0.3 * proto_loss
-        + config.lambda_contrastive * contrastive_loss
-        + config.lambda_disentangle * disentangle_loss
-        + config.lambda_adversarial * adversarial_loss
-        + config.lambda_reconstruct * recon_loss
+        + config.lambda_triplet * triplet_loss
+        + config.lambda_cross_view * xview_loss
     )
 
     return {
-        "total": total_loss,
+        "total": total,
         "task": task_loss,
-        "proto": proto_loss,
-        "contrastive": contrastive_loss,
-        "disentangle": disentangle_loss,
-        "adversarial": adversarial_loss,
-        "recon": recon_loss,
-        "mi": mi_loss,
-        "kl": kl_loss,
+        "triplet": triplet_loss,
+        "xview": xview_loss,
     }
 
 
@@ -1267,7 +1235,7 @@ def compute_all_losses(
 # ============================================================================
 
 class Trainer:
-    def __init__(self, config: Config, model: CodeOrigin, train_loader, val_loader, test_loader, class_weights=None):
+    def __init__(self, config: Config, model: BHSCM, train_loader, val_loader, test_loader, class_weights=None):
         self.config = config
         self.model = model.to(config.device)
         self.train_loader = train_loader
@@ -1309,11 +1277,7 @@ class Trainer:
         total_losses = defaultdict(float)
         num_batches = 0
 
-        # GRL lambda schedule (gradually increase)
-        progress = epoch / self.config.epochs
-        grl_lambda = 2.0 / (1.0 + math.exp(-10 * progress)) - 1.0
-        grl_lambda *= self.config.grl_lambda_max
-        self.model.grl.set_lambda(grl_lambda)
+        # BH-SCM: no GRL needed
 
         self.optimizer.zero_grad()
 
@@ -1354,7 +1318,7 @@ class Trainer:
                 lr = self.scheduler.get_last_lr()[0]
                 logger.info(
                     f"Epoch {epoch+1} | Step {batch_idx+1}/{len(self.train_loader)} | "
-                    f"Loss: {avg_loss:.4f} | LR: {lr:.2e} | GRL-λ: {grl_lambda:.3f}"
+                    f"Loss: {avg_loss:.4f} | LR: {lr:.2e}"
                 )
 
             # Mid-epoch eval
@@ -1387,11 +1351,7 @@ class Trainer:
             with autocast(device_type=self.config.device, enabled=self.use_amp, dtype=self.amp_dtype):
                 outputs = self.model(input_ids, attention_mask, ast_seq, struct_feat, labels)
 
-            # Normalize both to same scale before ensembling
-            logits_norm = F.softmax(outputs["logits"], dim=-1)
-            proto_norm = F.softmax(outputs["proto_logits"], dim=-1)
-            combined_logits = 0.7 * logits_norm + 0.3 * proto_norm
-            preds = combined_logits.argmax(dim=-1)
+            preds = outputs["logits"].argmax(dim=-1)
 
             all_preds.extend(preds.cpu().numpy())
             all_labels.extend(labels.cpu().numpy())
@@ -1424,7 +1384,7 @@ class Trainer:
 
     def save_checkpoint(self, tag: str = "latest"):
         os.makedirs(self.config.save_dir, exist_ok=True)
-        path = os.path.join(self.config.save_dir, f"codeorigin_{self.config.task}_{tag}.pt")
+        path = os.path.join(self.config.save_dir, f"bh_scm_{self.config.task}_{tag}.pt")
         torch.save({
             "model_state_dict": self.model.state_dict(),
             "best_f1": self.best_f1,
@@ -1433,7 +1393,7 @@ class Trainer:
         logger.info(f"Saved checkpoint to {path}")
 
     def load_checkpoint(self, tag: str = "best"):
-        path = os.path.join(self.config.save_dir, f"codeorigin_{self.config.task}_{tag}.pt")
+        path = os.path.join(self.config.save_dir, f"bh_scm_{self.config.task}_{tag}.pt")
         if os.path.exists(path):
             ckpt = torch.load(path, map_location=self.config.device, weights_only=True)
             self.model.load_state_dict(ckpt["model_state_dict"])
@@ -1443,7 +1403,7 @@ class Trainer:
 
     def train(self):
         logger.info("=" * 60)
-        logger.info(f"Starting CodeOrigin Training - Task {self.config.task}")
+        logger.info(f"Starting BH-SCM Training - Task {self.config.task}")
         logger.info(f"Num classes: {self.model.num_classes}")
         logger.info(f"Device: {self.config.device}")
         logger.info(f"Precision: {self.precision}")
@@ -1513,7 +1473,7 @@ def main(task: str = "T1", config: Optional[Config] = None):
     set_seed(config.seed)
 
     logger.info(f"{'='*60}")
-    logger.info(f"CodeOrigin - AI-Generated Code Detection")
+    logger.info(f"BH-SCM - AI-Generated Code Detection")
     logger.info(f"Task: {config.task}")
     logger.info(f"Benchmark: {config.benchmark}")
     logger.info(f"GPU: {_get_gpu_name()}")
@@ -1576,8 +1536,8 @@ def main(task: str = "T1", config: Optional[Config] = None):
     )
 
     # Model
-    logger.info(f"Building CodeOrigin model...")
-    model = CodeOrigin(config, num_classes)
+    logger.info(f"Building BH-SCM model...")
+    model = BHSCM(config, num_classes)
 
     # Count parameters
     total_params = sum(p.numel() for p in model.parameters())
@@ -1632,7 +1592,7 @@ def run_benchmark_suite(task: str = "T1", base_config: Optional[Config] = None):
     # Copy-paste friendly block for tracker logging.
     ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     logger.info("\n=== SUITE_RESULTS_START ===")
-    logger.info(f"timestamp={ts} | task={task} | method=CodeOrigin")
+    logger.info(f"timestamp={ts} | task={task} | method=BH-SCM")
     logger.info("| benchmark | task | best_val_f1 | test_f1 |")
     logger.info("|---|---|---:|---:|")
     for bench in ["aicd", "droid"]:
@@ -1650,7 +1610,7 @@ def run_benchmark_suite(task: str = "T1", base_config: Optional[Config] = None):
     machine_block = {
         "timestamp": ts,
         "task": task,
-        "method": "CodeOrigin",
+        "method": "BH-SCM",
         "results": results,
     }
     logger.info("SUITE_RESULTS_JSON=" + json.dumps(machine_block, ensure_ascii=True))

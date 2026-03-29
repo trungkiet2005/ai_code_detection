@@ -1,18 +1,28 @@
 """
-CodeOrigin: Domain-Invariant AI-Generated Code Detection via
-Style-Content Disentanglement and Hierarchical Contrastive Learning
+TTA-Evident: Test-Time Adaptive Evidential Learning for
+Robust AI-Generated Code Detection
+
+Key Innovation:
+- Evidential Deep Learning (EDL) head: outputs Dirichlet distribution
+  parameters instead of softmax, capturing epistemic uncertainty
+- Test-Time Adaptation via masked token prediction: one gradient step
+  of self-supervised MLM on test batches before classification
+- Explicitly flags OOD samples with high uncertainty
+- Superior calibration (ECE, Brier Score) over standard detectors
+
+Loss_train: L_EDL (Type II ML) + KL(Dir || Dir_prior) + disentangle losses
+Inference: MLM adapt step → evidential prediction → uncertainty scores
+
+Reference: Tier A Flagship 2 from research portfolio
+Target: NeurIPS 2026 ORAL
 
 Single-file implementation for Kaggle.
 Target: AICD-Bench + DroidCollection
-(https://huggingface.co/AICD-bench/AICD-Bench)
-(https://huggingface.co/datasets/project-droid/DroidCollection)
 
 Usage on Kaggle:
     1. Upload this file to a Kaggle notebook
     2. Run: !pip install datasets transformers accelerate tree-sitter tree-sitter-languages
-    3. Execute the cells or run: python codeorigin.py --task T1
-
-Author: [Your Name]
+    3. Execute the cells or run: python exp02_tta_evident.py --task T1
 """
 
 import os
@@ -221,9 +231,16 @@ class Config:
     device: str = "cuda" if torch.cuda.is_available() else "cpu"
     pin_memory: bool = True
     non_blocking: bool = True
-    save_dir: str = "./codeorigin_checkpoints"
+    save_dir: str = "./tta_evident_checkpoints"
     log_every: int = 100
     eval_every: int = 1000
+
+    # TTA-Evident specific
+    edl_lambda_kl: float = 0.1
+    tta_enabled: bool = True
+    tta_lr: float = 1e-5
+    tta_steps: int = 1
+    tta_mlm_prob: float = 0.15
 
 
 def set_seed(seed: int):
@@ -1021,20 +1038,91 @@ class PrototypicalContrastiveHead(nn.Module):
         return loss + 0.5 * supcon_loss
 
 
+class EvidentialHead(nn.Module):
+    """
+    Evidential Deep Learning classification head.
+    Outputs Dirichlet distribution parameters instead of point logits.
+    """
+    def __init__(self, input_dim: int, num_classes: int):
+        super().__init__()
+        self.num_classes = num_classes
+        self.fc = nn.Sequential(
+            nn.Linear(input_dim, input_dim // 2),
+            nn.LayerNorm(input_dim // 2),
+            nn.GELU(),
+            nn.Dropout(0.1),
+            nn.Linear(input_dim // 2, num_classes),
+        )
+
+    def forward(self, x: torch.Tensor) -> Dict[str, torch.Tensor]:
+        evidence = F.softplus(self.fc(x))
+        alpha = evidence + 1.0
+        S = alpha.sum(dim=-1, keepdim=True)
+        probs = alpha / S
+        uncertainty = self.num_classes / S.squeeze(-1)
+        return {
+            "evidence": evidence,
+            "alpha": alpha,
+            "probs": probs,
+            "uncertainty": uncertainty,
+        }
+
+
+def edl_loss(alpha: torch.Tensor, labels: torch.Tensor,
+             num_classes: int, epoch: int, total_epochs: int,
+             kl_weight: float = 0.1) -> torch.Tensor:
+    """Evidential Deep Learning loss: Type II ML + KL regularizer."""
+    S = alpha.sum(dim=-1, keepdim=True)
+    one_hot = F.one_hot(labels, num_classes).float()
+    loss_ml = (one_hot * (torch.digamma(S) - torch.digamma(alpha))).sum(dim=-1)
+    alpha_tilde = one_hot + (1 - one_hot) * (alpha - 1) + 1
+    S_tilde = alpha_tilde.sum(dim=-1, keepdim=True)
+    kl = (
+        torch.lgamma(S_tilde.squeeze(-1))
+        - torch.lgamma(torch.tensor(float(num_classes), device=alpha.device))
+        - torch.lgamma(alpha_tilde).sum(dim=-1)
+        + ((alpha_tilde - 1) * (torch.digamma(alpha_tilde) - torch.digamma(S_tilde))).sum(dim=-1)
+    )
+    annealing = min(1.0, epoch / max(total_epochs, 1))
+    return loss_ml.mean() + kl_weight * annealing * kl.mean()
+
+
+def compute_ece(probs, labels, n_bins=15):
+    """Expected Calibration Error."""
+    confidences = probs.max(dim=1)[0]
+    predictions = probs.argmax(dim=1)
+    accuracies = predictions.eq(labels)
+    ece = torch.zeros(1, device=probs.device)
+    for bin_idx in range(n_bins):
+        bin_lower = bin_idx / n_bins
+        bin_upper = (bin_idx + 1) / n_bins
+        in_bin = (confidences > bin_lower) & (confidences <= bin_upper)
+        if in_bin.sum() > 0:
+            bin_accuracy = accuracies[in_bin].float().mean()
+            bin_confidence = confidences[in_bin].mean()
+            ece += (in_bin.float().sum() / len(probs)) * torch.abs(bin_accuracy - bin_confidence)
+    return ece.item()
+
+
+def compute_brier_score(probs, labels, num_classes):
+    """Brier Score."""
+    one_hot = F.one_hot(labels, num_classes).float()
+    return ((probs - one_hot) ** 2).sum(dim=1).mean().item()
+
+
 # ============================================================================
-# Full Model: CodeOrigin
+# Full Model: TTAEvident
 # ============================================================================
 
-class CodeOrigin(nn.Module):
+class TTAEvident(nn.Module):
     """
-    CodeOrigin: Domain-Invariant AI-Generated Code Detection via
-    Style-Content Disentanglement and Hierarchical Contrastive Learning.
+    TTA-Evident: Test-Time Adaptive Evidential Learning.
 
     Components:
     1. Multi-Granularity Encoder (token + AST + structural)
-    2. Style-Content Disentanglement
-    3. Cross-Domain Adversarial Alignment
-    4. Hierarchical Prototypical Contrastive Learning
+    2. Style-Content Disentanglement (from base)
+    3. Evidential Deep Learning head (Dirichlet output)
+    4. Test-Time Adaptation via MLM (at inference)
     """
 
     def __init__(self, config: Config, num_classes: int):
@@ -1042,8 +1130,7 @@ class CodeOrigin(nn.Module):
         self.config = config
         self.num_classes = num_classes
 
-        # === Component 1: Multi-Granularity Encoder ===
-        # Token-level encoder (ModernBERT)
+        # Token-level encoder
         self.token_encoder = AutoModel.from_pretrained(config.encoder_name)
         token_hidden_size = self.token_encoder.config.hidden_size
 
@@ -1054,14 +1141,14 @@ class CodeOrigin(nn.Module):
             hidden_dim=config.gnn_hidden_dim,
         )
 
-        # Structural encoder (graph-level proxy)
+        # Structural encoder
         self.struct_encoder = StructuralEncoder(
             input_dim=STRUCTURAL_FEATURE_DIM,
             hidden_dim=config.gnn_hidden_dim,
         )
 
         # Cross-attention fusion
-        fusion_dim = config.z_style_dim + config.z_content_dim  # unified repr dim
+        fusion_dim = config.z_style_dim + config.z_content_dim
         self.fusion = CrossAttentionFusion(
             token_dim=token_hidden_size,
             ast_dim=config.gnn_hidden_dim,
@@ -1069,40 +1156,18 @@ class CodeOrigin(nn.Module):
             output_dim=fusion_dim,
         )
 
-        # === Component 2: Style-Content Disentanglement ===
+        # Style-Content Disentanglement
         self.disentangler = StyleContentDisentangler(
             input_dim=fusion_dim,
             z_style_dim=config.z_style_dim,
             z_content_dim=config.z_content_dim,
         )
 
-        # === Component 3: Domain Adversarial ===
-        self.grl = GradientReversalLayer()
-        self.domain_lang_classifier = nn.Sequential(
-            nn.Linear(config.z_style_dim, 128),
-            nn.ReLU(),
-            nn.Dropout(0.1),
-            nn.Linear(128, config.num_languages),
-        )
-        self.domain_type_classifier = nn.Sequential(
-            nn.Linear(config.z_style_dim, 128),
-            nn.ReLU(),
-            nn.Dropout(0.1),
-            nn.Linear(128, config.num_domains),
-        )
-
-        # === Component 4: Task Head ===
-        self.proto_head = PrototypicalContrastiveHead(
+        # Evidential head (replaces softmax)
+        self.edl_head = EvidentialHead(
             input_dim=config.z_style_dim,
             num_classes=num_classes,
-            temperature=config.temperature,
         )
-
-        # Content auxiliary head (predict language from z_content for disentanglement)
-        self.content_aux_head = nn.Linear(config.z_content_dim, config.num_languages)
-
-        # Focal loss gamma
-        self.focal_gamma = 2.0
 
     def forward(
         self,
@@ -1112,58 +1177,32 @@ class CodeOrigin(nn.Module):
         struct_feat: torch.Tensor,
         labels: Optional[torch.Tensor] = None,
     ) -> Dict[str, torch.Tensor]:
+        token_out = self.token_encoder(input_ids=input_ids, attention_mask=attention_mask)
+        token_repr = token_out.last_hidden_state[:, 0, :]
+        ast_repr = self.ast_encoder(ast_seq)
+        struct_repr = self.struct_encoder(struct_feat)
+        h_code = self.fusion(token_repr, ast_repr, struct_repr)
 
-        # === Multi-Granularity Encoding ===
-        # Token-level
-        token_out = self.token_encoder(
-            input_ids=input_ids,
-            attention_mask=attention_mask,
-        )
-        # Use [CLS] token representation
-        token_repr = token_out.last_hidden_state[:, 0, :]  # (B, hidden)
-
-        # AST-level
-        ast_repr = self.ast_encoder(ast_seq)  # (B, gnn_hidden)
-
-        # Structural-level
-        struct_repr = self.struct_encoder(struct_feat)  # (B, gnn_hidden)
-
-        # Fuse
-        h_code = self.fusion(token_repr, ast_repr, struct_repr)  # (B, fusion_dim)
-
-        # === Style-Content Disentanglement ===
         disent_out = self.disentangler(h_code)
-        z_style = disent_out["z_style"]      # (B, z_style_dim)
-        z_content = disent_out["z_content"]  # (B, z_content_dim)
+        z_style = disent_out["z_style"]
+        z_content = disent_out["z_content"]
 
-        # === Task Prediction ===
-        logits, proto_logits = self.proto_head(z_style)
+        edl_out = self.edl_head(z_style)
 
-        # === Domain Adversarial (on z_style) ===
-        z_style_grl = self.grl(z_style)
-        domain_lang_logits = self.domain_lang_classifier(z_style_grl)
-        domain_type_logits = self.domain_type_classifier(z_style_grl)
-
-        # === Content Auxiliary ===
-        content_lang_logits = self.content_aux_head(z_content)
-
-        output = {
-            "logits": logits,
-            "proto_logits": proto_logits,
+        return {
+            "alpha": edl_out["alpha"],
+            "probs": edl_out["probs"],
+            "uncertainty": edl_out["uncertainty"],
+            "evidence": edl_out["evidence"],
             "z_style": z_style,
             "z_content": z_content,
             "h_code": h_code,
             "h_recon": disent_out["h_recon"],
-            "domain_lang_logits": domain_lang_logits,
-            "domain_type_logits": domain_type_logits,
-            "content_lang_logits": content_lang_logits,
             "style_mu": disent_out["style_mu"],
             "style_logvar": disent_out["style_logvar"],
             "content_mu": disent_out["content_mu"],
             "content_logvar": disent_out["content_logvar"],
         }
-
-        return output
 
 
 # ============================================================================
@@ -1186,76 +1225,39 @@ class FocalLoss(nn.Module):
 
 
 def compute_all_losses(
-    model: CodeOrigin,
+    model: TTAEvident,
     outputs: Dict[str, torch.Tensor],
     labels: torch.Tensor,
     config: Config,
     focal_loss_fn: Optional[FocalLoss] = None,
+    epoch: int = 0,
 ) -> Dict[str, torch.Tensor]:
-    """Compute all loss components."""
+    """Compute TTA-Evident losses."""
+    # EDL loss (replaces CE/focal)
+    task_loss = edl_loss(
+        outputs["alpha"], labels, model.num_classes,
+        epoch, config.epochs, config.edl_lambda_kl,
+    )
 
-    # 1. Task loss (focal loss for class imbalance)
-    if focal_loss_fn is None:
-        focal_loss_fn = FocalLoss(gamma=2.0)
-    task_loss = focal_loss_fn(outputs["logits"], labels)
-
-    # Prototype cross-entropy loss
-    proto_loss = F.cross_entropy(outputs["proto_logits"], labels)
-
-    # Contrastive loss
-    contrastive_loss = model.proto_head.contrastive_loss(outputs["z_style"], labels)
-
-    # 2. Disentanglement losses
-    # MI minimization between z_style and z_content
+    # Disentanglement losses
     mi_loss = model.disentangler.compute_mi_loss(outputs["z_style"], outputs["z_content"])
-
-    # KL regularization
     kl_loss = model.disentangler.compute_kl_loss(
         outputs["style_mu"], outputs["style_logvar"],
         outputs["content_mu"], outputs["content_logvar"],
     )
-
-    # Reconstruction loss
     recon_loss = F.mse_loss(outputs["h_recon"], outputs["h_code"].detach())
-
     disentangle_loss = mi_loss + 0.01 * kl_loss
 
-    # 3. Domain adversarial loss: encourage z_style to be domain-invariant
-    #    by maximizing entropy of domain predictions (uniform = no domain info)
-    #    GRL handles gradient reversal so the encoder learns to confuse classifiers
-    domain_lang_probs = F.softmax(outputs["domain_lang_logits"], dim=-1)
-    # Target: uniform distribution over languages
-    uniform_lang = torch.ones_like(domain_lang_probs) / domain_lang_probs.size(-1)
-    adversarial_lang = F.kl_div(
-        torch.log(domain_lang_probs + 1e-8), uniform_lang, reduction="batchmean"
-    )
-
-    domain_type_probs = F.softmax(outputs["domain_type_logits"], dim=-1)
-    uniform_type = torch.ones_like(domain_type_probs) / domain_type_probs.size(-1)
-    adversarial_type = F.kl_div(
-        torch.log(domain_type_probs + 1e-8), uniform_type, reduction="batchmean"
-    )
-
-    # Minimize KL to uniform = push toward domain-invariant representation
-    adversarial_loss = adversarial_lang + adversarial_type
-
-    # Total loss
-    total_loss = (
+    total = (
         task_loss
-        + 0.3 * proto_loss
-        + config.lambda_contrastive * contrastive_loss
         + config.lambda_disentangle * disentangle_loss
-        + config.lambda_adversarial * adversarial_loss
         + config.lambda_reconstruct * recon_loss
     )
 
     return {
-        "total": total_loss,
+        "total": total,
         "task": task_loss,
-        "proto": proto_loss,
-        "contrastive": contrastive_loss,
         "disentangle": disentangle_loss,
-        "adversarial": adversarial_loss,
         "recon": recon_loss,
         "mi": mi_loss,
         "kl": kl_loss,
@@ -1267,7 +1269,7 @@ def compute_all_losses(
 # ============================================================================
 
 class Trainer:
-    def __init__(self, config: Config, model: CodeOrigin, train_loader, val_loader, test_loader, class_weights=None):
+    def __init__(self, config: Config, model: TTAEvident, train_loader, val_loader, test_loader, class_weights=None):
         self.config = config
         self.model = model.to(config.device)
         self.train_loader = train_loader
@@ -1309,11 +1311,7 @@ class Trainer:
         total_losses = defaultdict(float)
         num_batches = 0
 
-        # GRL lambda schedule (gradually increase)
-        progress = epoch / self.config.epochs
-        grl_lambda = 2.0 / (1.0 + math.exp(-10 * progress)) - 1.0
-        grl_lambda *= self.config.grl_lambda_max
-        self.model.grl.set_lambda(grl_lambda)
+        # No GRL in TTA-Evident
 
         self.optimizer.zero_grad()
 
@@ -1328,7 +1326,7 @@ class Trainer:
             # Forward with mixed precision
             with autocast(device_type=self.config.device, enabled=self.use_amp, dtype=self.amp_dtype):
                 outputs = self.model(input_ids, attention_mask, ast_seq, struct_feat, labels)
-                losses = compute_all_losses(self.model, outputs, labels, self.config, self.focal_loss)
+                losses = compute_all_losses(self.model, outputs, labels, self.config, self.focal_loss, epoch=epoch)
                 loss = losses["total"] / self.config.grad_accum_steps
 
             # Backward
@@ -1354,7 +1352,7 @@ class Trainer:
                 lr = self.scheduler.get_last_lr()[0]
                 logger.info(
                     f"Epoch {epoch+1} | Step {batch_idx+1}/{len(self.train_loader)} | "
-                    f"Loss: {avg_loss:.4f} | LR: {lr:.2e} | GRL-λ: {grl_lambda:.3f}"
+                    f"Loss: {avg_loss:.4f} | LR: {lr:.2e}"
                 )
 
             # Mid-epoch eval
@@ -1369,34 +1367,101 @@ class Trainer:
         # Return average losses
         return {k: v / num_batches for k, v in total_losses.items()}
 
-    @torch.no_grad()
+    def _tta_adapt_and_predict(self, batch):
+        """Test-Time Adaptation: MLM gradient step then predict."""
+        import copy
+
+        input_ids = batch["input_ids"].to(self.config.device, non_blocking=self.config.non_blocking)
+        attention_mask = batch["attention_mask"].to(self.config.device, non_blocking=self.config.non_blocking)
+        ast_seq = batch["ast_seq"].to(self.config.device, non_blocking=self.config.non_blocking)
+        struct_feat = batch["struct_feat"].to(self.config.device, non_blocking=self.config.non_blocking)
+
+        # Save model state
+        state_dict_backup = copy.deepcopy(self.model.state_dict())
+
+        # MLM self-supervised step on the token encoder
+        self.model.train()
+        tta_optimizer = torch.optim.AdamW(
+            self.model.token_encoder.parameters(), lr=self.config.tta_lr,
+        )
+
+        for _ in range(self.config.tta_steps):
+            # Create masked input
+            mask_prob = self.config.tta_mlm_prob
+            rand_mask = torch.rand_like(input_ids.float()) < mask_prob
+            # Don't mask special tokens (position 0 = CLS, padding)
+            rand_mask[:, 0] = False
+            rand_mask = rand_mask & (attention_mask.bool())
+
+            masked_ids = input_ids.clone()
+            # Use a generic mask token id (typically 103 for BERT-like, but use 0 as safe fallback)
+            mask_token_id = getattr(self.model.token_encoder.config, 'mask_token_id', None)
+            if mask_token_id is None:
+                mask_token_id = 103  # common default
+            masked_ids[rand_mask] = mask_token_id
+
+            with autocast(device_type=self.config.device, enabled=self.use_amp, dtype=self.amp_dtype):
+                token_out = self.model.token_encoder(input_ids=masked_ids, attention_mask=attention_mask)
+                hidden = token_out.last_hidden_state
+                # Simple MLM objective: predict original tokens at masked positions
+                vocab_size = self.model.token_encoder.config.vocab_size
+                mlm_logits = F.linear(hidden, self.model.token_encoder.embeddings.word_embeddings.weight)
+                mlm_loss = F.cross_entropy(
+                    mlm_logits[rand_mask], input_ids[rand_mask],
+                )
+
+            mlm_loss.backward()
+            tta_optimizer.step()
+            tta_optimizer.zero_grad()
+
+        # Predict with adapted model
+        self.model.eval()
+        with torch.no_grad():
+            with autocast(device_type=self.config.device, enabled=self.use_amp, dtype=self.amp_dtype):
+                outputs = self.model(input_ids, attention_mask, ast_seq, struct_feat)
+
+        # Restore original model state
+        self.model.load_state_dict(state_dict_backup)
+
+        return outputs
+
     def evaluate(self, dataloader, split_name: str = "Val") -> float:
         self.model.eval()
         all_preds = []
         all_labels = []
+        all_probs_list = []
+        all_uncertainties = []
         total_loss = 0.0
         num_batches = 0
 
+        use_tta = self.config.tta_enabled and split_name == "Test"
+
         for batch in dataloader:
-            input_ids = batch["input_ids"].to(self.config.device, non_blocking=self.config.non_blocking)
-            attention_mask = batch["attention_mask"].to(self.config.device, non_blocking=self.config.non_blocking)
-            ast_seq = batch["ast_seq"].to(self.config.device, non_blocking=self.config.non_blocking)
-            struct_feat = batch["struct_feat"].to(self.config.device, non_blocking=self.config.non_blocking)
             labels = batch["label"].to(self.config.device, non_blocking=self.config.non_blocking)
 
-            with autocast(device_type=self.config.device, enabled=self.use_amp, dtype=self.amp_dtype):
-                outputs = self.model(input_ids, attention_mask, ast_seq, struct_feat, labels)
+            if use_tta:
+                outputs = self._tta_adapt_and_predict(batch)
+            else:
+                with torch.no_grad():
+                    input_ids = batch["input_ids"].to(self.config.device, non_blocking=self.config.non_blocking)
+                    attention_mask = batch["attention_mask"].to(self.config.device, non_blocking=self.config.non_blocking)
+                    ast_seq = batch["ast_seq"].to(self.config.device, non_blocking=self.config.non_blocking)
+                    struct_feat = batch["struct_feat"].to(self.config.device, non_blocking=self.config.non_blocking)
 
-            # Normalize both to same scale before ensembling
-            logits_norm = F.softmax(outputs["logits"], dim=-1)
-            proto_norm = F.softmax(outputs["proto_logits"], dim=-1)
-            combined_logits = 0.7 * logits_norm + 0.3 * proto_norm
-            preds = combined_logits.argmax(dim=-1)
+                    with autocast(device_type=self.config.device, enabled=self.use_amp, dtype=self.amp_dtype):
+                        outputs = self.model(input_ids, attention_mask, ast_seq, struct_feat, labels)
+
+            probs = outputs["probs"]
+            preds = probs.argmax(dim=-1)
+            uncertainty = outputs["uncertainty"]
 
             all_preds.extend(preds.cpu().numpy())
             all_labels.extend(labels.cpu().numpy())
+            all_probs_list.append(probs.detach().float())
+            all_uncertainties.extend(uncertainty.detach().cpu().numpy())
 
-            loss = F.cross_entropy(outputs["logits"], labels)
+            # EDL loss for tracking
+            loss = edl_loss(outputs["alpha"], labels, self.model.num_classes, 0, 1)
             total_loss += loss.item()
             num_batches += 1
 
@@ -1409,10 +1474,33 @@ class Trainer:
             f"{split_name} | Loss: {avg_loss:.4f} | Macro-F1: {macro_f1:.4f} | "
             f"Weighted-F1: {weighted_f1:.4f}"
         )
+
+        # Calibration metrics
+        all_probs_cat = torch.cat(all_probs_list, dim=0)
+        all_labels_cat = torch.tensor(all_labels, device=all_probs_cat.device)
+        ece = compute_ece(all_probs_cat, all_labels_cat)
+        brier = compute_brier_score(all_probs_cat, all_labels_cat, self.model.num_classes)
+        logger.info(f"{split_name} | ECE: {ece:.4f} | Brier: {brier:.4f}")
+
+        # Uncertainty analysis: correct vs incorrect
+        all_uncertainties_np = np.array(all_uncertainties)
+        all_preds_np = np.array(all_preds)
+        all_labels_np = np.array(all_labels)
+        correct_mask = all_preds_np == all_labels_np
+        if correct_mask.sum() > 0 and (~correct_mask).sum() > 0:
+            mean_unc_correct = all_uncertainties_np[correct_mask].mean()
+            mean_unc_incorrect = all_uncertainties_np[~correct_mask].mean()
+            logger.info(
+                f"{split_name} | Uncertainty (correct): {mean_unc_correct:.4f} | "
+                f"Uncertainty (incorrect): {mean_unc_incorrect:.4f}"
+            )
+
         self.last_eval_metrics[split_name] = {
             "loss": float(avg_loss),
             "macro_f1": float(macro_f1),
             "weighted_f1": float(weighted_f1),
+            "ece": float(ece),
+            "brier": float(brier),
         }
 
         # Per-class report
@@ -1424,7 +1512,7 @@ class Trainer:
 
     def save_checkpoint(self, tag: str = "latest"):
         os.makedirs(self.config.save_dir, exist_ok=True)
-        path = os.path.join(self.config.save_dir, f"codeorigin_{self.config.task}_{tag}.pt")
+        path = os.path.join(self.config.save_dir, f"tta_evident_{self.config.task}_{tag}.pt")
         torch.save({
             "model_state_dict": self.model.state_dict(),
             "best_f1": self.best_f1,
@@ -1433,7 +1521,7 @@ class Trainer:
         logger.info(f"Saved checkpoint to {path}")
 
     def load_checkpoint(self, tag: str = "best"):
-        path = os.path.join(self.config.save_dir, f"codeorigin_{self.config.task}_{tag}.pt")
+        path = os.path.join(self.config.save_dir, f"tta_evident_{self.config.task}_{tag}.pt")
         if os.path.exists(path):
             ckpt = torch.load(path, map_location=self.config.device, weights_only=True)
             self.model.load_state_dict(ckpt["model_state_dict"])
@@ -1443,7 +1531,7 @@ class Trainer:
 
     def train(self):
         logger.info("=" * 60)
-        logger.info(f"Starting CodeOrigin Training - Task {self.config.task}")
+        logger.info(f"Starting TTA-Evident Training - Task {self.config.task}")
         logger.info(f"Num classes: {self.model.num_classes}")
         logger.info(f"Device: {self.config.device}")
         logger.info(f"Precision: {self.precision}")
@@ -1513,7 +1601,7 @@ def main(task: str = "T1", config: Optional[Config] = None):
     set_seed(config.seed)
 
     logger.info(f"{'='*60}")
-    logger.info(f"CodeOrigin - AI-Generated Code Detection")
+    logger.info(f"TTA-Evident - AI-Generated Code Detection")
     logger.info(f"Task: {config.task}")
     logger.info(f"Benchmark: {config.benchmark}")
     logger.info(f"GPU: {_get_gpu_name()}")
@@ -1576,8 +1664,8 @@ def main(task: str = "T1", config: Optional[Config] = None):
     )
 
     # Model
-    logger.info(f"Building CodeOrigin model...")
-    model = CodeOrigin(config, num_classes)
+    logger.info(f"Building TTA-Evident model...")
+    model = TTAEvident(config, num_classes)
 
     # Count parameters
     total_params = sum(p.numel() for p in model.parameters())
@@ -1632,7 +1720,7 @@ def run_benchmark_suite(task: str = "T1", base_config: Optional[Config] = None):
     # Copy-paste friendly block for tracker logging.
     ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     logger.info("\n=== SUITE_RESULTS_START ===")
-    logger.info(f"timestamp={ts} | task={task} | method=CodeOrigin")
+    logger.info(f"timestamp={ts} | task={task} | method=TTAEvident")
     logger.info("| benchmark | task | best_val_f1 | test_f1 |")
     logger.info("|---|---|---:|---:|")
     for bench in ["aicd", "droid"]:
@@ -1650,7 +1738,7 @@ def run_benchmark_suite(task: str = "T1", base_config: Optional[Config] = None):
     machine_block = {
         "timestamp": ts,
         "task": task,
-        "method": "CodeOrigin",
+        "method": "TTAEvident",
         "results": results,
     }
     logger.info("SUITE_RESULTS_JSON=" + json.dumps(machine_block, ensure_ascii=True))

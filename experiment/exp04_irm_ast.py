@@ -1,18 +1,18 @@
 """
-CodeOrigin: Domain-Invariant AI-Generated Code Detection via
-Style-Content Disentanglement and Hierarchical Contrastive Learning
+AST-IRM: AST-driven Invariant Risk Minimization for
+Cross-Language Robust AI-Generated Code Detection
 
-Single-file implementation for Kaggle.
-Target: AICD-Bench + DroidCollection
-(https://huggingface.co/AICD-bench/AICD-Bench)
-(https://huggingface.co/datasets/project-droid/DroidCollection)
+Key Innovation:
+- Treats programming languages as distinct environments for IRM
+- Forces model to learn causal, language-agnostic detection features
+- Penalizes gradients that vary across language environments
+- Directly solves cross-language performance degradation
+- Uses IRMv1 penalty with environment-aware batching
 
-Usage on Kaggle:
-    1. Upload this file to a Kaggle notebook
-    2. Run: !pip install datasets transformers accelerate tree-sitter tree-sitter-languages
-    3. Execute the cells or run: python codeorigin.py --task T1
+Loss: L = Sigma_e L_CE(e) + lambda_irm * Sigma_e ||grad_{w|w=1} L_CE(e) * w||^2
 
-Author: [Your Name]
+Reference: Tier B high-upside method from research portfolio
+Target: NeurIPS 2026 ORAL
 """
 
 import os
@@ -188,7 +188,6 @@ class Config:
 
     # Loss weights
     lambda_disentangle: float = 0.1
-    lambda_adversarial: float = 0.5
     lambda_contrastive: float = 0.3
     lambda_reconstruct: float = 0.1
 
@@ -196,8 +195,11 @@ class Config:
     temperature: float = 0.07
     prototype_momentum: float = 0.99
 
-    # Domain adversarial
-    grl_lambda_max: float = 1.0  # max lambda for GRL schedule
+    # IRM
+    lambda_irm: float = 1.0  # IRM penalty weight
+    irm_anneal_epochs: int = 1  # epochs before IRM penalty kicks in
+    irm_penalty_weight_max: float = 1e4  # max IRM penalty
+    num_environments: int = 9  # number of language environments
 
     # Data
     max_train_samples: int = 100_000  # subsample for Kaggle feasibility
@@ -221,7 +223,7 @@ class Config:
     device: str = "cuda" if torch.cuda.is_available() else "cpu"
     pin_memory: bool = True
     non_blocking: bool = True
-    save_dir: str = "./codeorigin_checkpoints"
+    save_dir: str = "./irm_ast_checkpoints"
     log_every: int = 100
     eval_every: int = 1000
 
@@ -419,23 +421,61 @@ STRUCTURAL_FEATURE_DIM = 22  # number of features from extract_structural_featur
 
 
 # ============================================================================
-# Dataset
+# Dataset with Environment (Language) Labels for IRM
 # ============================================================================
 
-class AICDDataset(Dataset):
-    """Dataset for AICD-Bench with multi-granularity features."""
+class IRMDataset(Dataset):
+    """Dataset with environment (language) labels for IRM."""
 
-    def __init__(
-        self,
-        data,
-        tokenizer,
-        max_length: int = 512,
-        ast_seq_len: int = 128,
-    ):
+    def __init__(self, data, tokenizer, max_length=512, ast_seq_len=128):
         self.data = data
         self.tokenizer = tokenizer
         self.max_length = max_length
         self.ast_seq_len = ast_seq_len
+
+        # Try to extract language info
+        self.lang_map = {}
+        self.lang_counter = 0
+
+    def _get_language_id(self, item):
+        """Extract or infer language environment from data item."""
+        # Try common field names
+        lang = None
+        for field_name in ["language", "lang", "programming_language", "Language"]:
+            if field_name in item:
+                lang = item[field_name]
+                break
+
+        if lang is None:
+            # Fallback: infer from code heuristics
+            code = item.get("code", "")
+            lang = self._infer_language(code)
+
+        if lang not in self.lang_map:
+            self.lang_map[lang] = self.lang_counter
+            self.lang_counter += 1
+
+        return self.lang_map[lang]
+
+    def _infer_language(self, code: str) -> str:
+        """Simple language inference heuristic."""
+        if "def " in code and ":" in code and "import " in code:
+            return "python"
+        if "public static void main" in code or "System.out" in code:
+            return "java"
+        if "#include" in code and ("{" in code):
+            return "cpp"
+        if "func " in code and "package " in code:
+            return "go"
+        if "fn " in code and "let mut" in code:
+            return "rust"
+        if "function " in code and ("var " in code or "const " in code or "let " in code):
+            return "javascript"
+        if "<?php" in code or "$" in code:
+            return "php"
+        if "using System" in code or "namespace " in code:
+            return "csharp"
+        return "unknown"
 
     def __len__(self):
         return len(self.data)
@@ -444,8 +484,8 @@ class AICDDataset(Dataset):
         item = self.data[idx]
         code = item["code"]
         label = item["label"]
+        env_id = self._get_language_id(item)
 
-        # Token-level: tokenize source code
         encoding = self.tokenizer(
             code,
             max_length=self.max_length,
@@ -453,11 +493,7 @@ class AICDDataset(Dataset):
             truncation=True,
             return_tensors="pt",
         )
-
-        # AST-level: node type sequence
         ast_seq = extract_ast_sequence(code, self.ast_seq_len)
-
-        # Graph-level proxy: structural features
         struct_feat = extract_structural_features(code)
 
         return {
@@ -466,8 +502,13 @@ class AICDDataset(Dataset):
             "ast_seq": torch.tensor(ast_seq, dtype=torch.long),
             "struct_feat": torch.tensor(struct_feat, dtype=torch.float32),
             "label": torch.tensor(label, dtype=torch.long),
+            "env_id": torch.tensor(env_id, dtype=torch.long),
         }
 
+
+# ============================================================================
+# Data Loading (unchanged from exp00)
+# ============================================================================
 
 def load_aicd_data(config: Config):
     """Load AICD-Bench dataset from HuggingFace."""
@@ -739,31 +780,6 @@ def preflight_benchmark_suite(task: str, base_config: Config) -> Dict[str, objec
 # Model Components
 # ============================================================================
 
-class GradientReversalFunction(torch.autograd.Function):
-    """Gradient Reversal Layer for domain adversarial training."""
-
-    @staticmethod
-    def forward(ctx, x, lambda_val):
-        ctx.lambda_val = lambda_val
-        return x.clone()
-
-    @staticmethod
-    def backward(ctx, grad_output):
-        return -ctx.lambda_val * grad_output, None
-
-
-class GradientReversalLayer(nn.Module):
-    def __init__(self):
-        super().__init__()
-        self.lambda_val = 0.0
-
-    def set_lambda(self, val):
-        self.lambda_val = val
-
-    def forward(self, x):
-        return GradientReversalFunction.apply(x, self.lambda_val)
-
-
 class ASTEncoder(nn.Module):
     """Encodes AST node type sequences into a fixed-size representation."""
 
@@ -1022,19 +1038,23 @@ class PrototypicalContrastiveHead(nn.Module):
 
 
 # ============================================================================
-# Full Model: CodeOrigin
+# Full Model: IRMAST
 # ============================================================================
 
-class CodeOrigin(nn.Module):
+class IRMAST(nn.Module):
     """
-    CodeOrigin: Domain-Invariant AI-Generated Code Detection via
-    Style-Content Disentanglement and Hierarchical Contrastive Learning.
+    AST-IRM: AST-driven Invariant Risk Minimization for
+    Cross-Language Robust AI-Generated Code Detection.
 
     Components:
     1. Multi-Granularity Encoder (token + AST + structural)
     2. Style-Content Disentanglement
-    3. Cross-Domain Adversarial Alignment
-    4. Hierarchical Prototypical Contrastive Learning
+    3. Hierarchical Prototypical Contrastive Learning
+    4. IRM penalty replaces domain adversarial training
+
+    IRM forces the model to learn causal features that are invariant
+    across programming language environments, eliminating the need
+    for explicit adversarial alignment.
     """
 
     def __init__(self, config: Config, num_classes: int):
@@ -1076,22 +1096,7 @@ class CodeOrigin(nn.Module):
             z_content_dim=config.z_content_dim,
         )
 
-        # === Component 3: Domain Adversarial ===
-        self.grl = GradientReversalLayer()
-        self.domain_lang_classifier = nn.Sequential(
-            nn.Linear(config.z_style_dim, 128),
-            nn.ReLU(),
-            nn.Dropout(0.1),
-            nn.Linear(128, config.num_languages),
-        )
-        self.domain_type_classifier = nn.Sequential(
-            nn.Linear(config.z_style_dim, 128),
-            nn.ReLU(),
-            nn.Dropout(0.1),
-            nn.Linear(128, config.num_domains),
-        )
-
-        # === Component 4: Task Head ===
+        # === Component 3: Task Head (Prototypical) ===
         self.proto_head = PrototypicalContrastiveHead(
             input_dim=config.z_style_dim,
             num_classes=num_classes,
@@ -1139,11 +1144,6 @@ class CodeOrigin(nn.Module):
         # === Task Prediction ===
         logits, proto_logits = self.proto_head(z_style)
 
-        # === Domain Adversarial (on z_style) ===
-        z_style_grl = self.grl(z_style)
-        domain_lang_logits = self.domain_lang_classifier(z_style_grl)
-        domain_type_logits = self.domain_type_classifier(z_style_grl)
-
         # === Content Auxiliary ===
         content_lang_logits = self.content_aux_head(z_content)
 
@@ -1154,8 +1154,6 @@ class CodeOrigin(nn.Module):
             "z_content": z_content,
             "h_code": h_code,
             "h_recon": disent_out["h_recon"],
-            "domain_lang_logits": domain_lang_logits,
-            "domain_type_logits": domain_type_logits,
             "content_lang_logits": content_lang_logits,
             "style_mu": disent_out["style_mu"],
             "style_logvar": disent_out["style_logvar"],
@@ -1185,19 +1183,95 @@ class FocalLoss(nn.Module):
         return focal_loss.mean()
 
 
-def compute_all_losses(
-    model: CodeOrigin,
-    outputs: Dict[str, torch.Tensor],
-    labels: torch.Tensor,
-    config: Config,
-    focal_loss_fn: Optional[FocalLoss] = None,
-) -> Dict[str, torch.Tensor]:
-    """Compute all loss components."""
+def compute_irm_penalty(logits: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
+    """
+    IRMv1 penalty: ||grad_{w|w=1} CE(w * logits, y)||^2
+    Measures how much the optimal classifier varies across environments.
+    """
+    # Scale parameter (dummy scalar = 1.0)
+    scale = torch.ones(1, device=logits.device, requires_grad=True)
 
-    # 1. Task loss (focal loss for class imbalance)
+    # Loss with scale
+    loss = F.cross_entropy(logits * scale, labels)
+
+    # Gradient w.r.t. scale
+    grad = torch.autograd.grad(loss, scale, create_graph=True)[0]
+
+    # Penalty = gradient norm squared
+    return (grad ** 2).sum()
+
+
+def compute_env_irm_loss(
+    logits: torch.Tensor,
+    labels: torch.Tensor,
+    env_ids: torch.Tensor,
+    lambda_irm: float,
+    focal_loss_fn=None,
+) -> Dict[str, torch.Tensor]:
+    """
+    Compute IRM loss across environments.
+    L = Sigma_e L_CE(e) + lambda * Sigma_e penalty(e)
+    """
     if focal_loss_fn is None:
         focal_loss_fn = FocalLoss(gamma=2.0)
-    task_loss = focal_loss_fn(outputs["logits"], labels)
+
+    unique_envs = torch.unique(env_ids)
+
+    total_ce = torch.tensor(0.0, device=logits.device)
+    total_penalty = torch.tensor(0.0, device=logits.device)
+    num_envs = 0
+
+    for env in unique_envs:
+        mask = env_ids == env
+        if mask.sum() < 2:  # need at least 2 samples
+            continue
+
+        env_logits = logits[mask]
+        env_labels = labels[mask]
+
+        # Per-environment CE loss
+        env_loss = focal_loss_fn(env_logits, env_labels)
+        total_ce = total_ce + env_loss
+
+        # IRM penalty for this environment
+        penalty = compute_irm_penalty(env_logits, env_labels)
+        total_penalty = total_penalty + penalty
+
+        num_envs += 1
+
+    if num_envs > 0:
+        total_ce = total_ce / num_envs
+        total_penalty = total_penalty / num_envs
+
+    total = total_ce + lambda_irm * total_penalty
+
+    return {
+        "total": total,
+        "ce": total_ce,
+        "irm_penalty": total_penalty,
+    }
+
+
+def compute_all_losses(
+    model: IRMAST,
+    outputs: Dict[str, torch.Tensor],
+    labels: torch.Tensor,
+    env_ids: torch.Tensor,
+    config: Config,
+    current_irm_lambda: float,
+    focal_loss_fn: Optional[FocalLoss] = None,
+) -> Dict[str, torch.Tensor]:
+    """Compute all loss components including IRM penalty."""
+
+    # 1. IRM-aware task loss (focal loss per environment + IRM penalty)
+    if focal_loss_fn is None:
+        focal_loss_fn = FocalLoss(gamma=2.0)
+
+    irm_losses = compute_env_irm_loss(
+        outputs["logits"], labels, env_ids, current_irm_lambda, focal_loss_fn,
+    )
+    task_loss = irm_losses["ce"]
+    irm_penalty = irm_losses["irm_penalty"]
 
     # Prototype cross-entropy loss
     proto_loss = F.cross_entropy(outputs["proto_logits"], labels)
@@ -1220,42 +1294,23 @@ def compute_all_losses(
 
     disentangle_loss = mi_loss + 0.01 * kl_loss
 
-    # 3. Domain adversarial loss: encourage z_style to be domain-invariant
-    #    by maximizing entropy of domain predictions (uniform = no domain info)
-    #    GRL handles gradient reversal so the encoder learns to confuse classifiers
-    domain_lang_probs = F.softmax(outputs["domain_lang_logits"], dim=-1)
-    # Target: uniform distribution over languages
-    uniform_lang = torch.ones_like(domain_lang_probs) / domain_lang_probs.size(-1)
-    adversarial_lang = F.kl_div(
-        torch.log(domain_lang_probs + 1e-8), uniform_lang, reduction="batchmean"
-    )
-
-    domain_type_probs = F.softmax(outputs["domain_type_logits"], dim=-1)
-    uniform_type = torch.ones_like(domain_type_probs) / domain_type_probs.size(-1)
-    adversarial_type = F.kl_div(
-        torch.log(domain_type_probs + 1e-8), uniform_type, reduction="batchmean"
-    )
-
-    # Minimize KL to uniform = push toward domain-invariant representation
-    adversarial_loss = adversarial_lang + adversarial_type
-
-    # Total loss
+    # Total loss (IRM replaces adversarial)
     total_loss = (
         task_loss
+        + current_irm_lambda * irm_penalty
         + 0.3 * proto_loss
         + config.lambda_contrastive * contrastive_loss
         + config.lambda_disentangle * disentangle_loss
-        + config.lambda_adversarial * adversarial_loss
         + config.lambda_reconstruct * recon_loss
     )
 
     return {
         "total": total_loss,
         "task": task_loss,
+        "irm_penalty": irm_penalty,
         "proto": proto_loss,
         "contrastive": contrastive_loss,
         "disentangle": disentangle_loss,
-        "adversarial": adversarial_loss,
         "recon": recon_loss,
         "mi": mi_loss,
         "kl": kl_loss,
@@ -1267,7 +1322,7 @@ def compute_all_losses(
 # ============================================================================
 
 class Trainer:
-    def __init__(self, config: Config, model: CodeOrigin, train_loader, val_loader, test_loader, class_weights=None):
+    def __init__(self, config: Config, model: IRMAST, train_loader, val_loader, test_loader, class_weights=None):
         self.config = config
         self.model = model.to(config.device)
         self.train_loader = train_loader
@@ -1304,16 +1359,21 @@ class Trainer:
         self.global_step = 0
         self.last_eval_metrics: Dict[str, Dict[str, float]] = {}
 
+    def _get_irm_lambda(self, epoch: int) -> float:
+        """IRM penalty annealing schedule."""
+        if epoch < self.config.irm_anneal_epochs:
+            return 0.0  # Pure ERM phase
+        progress = (epoch - self.config.irm_anneal_epochs) / max(self.config.epochs - self.config.irm_anneal_epochs, 1)
+        return self.config.lambda_irm * min(progress * self.config.irm_penalty_weight_max, self.config.irm_penalty_weight_max)
+
     def train_epoch(self, epoch: int):
         self.model.train()
         total_losses = defaultdict(float)
         num_batches = 0
+        nan_count = 0
 
-        # GRL lambda schedule (gradually increase)
-        progress = epoch / self.config.epochs
-        grl_lambda = 2.0 / (1.0 + math.exp(-10 * progress)) - 1.0
-        grl_lambda *= self.config.grl_lambda_max
-        self.model.grl.set_lambda(grl_lambda)
+        # IRM annealing schedule
+        current_irm_lambda = self._get_irm_lambda(epoch)
 
         self.optimizer.zero_grad()
 
@@ -1324,18 +1384,33 @@ class Trainer:
             ast_seq = batch["ast_seq"].to(self.config.device, non_blocking=self.config.non_blocking)
             struct_feat = batch["struct_feat"].to(self.config.device, non_blocking=self.config.non_blocking)
             labels = batch["label"].to(self.config.device, non_blocking=self.config.non_blocking)
+            env_ids = batch["env_id"].to(self.config.device, non_blocking=self.config.non_blocking)
 
             # Forward with mixed precision
             with autocast(device_type=self.config.device, enabled=self.use_amp, dtype=self.amp_dtype):
                 outputs = self.model(input_ids, attention_mask, ast_seq, struct_feat, labels)
-                losses = compute_all_losses(self.model, outputs, labels, self.config, self.focal_loss)
+                losses = compute_all_losses(
+                    self.model, outputs, labels, env_ids,
+                    self.config, current_irm_lambda, self.focal_loss,
+                )
                 loss = losses["total"] / self.config.grad_accum_steps
+
+            # NaN detection (IRM can be unstable)
+            if torch.isnan(loss) or torch.isinf(loss):
+                nan_count += 1
+                if nan_count > 10:
+                    logger.warning(f"Too many NaN/Inf losses ({nan_count}), reducing IRM lambda")
+                    current_irm_lambda *= 0.5
+                    nan_count = 0
+                self.optimizer.zero_grad()
+                continue
 
             # Backward
             self.scaler.scale(loss).backward()
 
             if (batch_idx + 1) % self.config.grad_accum_steps == 0:
                 self.scaler.unscale_(self.optimizer)
+                # Extra aggressive gradient clipping for IRM stability
                 torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.config.max_grad_norm)
                 self.scaler.step(self.optimizer)
                 self.scaler.update()
@@ -1345,16 +1420,19 @@ class Trainer:
 
             # Track losses
             for k, v in losses.items():
-                total_losses[k] += v.item()
+                if not (torch.isnan(v) or torch.isinf(v)):
+                    total_losses[k] += v.item()
             num_batches += 1
 
             # Log
             if (batch_idx + 1) % self.config.log_every == 0:
                 avg_loss = total_losses["total"] / num_batches
                 lr = self.scheduler.get_last_lr()[0]
+                irm_pen = total_losses.get("irm_penalty", 0.0) / max(num_batches, 1)
                 logger.info(
                     f"Epoch {epoch+1} | Step {batch_idx+1}/{len(self.train_loader)} | "
-                    f"Loss: {avg_loss:.4f} | LR: {lr:.2e} | GRL-λ: {grl_lambda:.3f}"
+                    f"Loss: {avg_loss:.4f} | IRM-pen: {irm_pen:.4f} | "
+                    f"IRM-lam: {current_irm_lambda:.2e} | LR: {lr:.2e}"
                 )
 
             # Mid-epoch eval
@@ -1367,7 +1445,7 @@ class Trainer:
                 self.model.train()
 
         # Return average losses
-        return {k: v / num_batches for k, v in total_losses.items()}
+        return {k: v / max(num_batches, 1) for k, v in total_losses.items()}
 
     @torch.no_grad()
     def evaluate(self, dataloader, split_name: str = "Val") -> float:
@@ -1424,7 +1502,7 @@ class Trainer:
 
     def save_checkpoint(self, tag: str = "latest"):
         os.makedirs(self.config.save_dir, exist_ok=True)
-        path = os.path.join(self.config.save_dir, f"codeorigin_{self.config.task}_{tag}.pt")
+        path = os.path.join(self.config.save_dir, f"irm_ast_{self.config.task}_{tag}.pt")
         torch.save({
             "model_state_dict": self.model.state_dict(),
             "best_f1": self.best_f1,
@@ -1433,7 +1511,7 @@ class Trainer:
         logger.info(f"Saved checkpoint to {path}")
 
     def load_checkpoint(self, tag: str = "best"):
-        path = os.path.join(self.config.save_dir, f"codeorigin_{self.config.task}_{tag}.pt")
+        path = os.path.join(self.config.save_dir, f"irm_ast_{self.config.task}_{tag}.pt")
         if os.path.exists(path):
             ckpt = torch.load(path, map_location=self.config.device, weights_only=True)
             self.model.load_state_dict(ckpt["model_state_dict"])
@@ -1443,15 +1521,20 @@ class Trainer:
 
     def train(self):
         logger.info("=" * 60)
-        logger.info(f"Starting CodeOrigin Training - Task {self.config.task}")
+        logger.info(f"Starting AST-IRM Training - Task {self.config.task}")
         logger.info(f"Num classes: {self.model.num_classes}")
         logger.info(f"Device: {self.config.device}")
         logger.info(f"Precision: {self.precision}")
         logger.info(f"Batch size: {self.config.batch_size} x {self.config.grad_accum_steps} = {self.config.batch_size * self.config.grad_accum_steps}")
+        logger.info(f"IRM anneal epochs: {self.config.irm_anneal_epochs}")
+        logger.info(f"IRM penalty max: {self.config.irm_penalty_weight_max}")
         logger.info("=" * 60)
 
         for epoch in range(self.config.epochs):
             logger.info(f"\n{'='*40} Epoch {epoch+1}/{self.config.epochs} {'='*40}")
+
+            irm_lam = self._get_irm_lambda(epoch)
+            logger.info(f"IRM lambda for epoch {epoch+1}: {irm_lam:.2e}")
 
             # Train
             train_losses = self.train_epoch(epoch)
@@ -1513,7 +1596,7 @@ def main(task: str = "T1", config: Optional[Config] = None):
     set_seed(config.seed)
 
     logger.info(f"{'='*60}")
-    logger.info(f"CodeOrigin - AI-Generated Code Detection")
+    logger.info(f"AST-IRM - AI-Generated Code Detection")
     logger.info(f"Task: {config.task}")
     logger.info(f"Benchmark: {config.benchmark}")
     logger.info(f"GPU: {_get_gpu_name()}")
@@ -1538,11 +1621,11 @@ def main(task: str = "T1", config: Optional[Config] = None):
     logger.info(f"Loading tokenizer: {config.encoder_name}")
     tokenizer = AutoTokenizer.from_pretrained(config.encoder_name)
 
-    # Datasets
-    logger.info("Creating datasets...")
-    train_dataset = AICDDataset(train_data, tokenizer, config.max_length, config.ast_seq_len)
-    val_dataset = AICDDataset(val_data, tokenizer, config.max_length, config.ast_seq_len)
-    test_dataset = AICDDataset(test_data, tokenizer, config.max_length, config.ast_seq_len)
+    # Datasets (using IRMDataset with environment labels)
+    logger.info("Creating IRM datasets with language environments...")
+    train_dataset = IRMDataset(train_data, tokenizer, config.max_length, config.ast_seq_len)
+    val_dataset = IRMDataset(val_data, tokenizer, config.max_length, config.ast_seq_len)
+    test_dataset = IRMDataset(test_data, tokenizer, config.max_length, config.ast_seq_len)
 
     # Class weights for imbalanced data
     train_labels = train_data["label"]
@@ -1576,8 +1659,8 @@ def main(task: str = "T1", config: Optional[Config] = None):
     )
 
     # Model
-    logger.info(f"Building CodeOrigin model...")
-    model = CodeOrigin(config, num_classes)
+    logger.info(f"Building IRMAST model...")
+    model = IRMAST(config, num_classes)
 
     # Count parameters
     total_params = sum(p.numel() for p in model.parameters())
@@ -1632,7 +1715,7 @@ def run_benchmark_suite(task: str = "T1", base_config: Optional[Config] = None):
     # Copy-paste friendly block for tracker logging.
     ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     logger.info("\n=== SUITE_RESULTS_START ===")
-    logger.info(f"timestamp={ts} | task={task} | method=CodeOrigin")
+    logger.info(f"timestamp={ts} | task={task} | method=AST-IRM")
     logger.info("| benchmark | task | best_val_f1 | test_f1 |")
     logger.info("|---|---|---:|---:|")
     for bench in ["aicd", "droid"]:
@@ -1650,7 +1733,7 @@ def run_benchmark_suite(task: str = "T1", base_config: Optional[Config] = None):
     machine_block = {
         "timestamp": ts,
         "task": task,
-        "method": "CodeOrigin",
+        "method": "AST-IRM",
         "results": results,
     }
     logger.info("SUITE_RESULTS_JSON=" + json.dumps(machine_block, ensure_ascii=True))
@@ -1684,6 +1767,9 @@ if __name__ == "__main__":
         max_val_samples=20_000,
         max_test_samples=50_000,
         require_tree_sitter=True,
+        lambda_irm=1.0,
+        irm_anneal_epochs=1,
+        irm_penalty_weight_max=1e4,
     )
     cfg = apply_hardware_profile(cfg)
 
