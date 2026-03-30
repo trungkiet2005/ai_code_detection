@@ -24,12 +24,12 @@ All methods build on `exp00_codeorigin.py` (CodeOrigin baseline) with novel comp
 | exp05 | **OSCP** | Frobenius norm orthogonal penalty + Variance-Invariant Latent Whitening + SupCon | `L_CE + λ_ortho·‖Cov‖²_F + λ_whiten·L_W + λ_supcon·L_SupCon` | A (Must-Run) | Pending |
 | exp06 | **AST-IRM** | Invariant Risk Minimization across language environments + annealed IRM penalty | `Σ_e L_CE(e) + λ_irm·Σ_e ‖∇_{w=1}L_CE(e)·w‖²` | B (High Novelty) | Pending |
 | exp07 | **DomainMix** | Comment stripping + variable normalization + embedding Mixup. Attacks domain shortcuts directly | `L_focal + λ_mixup·L_mixup` | A+ (Paper-guided) | Done (suite 5 runs) |
-| exp08 | **MoE-Code** | Mixture-of-Experts head (K=4, top-2 routing) with load balancing. Specialized expert per domain/language | `L_focal + λ_balance·L_load_balance` | A+ (Architectural) | Pending |
-| exp09 | **TokenStat** | Token distribution statistics (entropy, burstiness, TTR, Yule-K) + neural dual-head with soft gate | `L_focal (gated) + 0.3·L_neural + 0.3·L_stat` | A+ (Paper-guided) | Pending |
+| exp08 | **MoE-Code** | Mixture-of-Experts head (K=4, top-2 routing) with load balancing. Specialized expert per domain/language | `L_focal + λ_balance·L_load_balance` | A+ (Architectural) | Done (suite 5 runs) |
+| exp09 | **TokenStat** | Token distribution statistics (entropy, burstiness, TTR, Yule-K) + neural dual-head with soft gate | `L_focal (gated) + 0.3·L_neural + 0.3·L_stat` | A+ (Paper-guided) | Done (suite 5 runs) |
 | exp10 | **MetaDomain** | Reptile meta-learning: languages-as-tasks, learns domain-agnostic initialization | `Reptile: θ += β·(θ' - θ)` | S (Paradigm shift) | Pending |
-| exp11 | **SpectralCode** | FFT spectral analysis on token sequences. Multi-scale (32-256) frequency band features | `L_focal (gated) + 0.3·L_neural + 0.3·L_spectral` | S (Cross-domain transfer) | Pending |
+| exp11 | **SpectralCode** | FFT spectral analysis on token sequences. Multi-scale (32-256) frequency band features | `L_focal (gated) + 0.3·L_neural + 0.3·L_spectral` | S (Cross-domain transfer) | Done (suite 5 runs) |
 | exp12 | **WatermarkStat** | Watermark-detection-inspired: green-list proxy, n-gram entropy, Zipf deviation, chi-sq | `L_focal (gated) + 0.3·L_neural + 0.3·L_wmark` | S (Cross-domain transfer) | Pending |
-| exp13 | **SlotCode** | Slot Attention decomposes code into K structural slots. Slot consistency = detection signal | `L_task + 0.3·L_agg + 0.2·L_consist` | S (Object-centric) | Pending |
+| exp13 | **SlotCode** | Slot Attention decomposes code into K structural slots. Slot consistency = detection signal | `L_task + 0.3·L_agg + 0.2·L_consist` | S (Object-centric) | Done (suite 5 runs) |
 
 ---
 
@@ -58,12 +58,12 @@ All methods build on `exp00_codeorigin.py` (CodeOrigin baseline) with novel comp
 | exp05 | OSCP | T1 | 3 | 0.9938 | 0.2634 | 0.2469 | - | - | Whitening loss dominates (~206). Worse than baseline (-0.02) |
 | exp06 | AST-IRM | T1 | 3 | 0.9944 | 0.2930 | 0.2725 | - | - | IRM penalty explodes epoch 3 (λ=5000). No OOD gain vs baseline |
 | exp07 | DomainMix | T1/T2/T3 | 3 | 0.9880 / 0.0965 / 0.6443 | 0.3088 / 0.1048 / 0.4454 | 0.2755 / 0.0935 / 0.5641 | - | - | Severe val-test gap on AICD (esp. T1,T2); best AICD test on T3 |
-| exp08 | MoE-Code | T1 | 3 | - | - | - | - | - | K=4 experts, top-2 routing |
-| exp09 | TokenStat | T1 | 3 | - | - | - | - | - | Token stats + neural dual-head |
+| exp08 | MoE-Code | T1/T2/T3 | 3 | 0.9946 / 0.1467 / 0.7676 | 0.2825 / 0.1455 / 0.5440 | 0.2683 / 0.1250 / 0.6286 | - | - | Better than exp07 on T2/T3, but AICD T1 OOD gap remains severe |
+| exp09 | TokenStat | T1/T2/T3 | 3 | 0.9955 / 0.1747 / 0.7813 | 0.2589 / 0.1787 / 0.5521 | 0.2312 / 0.1666 / 0.6455 | - | - | Strong gains on AICD T2/T3 vs exp08; T1 still severe OOD collapse |
 | exp10 | MetaDomain | T1 | 3 | - | - | - | - | - | Reptile meta-learning |
-| exp11 | SpectralCode | T1 | 3 | - | - | - | - | - | FFT spectral features |
+| exp11 | SpectralCode | T1/T2/T3 | 3 | 0.9956 / 0.1785 / 0.7848 | 0.2983 / 0.1893 / 0.5631 | 0.2918 / 0.1797 / 0.6524 | - | - | Best AICD T1 among exp08/09/11; T2/T3 slightly stronger than exp09 |
 | exp12 | WatermarkStat | T1 | 3 | - | - | - | - | - | Watermark-inspired stats |
-| exp13 | SlotCode | T1 | 3 | - | - | - | - | - | Slot Attention decomposition |
+| exp13 | SlotCode | T1/T2/T3 | 3 | 0.9951 / 0.1485 / 0.7620 | 0.2569 / 0.1596 / 0.5706 | 0.2156 / 0.1571 / 0.6404 | - | - | Improves AICD T3 but underperforms exp11 on T1/T2 and keeps large T1 OOD gap |
 
 ### DroidCollection (Benchmark B)
 
@@ -77,12 +77,39 @@ All methods build on `exp00_codeorigin.py` (CodeOrigin baseline) with novel comp
 | exp05 | OSCP | T1 | 3 | 0.9640 | 0.9649 | 0.9649 | Slightly below baseline. Whitening hurts capacity |
 | exp06 | AST-IRM | T1 | 3 | 0.9674 | 0.9685 | 0.9685 | Stable. IRM penalty ~0.073 |
 | exp07 | DomainMix | T3/T4 | 3 | 0.7273 / 0.7071 | 0.7278 / 0.7036 | 0.7930 / 0.7706 | Stable and strong on Droid; close val-test alignment |
-| exp08 | MoE-Code | T1 | 3 | - | - | - | |
-| exp09 | TokenStat | T1 | 3 | - | - | - | |
+| exp08 | MoE-Code | T3/T4 | 3 | 0.8504 / 0.8460 | 0.8526 / 0.8454 | 0.8914 / 0.8785 | Strongest so far on Droid; val-test alignment is very close |
+| exp09 | TokenStat | T3/T4 | 3 | 0.8574 / 0.8478 | 0.8556 / 0.8488 | 0.8941 / 0.8815 | Very strong and stable on Droid; best among current methods on T3/T4 |
 | exp10 | MetaDomain | T1 | 3 | - | - | - | |
-| exp11 | SpectralCode | T1 | 3 | - | - | - | |
+| exp11 | SpectralCode | T3/T4 | 3 | 0.8500 / 0.8494 | 0.8473 / 0.8467 | 0.8877 / 0.8802 | Strong on Droid but slightly below exp09 on both tasks |
 | exp12 | WatermarkStat | T1 | 3 | - | - | - | |
-| exp13 | SlotCode | T1 | 3 | - | - | - | |
+| exp13 | SlotCode | T3/T4 | 3 | 0.8429 / 0.8388 | 0.8432 / 0.8337 | 0.8821 / 0.8679 | Solid Droid performance but below exp09/exp11 across both tasks |
+
+---
+
+## Leaderboard (Current Runs)
+
+Methods included: `exp07`, `exp08`, `exp09`, `exp11`, `exp13` (all with 5-run suite done).
+
+| Rank | Task | Best Method | Test Macro-F1 | Runner-up | Delta |
+|------|------|-------------|---------------|-----------|-------|
+| 1 | AICD T1 | exp07 DomainMix | 0.3088 | exp11 SpectralCode (0.2983) | +0.0105 |
+| 1 | AICD T2 | exp11 SpectralCode | 0.1893 | exp09 TokenStat (0.1787) | +0.0106 |
+| 1 | AICD T3 | exp13 SlotCode | 0.5706 | exp11 SpectralCode (0.5631) | +0.0075 |
+| 1 | DROID T3 | exp09 TokenStat | 0.8556 | exp08 MoE-Code (0.8526) | +0.0030 |
+| 1 | DROID T4 | exp09 TokenStat | 0.8488 | exp11 SpectralCode (0.8467) | +0.0021 |
+
+| Rank | Method | Avg Macro-F1 (5 tasks) | Avg AICD (T1/T2/T3) | Avg DROID (T3/T4) | Status |
+|------|--------|--------------------------|----------------------|-------------------|--------|
+| 1 | exp11 SpectralCode | 0.5489 | 0.3502 | 0.8470 | Best overall currently |
+| 2 | exp09 TokenStat | 0.5388 | 0.3299 | 0.8522 | Best on Droid aggregate |
+| 3 | exp08 MoE-Code | 0.5340 | 0.3240 | 0.8490 | Strong, balanced |
+| 4 | exp13 SlotCode | 0.5328 | 0.3290 | 0.8385 | Best AICD T3 single-task |
+| 5 | exp07 DomainMix | 0.4581 | 0.2863 | 0.7157 | Baseline among new methods |
+
+Quick take:
+- If you want **best overall now** -> `exp11 SpectralCode`.
+- If you want **best Droid robustness** -> `exp09 TokenStat`.
+- For **AICD T1 OOD bottleneck**, no method solves it yet (all still show large val-test collapse).
 
 ---
 
@@ -155,6 +182,46 @@ All methods build on `exp00_codeorigin.py` (CodeOrigin baseline) with novel comp
 - Droid final test Macro-F1: `T3=0.7278`, `T4=0.7036`
 - Notable behavior: very high val on AICD T1 (`0.9880`) but low test (`0.3088`) indicates unresolved OOD shortcut issue
 - Overall: DomainMix is robust on Droid, but does not solve AICD OOD generalization (except partial gain on T3)
+
+### exp08 - MoE-Code (Tier A+ Architectural)
+
+**Run timestamp:** `2026-03-30 11:05:45` (full suite done)
+
+- Preflight + full suite completed for 5 runs on H100 BF16: `aicd_T1`, `aicd_T2`, `aicd_T3`, `droid_T3`, `droid_T4`
+- AICD final test Macro-F1: `T1=0.2825`, `T2=0.1455`, `T3=0.5440`
+- Droid final test Macro-F1: `T3=0.8526`, `T4=0.8454`
+- Best Val Macro-F1: `AICD_T1=0.9946`, `AICD_T2=0.1467`, `AICD_T3=0.7676`, `DROID_T3=0.8504`, `DROID_T4=0.8460`
+- Overall: MoE routing substantially improves Droid and lifts AICD T2/T3 vs exp07, but still fails to close the AICD T1 OOD val-test gap
+
+### exp09 - TokenStat (Tier A+ Paper-guided)
+
+**Run timestamp:** `2026-03-30 11:17:24` (full suite done)
+
+- Preflight + full suite completed for 5 runs on H100 BF16: `aicd_T1`, `aicd_T2`, `aicd_T3`, `droid_T3`, `droid_T4`
+- AICD final test Macro-F1: `T1=0.2589`, `T2=0.1787`, `T3=0.5521`
+- Droid final test Macro-F1: `T3=0.8556`, `T4=0.8488`
+- Best Val Macro-F1: `AICD_T1=0.9955`, `AICD_T2=0.1747`, `AICD_T3=0.7813`, `DROID_T3=0.8574`, `DROID_T4=0.8478`
+- Overall: Token statistics + gated fusion improves AICD T2/T3 and sets strongest Droid performance so far, but AICD T1 OOD shortcut issue remains unresolved
+
+### exp11 - SpectralCode (Tier S Cross-domain transfer)
+
+**Run timestamp:** `2026-03-30 11:16:35` (full suite done)
+
+- Preflight + full suite completed for 5 runs on H100 BF16: `aicd_T1`, `aicd_T2`, `aicd_T3`, `droid_T3`, `droid_T4`
+- AICD final test Macro-F1: `T1=0.2983`, `T2=0.1893`, `T3=0.5631`
+- Droid final test Macro-F1: `T3=0.8473`, `T4=0.8467`
+- Best Val Macro-F1: `AICD_T1=0.9956`, `AICD_T2=0.1785`, `AICD_T3=0.7848`, `DROID_T3=0.8500`, `DROID_T4=0.8494`
+- Overall: spectral features give the strongest AICD performance so far (especially T1/T3), but Droid remains slightly better with TokenStat and the AICD T1 OOD gap is still present
+
+### exp13 - SlotCode (Tier S Object-centric)
+
+**Run timestamp:** `2026-03-30 11:07:11` (full suite done)
+
+- Preflight + full suite completed for 5 runs on H100 BF16: `aicd_T1`, `aicd_T2`, `aicd_T3`, `droid_T3`, `droid_T4`
+- AICD final test Macro-F1: `T1=0.2569`, `T2=0.1596`, `T3=0.5706`
+- Droid final test Macro-F1: `T3=0.8432`, `T4=0.8337`
+- Best Val Macro-F1: `AICD_T1=0.9951`, `AICD_T2=0.1485`, `AICD_T3=0.7620`, `DROID_T3=0.8429`, `DROID_T4=0.8388`
+- Overall: slot decomposition helps on AICD T3, but ranking is below SpectralCode/TokenStat on most tasks and does not address AICD T1 OOD collapse
 
 ---
 
