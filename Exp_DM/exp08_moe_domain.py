@@ -1,6 +1,18 @@
 """
-CodeOrigin: Domain-Invariant AI-Generated Code Detection via
-Style-Content Disentanglement and Hierarchical Contrastive Learning
+[EXP08] MoE-Code: Mixture-of-Experts with Language-Routed Gating for
+OOD-Robust AI-Generated Code Detection
+
+Key Innovation:
+- Mixture-of-Experts classification head with K=4 experts
+- Router gating based on structural code features (language proxy)
+- Load balancing loss prevents expert collapse
+- Shared ModernBERT encoder + specialized expert classifiers
+- Each expert learns domain/language-specific decision boundaries
+
+Loss: L = L_focal + lambda_balance * L_load_balance
+
+Reference: Addresses cross-domain/language OOD gap in AICD-Bench
+Target: NeurIPS 2026 ORAL
 
 Single-file implementation for Kaggle.
 Target: AICD-Bench + DroidCollection
@@ -10,9 +22,7 @@ Target: AICD-Bench + DroidCollection
 Usage on Kaggle:
     1. Upload this file to a Kaggle notebook
     2. Run: !pip install datasets transformers accelerate tree-sitter tree-sitter-languages
-    3. Execute the cells or run: python codeorigin.py --task T1
-
-Author: [Your Name]
+    3. Execute the cells or run: python exp08_moe_domain.py --task T1
 """
 
 import os
@@ -188,18 +198,11 @@ class Config:
     warmup_ratio: float = 0.1
     max_grad_norm: float = 1.0
 
-    # Loss weights
-    lambda_disentangle: float = 0.1
-    lambda_adversarial: float = 0.5
-    lambda_contrastive: float = 0.3
-    lambda_reconstruct: float = 0.1
-
-    # Contrastive learning
-    temperature: float = 0.07
-    prototype_momentum: float = 0.99
-
-    # Domain adversarial
-    grl_lambda_max: float = 1.0  # max lambda for GRL schedule
+    # MoE specific
+    num_experts: int = 4
+    expert_hidden_dim: int = 256
+    moe_top_k: int = 2  # top-k experts per sample
+    lambda_balance: float = 0.1  # load balancing loss weight
 
     # Data
     max_train_samples: int = 100_000  # subsample for Kaggle feasibility
@@ -223,7 +226,7 @@ class Config:
     device: str = "cuda" if torch.cuda.is_available() else "cpu"
     pin_memory: bool = True
     non_blocking: bool = True
-    save_dir: str = "./codeorigin_checkpoints"
+    save_dir: str = "./moe_code_checkpoints"
     log_every: int = 100
     eval_every: int = 1000
 
@@ -744,31 +747,6 @@ def preflight_benchmark_suite(run_plan: List[Tuple[str, str]], base_config: Conf
 # Model Components
 # ============================================================================
 
-class GradientReversalFunction(torch.autograd.Function):
-    """Gradient Reversal Layer for domain adversarial training."""
-
-    @staticmethod
-    def forward(ctx, x, lambda_val):
-        ctx.lambda_val = lambda_val
-        return x.clone()
-
-    @staticmethod
-    def backward(ctx, grad_output):
-        return -ctx.lambda_val * grad_output, None
-
-
-class GradientReversalLayer(nn.Module):
-    def __init__(self):
-        super().__init__()
-        self.lambda_val = 0.0
-
-    def set_lambda(self, val):
-        self.lambda_val = val
-
-    def forward(self, x):
-        return GradientReversalFunction.apply(x, self.lambda_val)
-
-
 class ASTEncoder(nn.Module):
     """Encodes AST node type sequences into a fixed-size representation."""
 
@@ -852,194 +830,92 @@ class CrossAttentionFusion(nn.Module):
         return fused
 
 
-class StyleContentDisentangler(nn.Module):
-    """
-    Disentangles code representation into style (authorship) and content (semantics).
-    Uses variational approach with mutual information minimization.
-    """
-
-    def __init__(self, input_dim: int, z_style_dim: int, z_content_dim: int):
+class Expert(nn.Module):
+    """Single expert classifier."""
+    def __init__(self, input_dim: int, hidden_dim: int, num_classes: int):
         super().__init__()
-
-        # Style encoder: captures HOW code is written
-        self.style_encoder = nn.Sequential(
-            nn.Linear(input_dim, input_dim),
-            nn.LayerNorm(input_dim),
+        self.net = nn.Sequential(
+            nn.Linear(input_dim, hidden_dim),
+            nn.LayerNorm(hidden_dim),
             nn.GELU(),
             nn.Dropout(0.1),
-            nn.Linear(input_dim, z_style_dim * 2),  # mean + logvar
+            nn.Linear(hidden_dim, num_classes),
         )
 
-        # Content encoder: captures WHAT code does
-        self.content_encoder = nn.Sequential(
-            nn.Linear(input_dim, input_dim),
-            nn.LayerNorm(input_dim),
-            nn.GELU(),
-            nn.Dropout(0.1),
-            nn.Linear(input_dim, z_content_dim * 2),  # mean + logvar
-        )
+    def forward(self, x):
+        return self.net(x)
 
-        # Reconstruction decoder
-        self.decoder = nn.Sequential(
-            nn.Linear(z_style_dim + z_content_dim, input_dim),
-            nn.LayerNorm(input_dim),
-            nn.GELU(),
-            nn.Linear(input_dim, input_dim),
-        )
 
-        # CLUB MI estimator (Cheng et al., 2020)
-        self.mi_estimator = nn.Sequential(
-            nn.Linear(z_style_dim, 256),
-            nn.ReLU(),
-            nn.Linear(256, z_content_dim),
-        )
+class MoEHead(nn.Module):
+    """Mixture-of-Experts classification head with top-k routing."""
+    def __init__(self, input_dim: int, num_experts: int, expert_hidden: int,
+                 num_classes: int, top_k: int = 2):
+        super().__init__()
+        self.num_experts = num_experts
+        self.top_k = top_k
+        self.num_classes = num_classes
 
-        self.z_style_dim = z_style_dim
-        self.z_content_dim = z_content_dim
+        # Router: maps input to expert weights
+        self.router = nn.Linear(input_dim, num_experts)
 
-    def reparameterize(self, mu: torch.Tensor, logvar: torch.Tensor) -> torch.Tensor:
-        """Reparameterization trick."""
-        if self.training:
-            std = torch.exp(0.5 * logvar)
-            eps = torch.randn_like(std)
-            return mu + eps * std
-        return mu
+        # Experts
+        self.experts = nn.ModuleList([
+            Expert(input_dim, expert_hidden, num_classes)
+            for _ in range(num_experts)
+        ])
 
-    def forward(self, h_code: torch.Tensor) -> Dict[str, torch.Tensor]:
-        # Encode style
-        style_params = self.style_encoder(h_code)
-        style_mu, style_logvar = style_params.chunk(2, dim=-1)
-        z_style = self.reparameterize(style_mu, style_logvar)
+    def forward(self, x: torch.Tensor) -> Dict[str, torch.Tensor]:
+        batch_size = x.size(0)
 
-        # Encode content
-        content_params = self.content_encoder(h_code)
-        content_mu, content_logvar = content_params.chunk(2, dim=-1)
-        z_content = self.reparameterize(content_mu, content_logvar)
+        # Router logits
+        router_logits = self.router(x)  # (B, num_experts)
 
-        # Reconstruct
-        h_recon = self.decoder(torch.cat([z_style, z_content], dim=-1))
+        # Top-k gating
+        top_k_logits, top_k_indices = torch.topk(router_logits, self.top_k, dim=-1)
+        top_k_gates = F.softmax(top_k_logits, dim=-1)  # (B, top_k)
 
-        # MI estimation (CLUB upper bound)
-        content_pred = self.mi_estimator(z_style.detach())
+        # Compute expert outputs (only for selected experts)
+        # For simplicity, compute all experts and mask
+        all_expert_outputs = torch.stack([
+            expert(x) for expert in self.experts
+        ], dim=1)  # (B, num_experts, num_classes)
+
+        # Gather top-k expert outputs
+        top_k_expert_outputs = torch.gather(
+            all_expert_outputs, 1,
+            top_k_indices.unsqueeze(-1).expand(-1, -1, self.num_classes)
+        )  # (B, top_k, num_classes)
+
+        # Weighted combination
+        logits = (top_k_gates.unsqueeze(-1) * top_k_expert_outputs).sum(dim=1)  # (B, num_classes)
+
+        # Load balancing: fraction of tokens routed to each expert should be uniform
+        router_probs = F.softmax(router_logits, dim=-1)  # (B, num_experts)
+        expert_load = router_probs.mean(dim=0)  # (num_experts,)
+        target_load = torch.ones_like(expert_load) / self.num_experts
+        balance_loss = ((expert_load - target_load) ** 2).sum() * self.num_experts
 
         return {
-            "z_style": z_style,
-            "z_content": z_content,
-            "style_mu": style_mu,
-            "style_logvar": style_logvar,
-            "content_mu": content_mu,
-            "content_logvar": content_logvar,
-            "h_recon": h_recon,
-            "content_pred": content_pred,
+            "logits": logits,
+            "balance_loss": balance_loss,
+            "router_probs": router_probs,
+            "expert_load": expert_load,
         }
 
-    def compute_mi_loss(self, z_style: torch.Tensor, z_content: torch.Tensor) -> torch.Tensor:
-        """CLUB MI upper bound estimation."""
-        content_pred = self.mi_estimator(z_style)
-
-        # Positive samples: matched pairs
-        positive = -0.5 * ((z_content - content_pred) ** 2).sum(dim=-1)
-
-        # Negative samples: random shuffle
-        z_content_shuffle = z_content[torch.randperm(z_content.size(0), device=z_content.device)]
-        negative = -0.5 * ((z_content_shuffle - content_pred) ** 2).sum(dim=-1)
-
-        mi_upper = (positive - negative).mean()
-        return F.relu(mi_upper)  # Ensure non-negative
-
-    def compute_kl_loss(
-        self,
-        style_mu: torch.Tensor, style_logvar: torch.Tensor,
-        content_mu: torch.Tensor, content_logvar: torch.Tensor,
-    ) -> torch.Tensor:
-        """KL divergence to regularize latent spaces."""
-        kl_style = -0.5 * (1 + style_logvar - style_mu.pow(2) - style_logvar.exp()).sum(dim=-1).mean()
-        kl_content = -0.5 * (1 + content_logvar - content_mu.pow(2) - content_logvar.exp()).sum(dim=-1).mean()
-        return 0.5 * (kl_style + kl_content)
-
-
-class PrototypicalContrastiveHead(nn.Module):
-    """
-    Hierarchical prototypical contrastive learning for family attribution.
-    Maintains learnable prototypes for each class.
-    """
-
-    def __init__(self, input_dim: int, num_classes: int, temperature: float = 0.07):
-        super().__init__()
-        self.prototypes = nn.Parameter(torch.randn(num_classes, input_dim))
-        nn.init.xavier_uniform_(self.prototypes)
-        self.temperature = temperature
-        self.num_classes = num_classes
-        self.classifier = nn.Linear(input_dim, num_classes)
-
-    def forward(self, z_style: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
-        """
-        Returns:
-            logits: classification logits
-            proto_logits: prototype-based similarity logits
-        """
-        logits = self.classifier(z_style)
-
-        # Prototype-based classification
-        z_norm = F.normalize(z_style, dim=-1)
-        p_norm = F.normalize(self.prototypes, dim=-1)
-        proto_logits = torch.mm(z_norm, p_norm.t()) / self.temperature
-
-        return logits, proto_logits
-
-    def contrastive_loss(
-        self, z_style: torch.Tensor, labels: torch.Tensor
-    ) -> torch.Tensor:
-        """Supervised prototypical contrastive loss."""
-        z_norm = F.normalize(z_style, dim=-1)
-        p_norm = F.normalize(self.prototypes, dim=-1)
-
-        # Similarity to all prototypes
-        sim = torch.mm(z_norm, p_norm.t()) / self.temperature  # (B, num_classes)
-
-        # Cross-entropy with prototype targets
-        loss = F.cross_entropy(sim, labels)
-
-        # Pull toward own prototype, push from others (SupCon-style)
-        batch_size = z_style.size(0)
-        if batch_size < 2:
-            return loss
-
-        # Pairwise similarity in batch
-        z_sim = torch.mm(z_norm, z_norm.t()) / self.temperature  # (B, B)
-
-        # Mask: same class = positive (no grad, safe for in-place)
-        label_mask = (labels.unsqueeze(0) == labels.unsqueeze(1))  # (B, B)
-        self_mask = ~torch.eye(batch_size, dtype=torch.bool, device=z_style.device)
-        label_mask = label_mask & self_mask  # exclude self
-
-        if label_mask.sum() == 0:
-            return loss
-
-        # SupCon loss - avoid in-place ops on tensors in computation graph
-        exp_sim = torch.exp(z_sim) * self_mask.float()  # zero out self-similarity
-
-        log_prob = z_sim - torch.log(exp_sim.sum(dim=1, keepdim=True) + 1e-8)
-        mean_log_prob = (label_mask * log_prob).sum(dim=1) / (label_mask.sum(dim=1) + 1e-8)
-        supcon_loss = -mean_log_prob[label_mask.sum(dim=1) > 0].mean()
-
-        return loss + 0.5 * supcon_loss
-
 
 # ============================================================================
-# Full Model: CodeOrigin
+# Full Model: MoE-Code
 # ============================================================================
 
-class CodeOrigin(nn.Module):
+class MoECode(nn.Module):
     """
-    CodeOrigin: Domain-Invariant AI-Generated Code Detection via
-    Style-Content Disentanglement and Hierarchical Contrastive Learning.
+    MoE-Code: Mixture-of-Experts with Language-Routed Gating for
+    OOD-Robust AI-Generated Code Detection.
 
     Components:
     1. Multi-Granularity Encoder (token + AST + structural)
-    2. Style-Content Disentanglement
-    3. Cross-Domain Adversarial Alignment
-    4. Hierarchical Prototypical Contrastive Learning
+    2. Cross-Attention Fusion
+    3. MoE Classification Head with top-k routing and load balancing
     """
 
     def __init__(self, config: Config, num_classes: int):
@@ -1077,40 +953,14 @@ class CodeOrigin(nn.Module):
             output_dim=fusion_dim,
         )
 
-        # === Component 2: Style-Content Disentanglement ===
-        self.disentangler = StyleContentDisentangler(
+        # === Component 2: MoE Classification Head ===
+        self.moe_head = MoEHead(
             input_dim=fusion_dim,
-            z_style_dim=config.z_style_dim,
-            z_content_dim=config.z_content_dim,
-        )
-
-        # === Component 3: Domain Adversarial ===
-        self.grl = GradientReversalLayer()
-        self.domain_lang_classifier = nn.Sequential(
-            nn.Linear(config.z_style_dim, 128),
-            nn.ReLU(),
-            nn.Dropout(0.1),
-            nn.Linear(128, config.num_languages),
-        )
-        self.domain_type_classifier = nn.Sequential(
-            nn.Linear(config.z_style_dim, 128),
-            nn.ReLU(),
-            nn.Dropout(0.1),
-            nn.Linear(128, config.num_domains),
-        )
-
-        # === Component 4: Task Head ===
-        self.proto_head = PrototypicalContrastiveHead(
-            input_dim=config.z_style_dim,
+            num_experts=config.num_experts,
+            expert_hidden=config.expert_hidden_dim,
             num_classes=num_classes,
-            temperature=config.temperature,
+            top_k=config.moe_top_k,
         )
-
-        # Content auxiliary head (predict language from z_content for disentanglement)
-        self.content_aux_head = nn.Linear(config.z_content_dim, config.num_languages)
-
-        # Focal loss gamma
-        self.focal_gamma = 2.0
 
     def forward(
         self,
@@ -1139,39 +989,14 @@ class CodeOrigin(nn.Module):
         # Fuse
         h_code = self.fusion(token_repr, ast_repr, struct_repr)  # (B, fusion_dim)
 
-        # === Style-Content Disentanglement ===
-        disent_out = self.disentangler(h_code)
-        z_style = disent_out["z_style"]      # (B, z_style_dim)
-        z_content = disent_out["z_content"]  # (B, z_content_dim)
+        # === MoE Classification ===
+        moe_out = self.moe_head(h_code)
 
-        # === Task Prediction ===
-        logits, proto_logits = self.proto_head(z_style)
-
-        # === Domain Adversarial (on z_style) ===
-        z_style_grl = self.grl(z_style)
-        domain_lang_logits = self.domain_lang_classifier(z_style_grl)
-        domain_type_logits = self.domain_type_classifier(z_style_grl)
-
-        # === Content Auxiliary ===
-        content_lang_logits = self.content_aux_head(z_content)
-
-        output = {
-            "logits": logits,
-            "proto_logits": proto_logits,
-            "z_style": z_style,
-            "z_content": z_content,
-            "h_code": h_code,
-            "h_recon": disent_out["h_recon"],
-            "domain_lang_logits": domain_lang_logits,
-            "domain_type_logits": domain_type_logits,
-            "content_lang_logits": content_lang_logits,
-            "style_mu": disent_out["style_mu"],
-            "style_logvar": disent_out["style_logvar"],
-            "content_mu": disent_out["content_mu"],
-            "content_logvar": disent_out["content_logvar"],
+        return {
+            "logits": moe_out["logits"],
+            "balance_loss": moe_out["balance_loss"],
+            "expert_load": moe_out["expert_load"],
         }
-
-        return output
 
 
 # ============================================================================
@@ -1194,79 +1019,24 @@ class FocalLoss(nn.Module):
 
 
 def compute_all_losses(
-    model: CodeOrigin,
+    model: MoECode,
     outputs: Dict[str, torch.Tensor],
     labels: torch.Tensor,
     config: Config,
     focal_loss_fn: Optional[FocalLoss] = None,
 ) -> Dict[str, torch.Tensor]:
-    """Compute all loss components."""
-
-    # 1. Task loss (focal loss for class imbalance)
+    """Compute all loss components: focal task loss + load balancing."""
     if focal_loss_fn is None:
         focal_loss_fn = FocalLoss(gamma=2.0)
+
     task_loss = focal_loss_fn(outputs["logits"], labels)
-
-    # Prototype cross-entropy loss
-    proto_loss = F.cross_entropy(outputs["proto_logits"], labels)
-
-    # Contrastive loss
-    contrastive_loss = model.proto_head.contrastive_loss(outputs["z_style"], labels)
-
-    # 2. Disentanglement losses
-    # MI minimization between z_style and z_content
-    mi_loss = model.disentangler.compute_mi_loss(outputs["z_style"], outputs["z_content"])
-
-    # KL regularization
-    kl_loss = model.disentangler.compute_kl_loss(
-        outputs["style_mu"], outputs["style_logvar"],
-        outputs["content_mu"], outputs["content_logvar"],
-    )
-
-    # Reconstruction loss
-    recon_loss = F.mse_loss(outputs["h_recon"], outputs["h_code"].detach())
-
-    disentangle_loss = mi_loss + 0.01 * kl_loss
-
-    # 3. Domain adversarial loss: encourage z_style to be domain-invariant
-    #    by maximizing entropy of domain predictions (uniform = no domain info)
-    #    GRL handles gradient reversal so the encoder learns to confuse classifiers
-    domain_lang_probs = F.softmax(outputs["domain_lang_logits"], dim=-1)
-    # Target: uniform distribution over languages
-    uniform_lang = torch.ones_like(domain_lang_probs) / domain_lang_probs.size(-1)
-    adversarial_lang = F.kl_div(
-        torch.log(domain_lang_probs + 1e-8), uniform_lang, reduction="batchmean"
-    )
-
-    domain_type_probs = F.softmax(outputs["domain_type_logits"], dim=-1)
-    uniform_type = torch.ones_like(domain_type_probs) / domain_type_probs.size(-1)
-    adversarial_type = F.kl_div(
-        torch.log(domain_type_probs + 1e-8), uniform_type, reduction="batchmean"
-    )
-
-    # Minimize KL to uniform = push toward domain-invariant representation
-    adversarial_loss = adversarial_lang + adversarial_type
-
-    # Total loss
-    total_loss = (
-        task_loss
-        + 0.3 * proto_loss
-        + config.lambda_contrastive * contrastive_loss
-        + config.lambda_disentangle * disentangle_loss
-        + config.lambda_adversarial * adversarial_loss
-        + config.lambda_reconstruct * recon_loss
-    )
+    balance_loss = outputs["balance_loss"]
+    total_loss = task_loss + config.lambda_balance * balance_loss
 
     return {
         "total": total_loss,
         "task": task_loss,
-        "proto": proto_loss,
-        "contrastive": contrastive_loss,
-        "disentangle": disentangle_loss,
-        "adversarial": adversarial_loss,
-        "recon": recon_loss,
-        "mi": mi_loss,
-        "kl": kl_loss,
+        "balance": balance_loss,
     }
 
 
@@ -1275,7 +1045,7 @@ def compute_all_losses(
 # ============================================================================
 
 class Trainer:
-    def __init__(self, config: Config, model: CodeOrigin, train_loader, val_loader, test_loader, class_weights=None):
+    def __init__(self, config: Config, model: MoECode, train_loader, val_loader, test_loader, class_weights=None):
         self.config = config
         self.model = model.to(config.device)
         self.train_loader = train_loader
@@ -1317,12 +1087,6 @@ class Trainer:
         total_losses = defaultdict(float)
         num_batches = 0
 
-        # GRL lambda schedule (gradually increase)
-        progress = epoch / self.config.epochs
-        grl_lambda = 2.0 / (1.0 + math.exp(-10 * progress)) - 1.0
-        grl_lambda *= self.config.grl_lambda_max
-        self.model.grl.set_lambda(grl_lambda)
-
         self.optimizer.zero_grad()
 
         for batch_idx, batch in enumerate(self.train_loader):
@@ -1356,13 +1120,17 @@ class Trainer:
                 total_losses[k] += v.item()
             num_batches += 1
 
-            # Log
+            # Log (include expert load distribution)
             if (batch_idx + 1) % self.config.log_every == 0:
                 avg_loss = total_losses["total"] / num_batches
+                avg_balance = total_losses["balance"] / num_batches
                 lr = self.scheduler.get_last_lr()[0]
+                expert_load = outputs["expert_load"].detach().cpu().numpy()
+                expert_load_str = ", ".join(f"{v:.3f}" for v in expert_load)
                 logger.info(
                     f"Epoch {epoch+1} | Step {batch_idx+1}/{len(self.train_loader)} | "
-                    f"Loss: {avg_loss:.4f} | LR: {lr:.2e} | GRL-λ: {grl_lambda:.3f}"
+                    f"Loss: {avg_loss:.4f} | Balance: {avg_balance:.4f} | LR: {lr:.2e} | "
+                    f"Expert load: [{expert_load_str}]"
                 )
 
             # Mid-epoch eval
@@ -1395,11 +1163,7 @@ class Trainer:
             with autocast(device_type=self.config.device, enabled=self.use_amp, dtype=self.amp_dtype):
                 outputs = self.model(input_ids, attention_mask, ast_seq, struct_feat, labels)
 
-            # Normalize both to same scale before ensembling
-            logits_norm = F.softmax(outputs["logits"], dim=-1)
-            proto_norm = F.softmax(outputs["proto_logits"], dim=-1)
-            combined_logits = 0.7 * logits_norm + 0.3 * proto_norm
-            preds = combined_logits.argmax(dim=-1)
+            preds = outputs["logits"].argmax(dim=-1)
 
             all_preds.extend(preds.cpu().numpy())
             all_labels.extend(labels.cpu().numpy())
@@ -1432,7 +1196,7 @@ class Trainer:
 
     def save_checkpoint(self, tag: str = "latest"):
         os.makedirs(self.config.save_dir, exist_ok=True)
-        path = os.path.join(self.config.save_dir, f"codeorigin_{self.config.task}_{tag}.pt")
+        path = os.path.join(self.config.save_dir, f"moecode_{self.config.task}_{tag}.pt")
         torch.save({
             "model_state_dict": self.model.state_dict(),
             "best_f1": self.best_f1,
@@ -1441,7 +1205,7 @@ class Trainer:
         logger.info(f"Saved checkpoint to {path}")
 
     def load_checkpoint(self, tag: str = "best"):
-        path = os.path.join(self.config.save_dir, f"codeorigin_{self.config.task}_{tag}.pt")
+        path = os.path.join(self.config.save_dir, f"moecode_{self.config.task}_{tag}.pt")
         if os.path.exists(path):
             ckpt = torch.load(path, map_location=self.config.device, weights_only=True)
             self.model.load_state_dict(ckpt["model_state_dict"])
@@ -1451,7 +1215,7 @@ class Trainer:
 
     def train(self):
         logger.info("=" * 60)
-        logger.info(f"Starting CodeOrigin Training - Task {self.config.task}")
+        logger.info(f"[EXP08] Starting MoE-Code Training - Task {self.config.task}")
         logger.info(f"Num classes: {self.model.num_classes}")
         logger.info(f"Device: {self.config.device}")
         logger.info(f"Precision: {self.precision}")
@@ -1521,7 +1285,7 @@ def main(task: str = "T1", config: Optional[Config] = None):
     set_seed(config.seed)
 
     logger.info(f"{'='*60}")
-    logger.info(f"CodeOrigin - AI-Generated Code Detection")
+    logger.info(f"[EXP08] MoE-Code - AI-Generated Code Detection")
     logger.info(f"Task: {config.task}")
     logger.info(f"Benchmark: {config.benchmark}")
     logger.info(f"GPU: {_get_gpu_name()}")
@@ -1584,8 +1348,8 @@ def main(task: str = "T1", config: Optional[Config] = None):
     )
 
     # Model
-    logger.info(f"Building CodeOrigin model...")
-    model = CodeOrigin(config, num_classes)
+    logger.info(f"Building MoE-Code model...")
+    model = MoECode(config, num_classes)
 
     # Count parameters
     total_params = sum(p.numel() for p in model.parameters())
@@ -1633,7 +1397,7 @@ def run_benchmark_suite(run_plan: List[Tuple[str, str]], base_config: Optional[C
 
         run_key = f"{bench}_{bench_task}"
         logger.info("\n" + "=" * 70)
-        logger.info(f"BENCHMARK SUITE RUN: {bench.upper()} | task={bench_task}")
+        logger.info(f"[EXP08] BENCHMARK SUITE RUN: {bench.upper()} | task={bench_task}")
         logger.info("=" * 70)
         results[run_key] = main(task=bench_task, config=cfg)
 
@@ -1654,7 +1418,7 @@ def run_benchmark_suite(run_plan: List[Tuple[str, str]], base_config: Optional[C
     # Machine-readable block
     ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     logger.info("\n=== SUITE_RESULTS_START ===")
-    logger.info(f"timestamp={ts} | method=CodeOrigin | runs={len(run_plan)}")
+    logger.info(f"timestamp={ts} | method=EXP08_MoE-Code | runs={len(run_plan)}")
     logger.info("| run_key | best_val_f1 | test_f1 | test_weighted_f1 |")
     logger.info("|---|---:|---:|---:|")
     for run_key, stats in results.items():
@@ -1667,7 +1431,7 @@ def run_benchmark_suite(run_plan: List[Tuple[str, str]], base_config: Optional[C
 
     machine_block = {
         "timestamp": ts,
-        "method": "CodeOrigin",
+        "method": "MoE-Code",
         "run_plan": [f"{b}_{t}" for b, t in run_plan],
         "results": results,
     }

@@ -1,18 +1,16 @@
 """
-CodeOrigin: Domain-Invariant AI-Generated Code Detection via
-Style-Content Disentanglement and Hierarchical Contrastive Learning
+[EXP13] SlotCode: Slot Attention Decomposition for Code Authorship Detection
 
-Single-file implementation for Kaggle.
-Target: AICD-Bench + DroidCollection
-(https://huggingface.co/AICD-bench/AICD-Bench)
-(https://huggingface.co/datasets/project-droid/DroidCollection)
+Key Innovation:
+- Slot Attention decomposes code representations into K structural slots
+- Each slot captures one aspect: function patterns, naming, control flow, etc.
+- Slot consistency score: LLM code has uniform slots (low variance),
+  human code has diverse slots (high variance)
+- Slot-level voting: each slot classifies independently, aggregate via attention
+- Domain-invariant by construction: slots capture structural patterns
 
-Usage on Kaggle:
-    1. Upload this file to a Kaggle notebook
-    2. Run: !pip install datasets transformers accelerate tree-sitter tree-sitter-languages
-    3. Execute the cells or run: python codeorigin.py --task T1
-
-Author: [Your Name]
+Reference: Slot Attention (Locatello et al. 2020) applied to code forensics
+Target: NeurIPS 2026 ORAL
 """
 
 import os
@@ -198,6 +196,11 @@ class Config:
     temperature: float = 0.07
     prototype_momentum: float = 0.99
 
+    # SlotCode specific
+    num_slots: int = 8
+    slot_dim: int = 128
+    slot_iterations: int = 3  # iterative attention refinement
+
     # Domain adversarial
     grl_lambda_max: float = 1.0  # max lambda for GRL schedule
 
@@ -223,7 +226,7 @@ class Config:
     device: str = "cuda" if torch.cuda.is_available() else "cpu"
     pin_memory: bool = True
     non_blocking: bool = True
-    save_dir: str = "./codeorigin_checkpoints"
+    save_dir: str = "./slot_code_checkpoints"
     log_every: int = 100
     eval_every: int = 1000
 
@@ -744,302 +747,104 @@ def preflight_benchmark_suite(run_plan: List[Tuple[str, str]], base_config: Conf
 # Model Components
 # ============================================================================
 
-class GradientReversalFunction(torch.autograd.Function):
-    """Gradient Reversal Layer for domain adversarial training."""
-
-    @staticmethod
-    def forward(ctx, x, lambda_val):
-        ctx.lambda_val = lambda_val
-        return x.clone()
-
-    @staticmethod
-    def backward(ctx, grad_output):
-        return -ctx.lambda_val * grad_output, None
-
-
-class GradientReversalLayer(nn.Module):
-    def __init__(self):
-        super().__init__()
-        self.lambda_val = 0.0
-
-    def set_lambda(self, val):
-        self.lambda_val = val
-
-    def forward(self, x):
-        return GradientReversalFunction.apply(x, self.lambda_val)
-
-
-class ASTEncoder(nn.Module):
-    """Encodes AST node type sequences into a fixed-size representation."""
-
-    def __init__(self, vocab_size: int, embed_dim: int, hidden_dim: int):
-        super().__init__()
-        self.embedding = nn.Embedding(vocab_size, embed_dim, padding_idx=0)
-        self.lstm = nn.LSTM(
-            embed_dim, hidden_dim, num_layers=1,
-            batch_first=True, bidirectional=True,
-        )
-        self.proj = nn.Linear(hidden_dim * 2, hidden_dim)
-
-    def forward(self, ast_seq: torch.Tensor) -> torch.Tensor:
-        # ast_seq: (B, seq_len)
-        x = self.embedding(ast_seq)  # (B, seq_len, embed_dim)
-        output, (h_n, _) = self.lstm(x)  # h_n: (2, B, hidden)
-        # Concatenate forward and backward final hidden states
-        h = torch.cat([h_n[0], h_n[1]], dim=-1)  # (B, hidden*2)
-        return self.proj(h)  # (B, hidden)
-
-
-class StructuralEncoder(nn.Module):
-    """Encodes structural/graph-level features."""
-
-    def __init__(self, input_dim: int, hidden_dim: int):
-        super().__init__()
-        self.net = nn.Sequential(
-            nn.Linear(input_dim, hidden_dim),
-            nn.LayerNorm(hidden_dim),
-            nn.GELU(),
-            nn.Dropout(0.1),
-            nn.Linear(hidden_dim, hidden_dim),
-            nn.LayerNorm(hidden_dim),
-            nn.GELU(),
-        )
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return self.net(x)
-
-
-class CrossAttentionFusion(nn.Module):
-    """Fuse multi-granularity representations via cross-attention."""
-
-    def __init__(self, token_dim: int, ast_dim: int, struct_dim: int, output_dim: int):
-        super().__init__()
-        self.token_proj = nn.Linear(token_dim, output_dim)
-        self.ast_proj = nn.Linear(ast_dim, output_dim)
-        self.struct_proj = nn.Linear(struct_dim, output_dim)
-
-        self.cross_attn = nn.MultiheadAttention(
-            embed_dim=output_dim,
-            num_heads=4,
-            dropout=0.1,
-            batch_first=True,
-        )
-        self.norm = nn.LayerNorm(output_dim)
-        self.gate = nn.Linear(output_dim * 3, output_dim)
-
-    def forward(
-        self,
-        token_repr: torch.Tensor,   # (B, token_dim)
-        ast_repr: torch.Tensor,     # (B, ast_dim)
-        struct_repr: torch.Tensor,  # (B, struct_dim)
-    ) -> torch.Tensor:
-        # Project all to same dimension
-        t = self.token_proj(token_repr)    # (B, output_dim)
-        a = self.ast_proj(ast_repr)        # (B, output_dim)
-        s = self.struct_proj(struct_repr)  # (B, output_dim)
-
-        # Stack as sequence for cross-attention: (B, 3, output_dim)
-        seq = torch.stack([t, a, s], dim=1)
-
-        # Self-attention across views
-        attn_out, _ = self.cross_attn(seq, seq, seq)  # (B, 3, output_dim)
-        attn_out = self.norm(attn_out + seq)
-
-        # Gated fusion
-        concat = torch.cat([attn_out[:, 0], attn_out[:, 1], attn_out[:, 2]], dim=-1)
-        fused = self.gate(concat)  # (B, output_dim)
-
-        return fused
-
-
-class StyleContentDisentangler(nn.Module):
+class SlotAttention(nn.Module):
     """
-    Disentangles code representation into style (authorship) and content (semantics).
-    Uses variational approach with mutual information minimization.
+    Slot Attention module adapted for code sequences.
+    Decomposes sequence into K slots via iterative attention.
     """
-
-    def __init__(self, input_dim: int, z_style_dim: int, z_content_dim: int):
+    def __init__(self, input_dim: int, slot_dim: int, num_slots: int, num_iterations: int = 3):
         super().__init__()
+        self.num_slots = num_slots
+        self.slot_dim = slot_dim
+        self.num_iterations = num_iterations
 
-        # Style encoder: captures HOW code is written
-        self.style_encoder = nn.Sequential(
-            nn.Linear(input_dim, input_dim),
-            nn.LayerNorm(input_dim),
+        # Slot initialization (learnable)
+        self.slot_mu = nn.Parameter(torch.randn(1, num_slots, slot_dim))
+        self.slot_log_sigma = nn.Parameter(torch.zeros(1, num_slots, slot_dim))
+        nn.init.xavier_uniform_(self.slot_mu)
+
+        # Projection
+        self.project_input = nn.Linear(input_dim, slot_dim)
+        self.project_k = nn.Linear(slot_dim, slot_dim)
+        self.project_v = nn.Linear(slot_dim, slot_dim)
+        self.project_q = nn.Linear(slot_dim, slot_dim)
+
+        # GRU for slot update
+        self.gru = nn.GRUCell(slot_dim, slot_dim)
+
+        # Layer norms
+        self.norm_input = nn.LayerNorm(slot_dim)
+        self.norm_slots = nn.LayerNorm(slot_dim)
+        self.norm_mlp = nn.LayerNorm(slot_dim)
+
+        # Slot MLP
+        self.mlp = nn.Sequential(
+            nn.Linear(slot_dim, slot_dim * 2),
             nn.GELU(),
-            nn.Dropout(0.1),
-            nn.Linear(input_dim, z_style_dim * 2),  # mean + logvar
+            nn.Linear(slot_dim * 2, slot_dim),
         )
 
-        # Content encoder: captures WHAT code does
-        self.content_encoder = nn.Sequential(
-            nn.Linear(input_dim, input_dim),
-            nn.LayerNorm(input_dim),
-            nn.GELU(),
-            nn.Dropout(0.1),
-            nn.Linear(input_dim, z_content_dim * 2),  # mean + logvar
-        )
+        self.scale = slot_dim ** -0.5
 
-        # Reconstruction decoder
-        self.decoder = nn.Sequential(
-            nn.Linear(z_style_dim + z_content_dim, input_dim),
-            nn.LayerNorm(input_dim),
-            nn.GELU(),
-            nn.Linear(input_dim, input_dim),
-        )
-
-        # CLUB MI estimator (Cheng et al., 2020)
-        self.mi_estimator = nn.Sequential(
-            nn.Linear(z_style_dim, 256),
-            nn.ReLU(),
-            nn.Linear(256, z_content_dim),
-        )
-
-        self.z_style_dim = z_style_dim
-        self.z_content_dim = z_content_dim
-
-    def reparameterize(self, mu: torch.Tensor, logvar: torch.Tensor) -> torch.Tensor:
-        """Reparameterization trick."""
-        if self.training:
-            std = torch.exp(0.5 * logvar)
-            eps = torch.randn_like(std)
-            return mu + eps * std
-        return mu
-
-    def forward(self, h_code: torch.Tensor) -> Dict[str, torch.Tensor]:
-        # Encode style
-        style_params = self.style_encoder(h_code)
-        style_mu, style_logvar = style_params.chunk(2, dim=-1)
-        z_style = self.reparameterize(style_mu, style_logvar)
-
-        # Encode content
-        content_params = self.content_encoder(h_code)
-        content_mu, content_logvar = content_params.chunk(2, dim=-1)
-        z_content = self.reparameterize(content_mu, content_logvar)
-
-        # Reconstruct
-        h_recon = self.decoder(torch.cat([z_style, z_content], dim=-1))
-
-        # MI estimation (CLUB upper bound)
-        content_pred = self.mi_estimator(z_style.detach())
-
-        return {
-            "z_style": z_style,
-            "z_content": z_content,
-            "style_mu": style_mu,
-            "style_logvar": style_logvar,
-            "content_mu": content_mu,
-            "content_logvar": content_logvar,
-            "h_recon": h_recon,
-            "content_pred": content_pred,
-        }
-
-    def compute_mi_loss(self, z_style: torch.Tensor, z_content: torch.Tensor) -> torch.Tensor:
-        """CLUB MI upper bound estimation."""
-        content_pred = self.mi_estimator(z_style)
-
-        # Positive samples: matched pairs
-        positive = -0.5 * ((z_content - content_pred) ** 2).sum(dim=-1)
-
-        # Negative samples: random shuffle
-        z_content_shuffle = z_content[torch.randperm(z_content.size(0), device=z_content.device)]
-        negative = -0.5 * ((z_content_shuffle - content_pred) ** 2).sum(dim=-1)
-
-        mi_upper = (positive - negative).mean()
-        return F.relu(mi_upper)  # Ensure non-negative
-
-    def compute_kl_loss(
-        self,
-        style_mu: torch.Tensor, style_logvar: torch.Tensor,
-        content_mu: torch.Tensor, content_logvar: torch.Tensor,
-    ) -> torch.Tensor:
-        """KL divergence to regularize latent spaces."""
-        kl_style = -0.5 * (1 + style_logvar - style_mu.pow(2) - style_logvar.exp()).sum(dim=-1).mean()
-        kl_content = -0.5 * (1 + content_logvar - content_mu.pow(2) - content_logvar.exp()).sum(dim=-1).mean()
-        return 0.5 * (kl_style + kl_content)
-
-
-class PrototypicalContrastiveHead(nn.Module):
-    """
-    Hierarchical prototypical contrastive learning for family attribution.
-    Maintains learnable prototypes for each class.
-    """
-
-    def __init__(self, input_dim: int, num_classes: int, temperature: float = 0.07):
-        super().__init__()
-        self.prototypes = nn.Parameter(torch.randn(num_classes, input_dim))
-        nn.init.xavier_uniform_(self.prototypes)
-        self.temperature = temperature
-        self.num_classes = num_classes
-        self.classifier = nn.Linear(input_dim, num_classes)
-
-    def forward(self, z_style: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+    def forward(self, inputs: torch.Tensor) -> torch.Tensor:
         """
+        Args:
+            inputs: (B, N, input_dim) -- sequence of token representations
         Returns:
-            logits: classification logits
-            proto_logits: prototype-based similarity logits
+            slots: (B, num_slots, slot_dim) -- decomposed slot representations
         """
-        logits = self.classifier(z_style)
+        B, N, _ = inputs.shape
 
-        # Prototype-based classification
-        z_norm = F.normalize(z_style, dim=-1)
-        p_norm = F.normalize(self.prototypes, dim=-1)
-        proto_logits = torch.mm(z_norm, p_norm.t()) / self.temperature
+        # Project inputs
+        inputs = self.project_input(inputs)
+        inputs = self.norm_input(inputs)
+        k = self.project_k(inputs)  # (B, N, slot_dim)
+        v = self.project_v(inputs)  # (B, N, slot_dim)
 
-        return logits, proto_logits
+        # Initialize slots
+        mu = self.slot_mu.expand(B, -1, -1)
+        sigma = self.slot_log_sigma.exp().expand(B, -1, -1)
+        slots = mu + sigma * torch.randn_like(sigma)  # (B, num_slots, slot_dim)
 
-    def contrastive_loss(
-        self, z_style: torch.Tensor, labels: torch.Tensor
-    ) -> torch.Tensor:
-        """Supervised prototypical contrastive loss."""
-        z_norm = F.normalize(z_style, dim=-1)
-        p_norm = F.normalize(self.prototypes, dim=-1)
+        # Iterative attention
+        for _ in range(self.num_iterations):
+            slots_prev = slots
+            slots = self.norm_slots(slots)
 
-        # Similarity to all prototypes
-        sim = torch.mm(z_norm, p_norm.t()) / self.temperature  # (B, num_classes)
+            q = self.project_q(slots)  # (B, num_slots, slot_dim)
 
-        # Cross-entropy with prototype targets
-        loss = F.cross_entropy(sim, labels)
+            # Attention: slots attend to inputs
+            attn = torch.einsum('bsd,bnd->bsn', q, k) * self.scale  # (B, num_slots, N)
+            attn = F.softmax(attn, dim=1)  # normalize over slots (competition)
+            attn = attn / (attn.sum(dim=-1, keepdim=True) + 1e-8)  # weighted mean
 
-        # Pull toward own prototype, push from others (SupCon-style)
-        batch_size = z_style.size(0)
-        if batch_size < 2:
-            return loss
+            updates = torch.einsum('bsn,bnd->bsd', attn, v)  # (B, num_slots, slot_dim)
 
-        # Pairwise similarity in batch
-        z_sim = torch.mm(z_norm, z_norm.t()) / self.temperature  # (B, B)
+            # GRU update
+            slots = self.gru(
+                updates.reshape(-1, self.slot_dim),
+                slots_prev.reshape(-1, self.slot_dim),
+            ).reshape(B, self.num_slots, self.slot_dim)
 
-        # Mask: same class = positive (no grad, safe for in-place)
-        label_mask = (labels.unsqueeze(0) == labels.unsqueeze(1))  # (B, B)
-        self_mask = ~torch.eye(batch_size, dtype=torch.bool, device=z_style.device)
-        label_mask = label_mask & self_mask  # exclude self
+            # MLP residual
+            slots = slots + self.mlp(self.norm_mlp(slots))
 
-        if label_mask.sum() == 0:
-            return loss
-
-        # SupCon loss - avoid in-place ops on tensors in computation graph
-        exp_sim = torch.exp(z_sim) * self_mask.float()  # zero out self-similarity
-
-        log_prob = z_sim - torch.log(exp_sim.sum(dim=1, keepdim=True) + 1e-8)
-        mean_log_prob = (label_mask * log_prob).sum(dim=1) / (label_mask.sum(dim=1) + 1e-8)
-        supcon_loss = -mean_log_prob[label_mask.sum(dim=1) > 0].mean()
-
-        return loss + 0.5 * supcon_loss
+        return slots
 
 
 # ============================================================================
-# Full Model: CodeOrigin
+# Full Model: SlotCode
 # ============================================================================
 
-class CodeOrigin(nn.Module):
+class SlotCode(nn.Module):
     """
-    CodeOrigin: Domain-Invariant AI-Generated Code Detection via
-    Style-Content Disentanglement and Hierarchical Contrastive Learning.
+    SlotCode: Slot Attention Decomposition for Code Authorship Detection.
 
     Components:
-    1. Multi-Granularity Encoder (token + AST + structural)
-    2. Style-Content Disentanglement
-    3. Cross-Domain Adversarial Alignment
-    4. Hierarchical Prototypical Contrastive Learning
+    1. ModernBERT encoder (outputs full sequence, not just CLS)
+    2. Slot Attention decomposition into K structural slots
+    3. Per-slot classification with attention-weighted aggregation
+    4. Slot consistency features (variance, pairwise similarity)
     """
 
     def __init__(self, config: Config, num_classes: int):
@@ -1047,70 +852,38 @@ class CodeOrigin(nn.Module):
         self.config = config
         self.num_classes = num_classes
 
-        # === Component 1: Multi-Granularity Encoder ===
-        # Token-level encoder (ModernBERT)
+        # ModernBERT encoder (outputs full sequence, not just CLS)
         self.token_encoder = AutoModel.from_pretrained(
             config.encoder_name,
             attn_implementation="sdpa",  # Flash Attention via PyTorch SDPA
         )
         token_hidden_size = self.token_encoder.config.hidden_size
 
-        # AST-level encoder
-        self.ast_encoder = ASTEncoder(
-            vocab_size=config.num_ast_node_types,
-            embed_dim=config.ast_embed_dim,
-            hidden_dim=config.gnn_hidden_dim,
+        # Slot Attention
+        self.slot_attention = SlotAttention(
+            input_dim=token_hidden_size,
+            slot_dim=config.slot_dim,
+            num_slots=config.num_slots,
+            num_iterations=config.slot_iterations,
         )
 
-        # Structural encoder (graph-level proxy)
-        self.struct_encoder = StructuralEncoder(
-            input_dim=STRUCTURAL_FEATURE_DIM,
-            hidden_dim=config.gnn_hidden_dim,
+        # Slot consistency features
+        # Variance across slots = measure of code consistency
+
+        # Per-slot classifier
+        self.slot_classifier = nn.Linear(config.slot_dim, num_classes)
+
+        # Slot aggregation attention
+        self.slot_aggregator = nn.Sequential(
+            nn.Linear(config.slot_dim, 1),
         )
 
-        # Cross-attention fusion
-        fusion_dim = config.z_style_dim + config.z_content_dim  # unified repr dim
-        self.fusion = CrossAttentionFusion(
-            token_dim=token_hidden_size,
-            ast_dim=config.gnn_hidden_dim,
-            struct_dim=config.gnn_hidden_dim,
-            output_dim=fusion_dim,
+        # Consistency-based features
+        self.consistency_head = nn.Sequential(
+            nn.Linear(config.num_slots + config.slot_dim, 64),
+            nn.GELU(),
+            nn.Linear(64, num_classes),
         )
-
-        # === Component 2: Style-Content Disentanglement ===
-        self.disentangler = StyleContentDisentangler(
-            input_dim=fusion_dim,
-            z_style_dim=config.z_style_dim,
-            z_content_dim=config.z_content_dim,
-        )
-
-        # === Component 3: Domain Adversarial ===
-        self.grl = GradientReversalLayer()
-        self.domain_lang_classifier = nn.Sequential(
-            nn.Linear(config.z_style_dim, 128),
-            nn.ReLU(),
-            nn.Dropout(0.1),
-            nn.Linear(128, config.num_languages),
-        )
-        self.domain_type_classifier = nn.Sequential(
-            nn.Linear(config.z_style_dim, 128),
-            nn.ReLU(),
-            nn.Dropout(0.1),
-            nn.Linear(128, config.num_domains),
-        )
-
-        # === Component 4: Task Head ===
-        self.proto_head = PrototypicalContrastiveHead(
-            input_dim=config.z_style_dim,
-            num_classes=num_classes,
-            temperature=config.temperature,
-        )
-
-        # Content auxiliary head (predict language from z_content for disentanglement)
-        self.content_aux_head = nn.Linear(config.z_content_dim, config.num_languages)
-
-        # Focal loss gamma
-        self.focal_gamma = 2.0
 
     def forward(
         self,
@@ -1120,58 +893,65 @@ class CodeOrigin(nn.Module):
         struct_feat: torch.Tensor,
         labels: Optional[torch.Tensor] = None,
     ) -> Dict[str, torch.Tensor]:
+        # Get full sequence representation
+        token_out = self.token_encoder(input_ids=input_ids, attention_mask=attention_mask)
+        hidden_states = token_out.last_hidden_state  # (B, seq_len, hidden)
 
-        # === Multi-Granularity Encoding ===
-        # Token-level
-        token_out = self.token_encoder(
-            input_ids=input_ids,
-            attention_mask=attention_mask,
-        )
-        # Use [CLS] token representation
-        token_repr = token_out.last_hidden_state[:, 0, :]  # (B, hidden)
+        # Slot decomposition
+        slots = self.slot_attention(hidden_states)  # (B, num_slots, slot_dim)
 
-        # AST-level
-        ast_repr = self.ast_encoder(ast_seq)  # (B, gnn_hidden)
+        # Per-slot classification
+        slot_logits = self.slot_classifier(slots)  # (B, num_slots, num_classes)
 
-        # Structural-level
-        struct_repr = self.struct_encoder(struct_feat)  # (B, gnn_hidden)
+        # Attention-weighted aggregation
+        slot_weights = F.softmax(self.slot_aggregator(slots).squeeze(-1), dim=-1)  # (B, num_slots)
+        agg_logits = (slot_weights.unsqueeze(-1) * slot_logits).sum(dim=1)  # (B, num_classes)
 
-        # Fuse
-        h_code = self.fusion(token_repr, ast_repr, struct_repr)  # (B, fusion_dim)
+        # Slot consistency features
+        slot_variance = slots.var(dim=1)  # (B, slot_dim) -- variance across slots
+        slot_pairwise_sim = []
+        for s1 in range(self.slot_attention.num_slots):
+            for s2 in range(s1 + 1, self.slot_attention.num_slots):
+                sim = F.cosine_similarity(slots[:, s1], slots[:, s2], dim=-1)
+                slot_pairwise_sim.append(sim)
+        if slot_pairwise_sim:
+            consistency_score = torch.stack(slot_pairwise_sim, dim=-1).mean(dim=-1, keepdim=True)
+        else:
+            consistency_score = torch.zeros(slots.size(0), 1, device=slots.device)
 
-        # === Style-Content Disentanglement ===
-        disent_out = self.disentangler(h_code)
-        z_style = disent_out["z_style"]      # (B, z_style_dim)
-        z_content = disent_out["z_content"]  # (B, z_content_dim)
+        # Combine: mean slot repr + consistency features
+        slot_mean = slots.mean(dim=1)  # (B, slot_dim)
+        # Number of "active" slots (those with high attention weight)
+        slot_activity = (slot_weights > 1.0 / self.slot_attention.num_slots).float().sum(dim=-1, keepdim=True)
 
-        # === Task Prediction ===
-        logits, proto_logits = self.proto_head(z_style)
+        consistency_input = torch.cat([
+            slot_variance.mean(dim=-1, keepdim=True),  # overall variance
+            consistency_score,  # mean pairwise similarity
+            slot_activity,  # how many slots are active
+            *[slot_weights[:, s:s+1] for s in range(min(self.slot_attention.num_slots, 5))],  # top slot weights
+            slot_mean,  # mean slot representation
+        ], dim=-1)
 
-        # === Domain Adversarial (on z_style) ===
-        z_style_grl = self.grl(z_style)
-        domain_lang_logits = self.domain_lang_classifier(z_style_grl)
-        domain_type_logits = self.domain_type_classifier(z_style_grl)
+        # Trim/pad to expected dim
+        expected_dim = self.slot_attention.num_slots + self.slot_attention.slot_dim
+        if consistency_input.size(-1) > expected_dim:
+            consistency_input = consistency_input[:, :expected_dim]
+        elif consistency_input.size(-1) < expected_dim:
+            pad = torch.zeros(consistency_input.size(0), expected_dim - consistency_input.size(-1), device=consistency_input.device)
+            consistency_input = torch.cat([consistency_input, pad], dim=-1)
 
-        # === Content Auxiliary ===
-        content_lang_logits = self.content_aux_head(z_content)
+        consistency_logits = self.consistency_head(consistency_input)
 
-        output = {
+        # Final: blend aggregated slot logits + consistency logits
+        logits = 0.7 * agg_logits + 0.3 * consistency_logits
+
+        return {
             "logits": logits,
-            "proto_logits": proto_logits,
-            "z_style": z_style,
-            "z_content": z_content,
-            "h_code": h_code,
-            "h_recon": disent_out["h_recon"],
-            "domain_lang_logits": domain_lang_logits,
-            "domain_type_logits": domain_type_logits,
-            "content_lang_logits": content_lang_logits,
-            "style_mu": disent_out["style_mu"],
-            "style_logvar": disent_out["style_logvar"],
-            "content_mu": disent_out["content_mu"],
-            "content_logvar": disent_out["content_logvar"],
+            "agg_logits": agg_logits,
+            "consistency_logits": consistency_logits,
+            "slot_weights": slot_weights,
+            "slot_variance": slot_variance.mean(dim=-1),
         }
-
-        return output
 
 
 # ============================================================================
@@ -1194,79 +974,26 @@ class FocalLoss(nn.Module):
 
 
 def compute_all_losses(
-    model: CodeOrigin,
+    model: SlotCode,
     outputs: Dict[str, torch.Tensor],
     labels: torch.Tensor,
     config: Config,
     focal_loss_fn: Optional[FocalLoss] = None,
 ) -> Dict[str, torch.Tensor]:
-    """Compute all loss components."""
-
-    # 1. Task loss (focal loss for class imbalance)
+    """Compute all SlotCode loss components."""
     if focal_loss_fn is None:
         focal_loss_fn = FocalLoss(gamma=2.0)
+
     task_loss = focal_loss_fn(outputs["logits"], labels)
-
-    # Prototype cross-entropy loss
-    proto_loss = F.cross_entropy(outputs["proto_logits"], labels)
-
-    # Contrastive loss
-    contrastive_loss = model.proto_head.contrastive_loss(outputs["z_style"], labels)
-
-    # 2. Disentanglement losses
-    # MI minimization between z_style and z_content
-    mi_loss = model.disentangler.compute_mi_loss(outputs["z_style"], outputs["z_content"])
-
-    # KL regularization
-    kl_loss = model.disentangler.compute_kl_loss(
-        outputs["style_mu"], outputs["style_logvar"],
-        outputs["content_mu"], outputs["content_logvar"],
-    )
-
-    # Reconstruction loss
-    recon_loss = F.mse_loss(outputs["h_recon"], outputs["h_code"].detach())
-
-    disentangle_loss = mi_loss + 0.01 * kl_loss
-
-    # 3. Domain adversarial loss: encourage z_style to be domain-invariant
-    #    by maximizing entropy of domain predictions (uniform = no domain info)
-    #    GRL handles gradient reversal so the encoder learns to confuse classifiers
-    domain_lang_probs = F.softmax(outputs["domain_lang_logits"], dim=-1)
-    # Target: uniform distribution over languages
-    uniform_lang = torch.ones_like(domain_lang_probs) / domain_lang_probs.size(-1)
-    adversarial_lang = F.kl_div(
-        torch.log(domain_lang_probs + 1e-8), uniform_lang, reduction="batchmean"
-    )
-
-    domain_type_probs = F.softmax(outputs["domain_type_logits"], dim=-1)
-    uniform_type = torch.ones_like(domain_type_probs) / domain_type_probs.size(-1)
-    adversarial_type = F.kl_div(
-        torch.log(domain_type_probs + 1e-8), uniform_type, reduction="batchmean"
-    )
-
-    # Minimize KL to uniform = push toward domain-invariant representation
-    adversarial_loss = adversarial_lang + adversarial_type
-
-    # Total loss
-    total_loss = (
-        task_loss
-        + 0.3 * proto_loss
-        + config.lambda_contrastive * contrastive_loss
-        + config.lambda_disentangle * disentangle_loss
-        + config.lambda_adversarial * adversarial_loss
-        + config.lambda_reconstruct * recon_loss
-    )
+    agg_loss = focal_loss_fn(outputs["agg_logits"], labels)
+    consist_loss = focal_loss_fn(outputs["consistency_logits"], labels)
+    total = task_loss + 0.3 * agg_loss + 0.2 * consist_loss
 
     return {
-        "total": total_loss,
+        "total": total,
         "task": task_loss,
-        "proto": proto_loss,
-        "contrastive": contrastive_loss,
-        "disentangle": disentangle_loss,
-        "adversarial": adversarial_loss,
-        "recon": recon_loss,
-        "mi": mi_loss,
-        "kl": kl_loss,
+        "agg": agg_loss,
+        "consist": consist_loss,
     }
 
 
@@ -1275,7 +1002,7 @@ def compute_all_losses(
 # ============================================================================
 
 class Trainer:
-    def __init__(self, config: Config, model: CodeOrigin, train_loader, val_loader, test_loader, class_weights=None):
+    def __init__(self, config: Config, model: SlotCode, train_loader, val_loader, test_loader, class_weights=None):
         self.config = config
         self.model = model.to(config.device)
         self.train_loader = train_loader
@@ -1316,12 +1043,8 @@ class Trainer:
         self.model.train()
         total_losses = defaultdict(float)
         num_batches = 0
-
-        # GRL lambda schedule (gradually increase)
-        progress = epoch / self.config.epochs
-        grl_lambda = 2.0 / (1.0 + math.exp(-10 * progress)) - 1.0
-        grl_lambda *= self.config.grl_lambda_max
-        self.model.grl.set_lambda(grl_lambda)
+        slot_weight_accum = None
+        slot_var_accum = 0.0
 
         self.optimizer.zero_grad()
 
@@ -1356,13 +1079,26 @@ class Trainer:
                 total_losses[k] += v.item()
             num_batches += 1
 
+            # Track slot statistics
+            with torch.no_grad():
+                sw = outputs["slot_weights"].mean(dim=0).cpu()
+                if slot_weight_accum is None:
+                    slot_weight_accum = sw
+                else:
+                    slot_weight_accum = slot_weight_accum + sw
+                slot_var_accum += outputs["slot_variance"].mean().item()
+
             # Log
             if (batch_idx + 1) % self.config.log_every == 0:
                 avg_loss = total_losses["total"] / num_batches
+                mean_slot_var = slot_var_accum / num_batches
                 lr = self.scheduler.get_last_lr()[0]
+                sw_dist = (slot_weight_accum / num_batches).numpy()
+                sw_str = ", ".join(f"{w:.3f}" for w in sw_dist)
                 logger.info(
                     f"Epoch {epoch+1} | Step {batch_idx+1}/{len(self.train_loader)} | "
-                    f"Loss: {avg_loss:.4f} | LR: {lr:.2e} | GRL-λ: {grl_lambda:.3f}"
+                    f"Loss: {avg_loss:.4f} | LR: {lr:.2e} | "
+                    f"SlotVar: {mean_slot_var:.4f} | SlotWts: [{sw_str}]"
                 )
 
             # Mid-epoch eval
@@ -1395,11 +1131,7 @@ class Trainer:
             with autocast(device_type=self.config.device, enabled=self.use_amp, dtype=self.amp_dtype):
                 outputs = self.model(input_ids, attention_mask, ast_seq, struct_feat, labels)
 
-            # Normalize both to same scale before ensembling
-            logits_norm = F.softmax(outputs["logits"], dim=-1)
-            proto_norm = F.softmax(outputs["proto_logits"], dim=-1)
-            combined_logits = 0.7 * logits_norm + 0.3 * proto_norm
-            preds = combined_logits.argmax(dim=-1)
+            preds = outputs["logits"].argmax(dim=-1)
 
             all_preds.extend(preds.cpu().numpy())
             all_labels.extend(labels.cpu().numpy())
@@ -1432,7 +1164,7 @@ class Trainer:
 
     def save_checkpoint(self, tag: str = "latest"):
         os.makedirs(self.config.save_dir, exist_ok=True)
-        path = os.path.join(self.config.save_dir, f"codeorigin_{self.config.task}_{tag}.pt")
+        path = os.path.join(self.config.save_dir, f"slotcode_{self.config.task}_{tag}.pt")
         torch.save({
             "model_state_dict": self.model.state_dict(),
             "best_f1": self.best_f1,
@@ -1441,7 +1173,7 @@ class Trainer:
         logger.info(f"Saved checkpoint to {path}")
 
     def load_checkpoint(self, tag: str = "best"):
-        path = os.path.join(self.config.save_dir, f"codeorigin_{self.config.task}_{tag}.pt")
+        path = os.path.join(self.config.save_dir, f"slotcode_{self.config.task}_{tag}.pt")
         if os.path.exists(path):
             ckpt = torch.load(path, map_location=self.config.device, weights_only=True)
             self.model.load_state_dict(ckpt["model_state_dict"])
@@ -1451,7 +1183,7 @@ class Trainer:
 
     def train(self):
         logger.info("=" * 60)
-        logger.info(f"Starting CodeOrigin Training - Task {self.config.task}")
+        logger.info(f"[EXP13] Starting SlotCode Training - Task {self.config.task}")
         logger.info(f"Num classes: {self.model.num_classes}")
         logger.info(f"Device: {self.config.device}")
         logger.info(f"Precision: {self.precision}")
@@ -1521,7 +1253,7 @@ def main(task: str = "T1", config: Optional[Config] = None):
     set_seed(config.seed)
 
     logger.info(f"{'='*60}")
-    logger.info(f"CodeOrigin - AI-Generated Code Detection")
+    logger.info(f"[EXP13] SlotCode - AI-Generated Code Detection")
     logger.info(f"Task: {config.task}")
     logger.info(f"Benchmark: {config.benchmark}")
     logger.info(f"GPU: {_get_gpu_name()}")
@@ -1584,8 +1316,8 @@ def main(task: str = "T1", config: Optional[Config] = None):
     )
 
     # Model
-    logger.info(f"Building CodeOrigin model...")
-    model = CodeOrigin(config, num_classes)
+    logger.info(f"Building SlotCode model...")
+    model = SlotCode(config, num_classes)
 
     # Count parameters
     total_params = sum(p.numel() for p in model.parameters())
@@ -1633,7 +1365,7 @@ def run_benchmark_suite(run_plan: List[Tuple[str, str]], base_config: Optional[C
 
         run_key = f"{bench}_{bench_task}"
         logger.info("\n" + "=" * 70)
-        logger.info(f"BENCHMARK SUITE RUN: {bench.upper()} | task={bench_task}")
+        logger.info(f"[EXP13] BENCHMARK SUITE RUN: {bench.upper()} | task={bench_task}")
         logger.info("=" * 70)
         results[run_key] = main(task=bench_task, config=cfg)
 
@@ -1654,7 +1386,7 @@ def run_benchmark_suite(run_plan: List[Tuple[str, str]], base_config: Optional[C
     # Machine-readable block
     ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     logger.info("\n=== SUITE_RESULTS_START ===")
-    logger.info(f"timestamp={ts} | method=CodeOrigin | runs={len(run_plan)}")
+    logger.info(f"timestamp={ts} | method=EXP13_SlotCode | runs={len(run_plan)}")
     logger.info("| run_key | best_val_f1 | test_f1 | test_weighted_f1 |")
     logger.info("|---|---:|---:|---:|")
     for run_key, stats in results.items():
@@ -1667,7 +1399,7 @@ def run_benchmark_suite(run_plan: List[Tuple[str, str]], base_config: Optional[C
 
     machine_block = {
         "timestamp": ts,
-        "method": "CodeOrigin",
+        "method": "SlotCode",
         "run_plan": [f"{b}_{t}" for b, t in run_plan],
         "results": results,
     }

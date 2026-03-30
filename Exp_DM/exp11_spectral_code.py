@@ -1,18 +1,16 @@
 """
-CodeOrigin: Domain-Invariant AI-Generated Code Detection via
-Style-Content Disentanglement and Hierarchical Contrastive Learning
+[EXP11] SpectralCode: Frequency-Domain Analysis for AI-Generated Code Detection
 
-Single-file implementation for Kaggle.
-Target: AICD-Bench + DroidCollection
-(https://huggingface.co/AICD-bench/AICD-Bench)
-(https://huggingface.co/datasets/project-droid/DroidCollection)
+Key Innovation:
+- Treats tokenized code as 1D signal and applies FFT spectral analysis
+- LLM decoding creates frequency-domain artifacts (repetition cycles,
+  periodic n-gram patterns) invisible in token space
+- Multi-scale spectral features at window sizes [32, 64, 128, 256]
+- Spectral + neural dual-path fusion
+- Inspired by AI-generated image detection (spectral forensics)
 
-Usage on Kaggle:
-    1. Upload this file to a Kaggle notebook
-    2. Run: !pip install datasets transformers accelerate tree-sitter tree-sitter-languages
-    3. Execute the cells or run: python codeorigin.py --task T1
-
-Author: [Your Name]
+Reference: Spectral analysis from image forensics applied to code
+Target: NeurIPS 2026 ORAL
 """
 
 import os
@@ -223,7 +221,7 @@ class Config:
     device: str = "cuda" if torch.cuda.is_available() else "cpu"
     pin_memory: bool = True
     non_blocking: bool = True
-    save_dir: str = "./codeorigin_checkpoints"
+    save_dir: str = "./spectral_code_checkpoints"
     log_every: int = 100
     eval_every: int = 1000
 
@@ -418,6 +416,84 @@ def extract_structural_features(code: str) -> List[float]:
 
 
 STRUCTURAL_FEATURE_DIM = 22  # number of features from extract_structural_features
+
+# ============================================================================
+# Spectral Feature Extraction
+# ============================================================================
+
+SPECTRAL_FEATURE_DIM = 64  # per-window features * num_windows
+
+
+def extract_spectral_features(input_ids: torch.Tensor, attention_mask: torch.Tensor) -> torch.Tensor:
+    """
+    Extract frequency-domain features from token ID sequences.
+    Treats token IDs as a 1D discrete signal and computes FFT.
+    """
+    batch_size = input_ids.size(0)
+    features = []
+    windows = [32, 64, 128, 256]
+    features_per_window = SPECTRAL_FEATURE_DIM // len(windows)  # 16 per window
+
+    for i in range(batch_size):
+        ids = input_ids[i][attention_mask[i].bool()].cpu().float().numpy()
+        seq_len = len(ids)
+        sample_feats = []
+
+        for win_size in windows:
+            if seq_len < win_size:
+                # Pad if too short
+                padded = np.zeros(win_size)
+                padded[:seq_len] = ids[:seq_len]
+            else:
+                # Use first win_size tokens
+                padded = ids[:win_size]
+
+            # Normalize to zero-mean
+            padded = padded - padded.mean()
+
+            # FFT
+            fft_vals = np.fft.rfft(padded)
+            magnitude = np.abs(fft_vals)
+
+            # Extract features from magnitude spectrum
+            if len(magnitude) == 0:
+                sample_feats.extend([0.0] * features_per_window)
+                continue
+
+            # Spectral statistics
+            total_energy = np.sum(magnitude ** 2)
+
+            # Split spectrum into bands
+            n_bands = min(8, len(magnitude))
+            band_size = max(1, len(magnitude) // n_bands)
+            band_energies = []
+            for b in range(n_bands):
+                start = b * band_size
+                end = min(start + band_size, len(magnitude))
+                band_energies.append(np.sum(magnitude[start:end] ** 2) / (total_energy + 1e-10))
+
+            # Pad to exactly features_per_window
+            while len(band_energies) < features_per_window - 4:
+                band_energies.append(0.0)
+            band_energies = band_energies[:features_per_window - 4]
+
+            # Global spectral stats
+            spectral_centroid = np.sum(np.arange(len(magnitude)) * magnitude) / (np.sum(magnitude) + 1e-10)
+            spectral_rolloff = np.searchsorted(np.cumsum(magnitude), 0.85 * np.sum(magnitude)) / len(magnitude)
+            spectral_flatness = np.exp(np.mean(np.log(magnitude + 1e-10))) / (np.mean(magnitude) + 1e-10)
+            peak_freq = np.argmax(magnitude[1:]) + 1 if len(magnitude) > 1 else 0
+
+            sample_feats.extend(band_energies)
+            sample_feats.extend([
+                spectral_centroid / len(magnitude),
+                spectral_rolloff,
+                min(spectral_flatness, 10.0),  # clip extreme values
+                peak_freq / len(magnitude),
+            ])
+
+        features.append(sample_feats[:SPECTRAL_FEATURE_DIM])
+
+    return torch.tensor(np.array(features), dtype=torch.float32, device=input_ids.device)
 
 
 # ============================================================================
@@ -1027,19 +1103,18 @@ class PrototypicalContrastiveHead(nn.Module):
 
 
 # ============================================================================
-# Full Model: CodeOrigin
+# Full Model: SpectralCode
 # ============================================================================
 
-class CodeOrigin(nn.Module):
+class SpectralCode(nn.Module):
     """
-    CodeOrigin: Domain-Invariant AI-Generated Code Detection via
-    Style-Content Disentanglement and Hierarchical Contrastive Learning.
+    SpectralCode: Frequency-Domain Analysis for AI-Generated Code Detection.
 
-    Components:
-    1. Multi-Granularity Encoder (token + AST + structural)
-    2. Style-Content Disentanglement
-    3. Cross-Domain Adversarial Alignment
-    4. Hierarchical Prototypical Contrastive Learning
+    Dual-path architecture:
+    1. Neural path: ModernBERT + AST + structural -> CrossAttentionFusion
+    2. Spectral path: FFT spectral features -> MLP encoder
+    Fusion: learned soft gate decides how much to trust each path.
+    Two classification heads + gated fusion output.
     """
 
     def __init__(self, config: Config, num_classes: int):
@@ -1047,7 +1122,7 @@ class CodeOrigin(nn.Module):
         self.config = config
         self.num_classes = num_classes
 
-        # === Component 1: Multi-Granularity Encoder ===
+        # === Neural Path ===
         # Token-level encoder (ModernBERT)
         self.token_encoder = AutoModel.from_pretrained(
             config.encoder_name,
@@ -1077,37 +1152,31 @@ class CodeOrigin(nn.Module):
             output_dim=fusion_dim,
         )
 
-        # === Component 2: Style-Content Disentanglement ===
-        self.disentangler = StyleContentDisentangler(
-            input_dim=fusion_dim,
-            z_style_dim=config.z_style_dim,
-            z_content_dim=config.z_content_dim,
-        )
-
-        # === Component 3: Domain Adversarial ===
-        self.grl = GradientReversalLayer()
-        self.domain_lang_classifier = nn.Sequential(
-            nn.Linear(config.z_style_dim, 128),
-            nn.ReLU(),
+        # === Spectral Path ===
+        self.spectral_encoder = nn.Sequential(
+            nn.Linear(SPECTRAL_FEATURE_DIM, 256),
+            nn.LayerNorm(256),
+            nn.GELU(),
             nn.Dropout(0.1),
-            nn.Linear(128, config.num_languages),
+            nn.Linear(256, 128),
+            nn.LayerNorm(128),
+            nn.GELU(),
         )
-        self.domain_type_classifier = nn.Sequential(
-            nn.Linear(config.z_style_dim, 128),
-            nn.ReLU(),
-            nn.Dropout(0.1),
-            nn.Linear(128, config.num_domains),
-        )
+        spectral_dim = 128
 
-        # === Component 4: Task Head ===
-        self.proto_head = PrototypicalContrastiveHead(
-            input_dim=config.z_style_dim,
-            num_classes=num_classes,
-            temperature=config.temperature,
-        )
+        # === Classification Heads ===
+        # Neural classifier
+        self.neural_head = nn.Linear(fusion_dim, num_classes)
 
-        # Content auxiliary head (predict language from z_content for disentanglement)
-        self.content_aux_head = nn.Linear(config.z_content_dim, config.num_languages)
+        # Spectral classifier
+        self.spectral_head = nn.Linear(spectral_dim, num_classes)
+
+        # === Soft Gate: learns when to trust neural vs spectral ===
+        self.gate = nn.Sequential(
+            nn.Linear(fusion_dim + spectral_dim, 64),
+            nn.GELU(),
+            nn.Linear(64, 2),  # [neural_weight, spectral_weight]
+        )
 
         # Focal loss gamma
         self.focal_gamma = 2.0
@@ -1121,7 +1190,7 @@ class CodeOrigin(nn.Module):
         labels: Optional[torch.Tensor] = None,
     ) -> Dict[str, torch.Tensor]:
 
-        # === Multi-Granularity Encoding ===
+        # === Neural Path ===
         # Token-level
         token_out = self.token_encoder(
             input_ids=input_ids,
@@ -1136,42 +1205,30 @@ class CodeOrigin(nn.Module):
         # Structural-level
         struct_repr = self.struct_encoder(struct_feat)  # (B, gnn_hidden)
 
-        # Fuse
-        h_code = self.fusion(token_repr, ast_repr, struct_repr)  # (B, fusion_dim)
+        # Fuse neural representations
+        h_neural = self.fusion(token_repr, ast_repr, struct_repr)  # (B, fusion_dim)
 
-        # === Style-Content Disentanglement ===
-        disent_out = self.disentangler(h_code)
-        z_style = disent_out["z_style"]      # (B, z_style_dim)
-        z_content = disent_out["z_content"]  # (B, z_content_dim)
+        # === Spectral Path ===
+        spectral_feats = extract_spectral_features(input_ids, attention_mask)  # (B, SPECTRAL_FEATURE_DIM)
+        h_spectral = self.spectral_encoder(spectral_feats)  # (B, 128)
 
-        # === Task Prediction ===
-        logits, proto_logits = self.proto_head(z_style)
+        # === Individual Predictions ===
+        neural_logits = self.neural_head(h_neural)       # (B, num_classes)
+        spectral_logits = self.spectral_head(h_spectral)  # (B, num_classes)
 
-        # === Domain Adversarial (on z_style) ===
-        z_style_grl = self.grl(z_style)
-        domain_lang_logits = self.domain_lang_classifier(z_style_grl)
-        domain_type_logits = self.domain_type_classifier(z_style_grl)
+        # === Soft Gate ===
+        gate_input = torch.cat([h_neural, h_spectral], dim=-1)
+        gate_weights = F.softmax(self.gate(gate_input), dim=-1)  # (B, 2)
 
-        # === Content Auxiliary ===
-        content_lang_logits = self.content_aux_head(z_content)
+        # === Fused Logits ===
+        logits = gate_weights[:, 0:1] * neural_logits + gate_weights[:, 1:2] * spectral_logits
 
-        output = {
+        return {
             "logits": logits,
-            "proto_logits": proto_logits,
-            "z_style": z_style,
-            "z_content": z_content,
-            "h_code": h_code,
-            "h_recon": disent_out["h_recon"],
-            "domain_lang_logits": domain_lang_logits,
-            "domain_type_logits": domain_type_logits,
-            "content_lang_logits": content_lang_logits,
-            "style_mu": disent_out["style_mu"],
-            "style_logvar": disent_out["style_logvar"],
-            "content_mu": disent_out["content_mu"],
-            "content_logvar": disent_out["content_logvar"],
+            "neural_logits": neural_logits,
+            "spectral_logits": spectral_logits,
+            "gate_weights": gate_weights,
         }
-
-        return output
 
 
 # ============================================================================
@@ -1194,79 +1251,37 @@ class FocalLoss(nn.Module):
 
 
 def compute_all_losses(
-    model: CodeOrigin,
+    model: SpectralCode,
     outputs: Dict[str, torch.Tensor],
     labels: torch.Tensor,
     config: Config,
     focal_loss_fn: Optional[FocalLoss] = None,
 ) -> Dict[str, torch.Tensor]:
-    """Compute all loss components."""
+    """
+    Compute all loss components for SpectralCode.
 
-    # 1. Task loss (focal loss for class imbalance)
+    Main loss: focal loss on soft-gated fused logits.
+    Auxiliary losses: focal loss on individual neural and spectral heads
+    (ensures both heads learn meaningful representations independently).
+    """
     if focal_loss_fn is None:
         focal_loss_fn = FocalLoss(gamma=2.0)
+
+    # Primary: focal loss on gated fusion output
     task_loss = focal_loss_fn(outputs["logits"], labels)
 
-    # Prototype cross-entropy loss
-    proto_loss = F.cross_entropy(outputs["proto_logits"], labels)
+    # Auxiliary: both heads should individually work
+    neural_loss = focal_loss_fn(outputs["neural_logits"], labels)
+    spectral_loss = focal_loss_fn(outputs["spectral_logits"], labels)
 
-    # Contrastive loss
-    contrastive_loss = model.proto_head.contrastive_loss(outputs["z_style"], labels)
-
-    # 2. Disentanglement losses
-    # MI minimization between z_style and z_content
-    mi_loss = model.disentangler.compute_mi_loss(outputs["z_style"], outputs["z_content"])
-
-    # KL regularization
-    kl_loss = model.disentangler.compute_kl_loss(
-        outputs["style_mu"], outputs["style_logvar"],
-        outputs["content_mu"], outputs["content_logvar"],
-    )
-
-    # Reconstruction loss
-    recon_loss = F.mse_loss(outputs["h_recon"], outputs["h_code"].detach())
-
-    disentangle_loss = mi_loss + 0.01 * kl_loss
-
-    # 3. Domain adversarial loss: encourage z_style to be domain-invariant
-    #    by maximizing entropy of domain predictions (uniform = no domain info)
-    #    GRL handles gradient reversal so the encoder learns to confuse classifiers
-    domain_lang_probs = F.softmax(outputs["domain_lang_logits"], dim=-1)
-    # Target: uniform distribution over languages
-    uniform_lang = torch.ones_like(domain_lang_probs) / domain_lang_probs.size(-1)
-    adversarial_lang = F.kl_div(
-        torch.log(domain_lang_probs + 1e-8), uniform_lang, reduction="batchmean"
-    )
-
-    domain_type_probs = F.softmax(outputs["domain_type_logits"], dim=-1)
-    uniform_type = torch.ones_like(domain_type_probs) / domain_type_probs.size(-1)
-    adversarial_type = F.kl_div(
-        torch.log(domain_type_probs + 1e-8), uniform_type, reduction="batchmean"
-    )
-
-    # Minimize KL to uniform = push toward domain-invariant representation
-    adversarial_loss = adversarial_lang + adversarial_type
-
-    # Total loss
-    total_loss = (
-        task_loss
-        + 0.3 * proto_loss
-        + config.lambda_contrastive * contrastive_loss
-        + config.lambda_disentangle * disentangle_loss
-        + config.lambda_adversarial * adversarial_loss
-        + config.lambda_reconstruct * recon_loss
-    )
+    # Total loss: main + weighted auxiliaries
+    total_loss = task_loss + 0.3 * neural_loss + 0.3 * spectral_loss
 
     return {
         "total": total_loss,
         "task": task_loss,
-        "proto": proto_loss,
-        "contrastive": contrastive_loss,
-        "disentangle": disentangle_loss,
-        "adversarial": adversarial_loss,
-        "recon": recon_loss,
-        "mi": mi_loss,
-        "kl": kl_loss,
+        "neural": neural_loss,
+        "spectral": spectral_loss,
     }
 
 
@@ -1275,7 +1290,7 @@ def compute_all_losses(
 # ============================================================================
 
 class Trainer:
-    def __init__(self, config: Config, model: CodeOrigin, train_loader, val_loader, test_loader, class_weights=None):
+    def __init__(self, config: Config, model: SpectralCode, train_loader, val_loader, test_loader, class_weights=None):
         self.config = config
         self.model = model.to(config.device)
         self.train_loader = train_loader
@@ -1317,12 +1332,6 @@ class Trainer:
         total_losses = defaultdict(float)
         num_batches = 0
 
-        # GRL lambda schedule (gradually increase)
-        progress = epoch / self.config.epochs
-        grl_lambda = 2.0 / (1.0 + math.exp(-10 * progress)) - 1.0
-        grl_lambda *= self.config.grl_lambda_max
-        self.model.grl.set_lambda(grl_lambda)
-
         self.optimizer.zero_grad()
 
         for batch_idx, batch in enumerate(self.train_loader):
@@ -1362,7 +1371,7 @@ class Trainer:
                 lr = self.scheduler.get_last_lr()[0]
                 logger.info(
                     f"Epoch {epoch+1} | Step {batch_idx+1}/{len(self.train_loader)} | "
-                    f"Loss: {avg_loss:.4f} | LR: {lr:.2e} | GRL-λ: {grl_lambda:.3f}"
+                    f"Loss: {avg_loss:.4f} | LR: {lr:.2e}"
                 )
 
             # Mid-epoch eval
@@ -1395,11 +1404,7 @@ class Trainer:
             with autocast(device_type=self.config.device, enabled=self.use_amp, dtype=self.amp_dtype):
                 outputs = self.model(input_ids, attention_mask, ast_seq, struct_feat, labels)
 
-            # Normalize both to same scale before ensembling
-            logits_norm = F.softmax(outputs["logits"], dim=-1)
-            proto_norm = F.softmax(outputs["proto_logits"], dim=-1)
-            combined_logits = 0.7 * logits_norm + 0.3 * proto_norm
-            preds = combined_logits.argmax(dim=-1)
+            preds = outputs["logits"].argmax(dim=-1)
 
             all_preds.extend(preds.cpu().numpy())
             all_labels.extend(labels.cpu().numpy())
@@ -1432,7 +1437,7 @@ class Trainer:
 
     def save_checkpoint(self, tag: str = "latest"):
         os.makedirs(self.config.save_dir, exist_ok=True)
-        path = os.path.join(self.config.save_dir, f"codeorigin_{self.config.task}_{tag}.pt")
+        path = os.path.join(self.config.save_dir, f"spectralcode_{self.config.task}_{tag}.pt")
         torch.save({
             "model_state_dict": self.model.state_dict(),
             "best_f1": self.best_f1,
@@ -1441,7 +1446,7 @@ class Trainer:
         logger.info(f"Saved checkpoint to {path}")
 
     def load_checkpoint(self, tag: str = "best"):
-        path = os.path.join(self.config.save_dir, f"codeorigin_{self.config.task}_{tag}.pt")
+        path = os.path.join(self.config.save_dir, f"spectralcode_{self.config.task}_{tag}.pt")
         if os.path.exists(path):
             ckpt = torch.load(path, map_location=self.config.device, weights_only=True)
             self.model.load_state_dict(ckpt["model_state_dict"])
@@ -1451,7 +1456,7 @@ class Trainer:
 
     def train(self):
         logger.info("=" * 60)
-        logger.info(f"Starting CodeOrigin Training - Task {self.config.task}")
+        logger.info(f"[EXP11] Starting SpectralCode Training - Task {self.config.task}")
         logger.info(f"Num classes: {self.model.num_classes}")
         logger.info(f"Device: {self.config.device}")
         logger.info(f"Precision: {self.precision}")
@@ -1521,7 +1526,7 @@ def main(task: str = "T1", config: Optional[Config] = None):
     set_seed(config.seed)
 
     logger.info(f"{'='*60}")
-    logger.info(f"CodeOrigin - AI-Generated Code Detection")
+    logger.info(f"[EXP11] SpectralCode - AI-Generated Code Detection")
     logger.info(f"Task: {config.task}")
     logger.info(f"Benchmark: {config.benchmark}")
     logger.info(f"GPU: {_get_gpu_name()}")
@@ -1584,8 +1589,8 @@ def main(task: str = "T1", config: Optional[Config] = None):
     )
 
     # Model
-    logger.info(f"Building CodeOrigin model...")
-    model = CodeOrigin(config, num_classes)
+    logger.info(f"Building SpectralCode model...")
+    model = SpectralCode(config, num_classes)
 
     # Count parameters
     total_params = sum(p.numel() for p in model.parameters())
@@ -1633,7 +1638,7 @@ def run_benchmark_suite(run_plan: List[Tuple[str, str]], base_config: Optional[C
 
         run_key = f"{bench}_{bench_task}"
         logger.info("\n" + "=" * 70)
-        logger.info(f"BENCHMARK SUITE RUN: {bench.upper()} | task={bench_task}")
+        logger.info(f"[EXP11] BENCHMARK SUITE RUN: {bench.upper()} | task={bench_task}")
         logger.info("=" * 70)
         results[run_key] = main(task=bench_task, config=cfg)
 
@@ -1654,7 +1659,7 @@ def run_benchmark_suite(run_plan: List[Tuple[str, str]], base_config: Optional[C
     # Machine-readable block
     ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     logger.info("\n=== SUITE_RESULTS_START ===")
-    logger.info(f"timestamp={ts} | method=CodeOrigin | runs={len(run_plan)}")
+    logger.info(f"timestamp={ts} | method=EXP11_SpectralCode | runs={len(run_plan)}")
     logger.info("| run_key | best_val_f1 | test_f1 | test_weighted_f1 |")
     logger.info("|---|---:|---:|---:|")
     for run_key, stats in results.items():
@@ -1667,7 +1672,7 @@ def run_benchmark_suite(run_plan: List[Tuple[str, str]], base_config: Optional[C
 
     machine_block = {
         "timestamp": ts,
-        "method": "CodeOrigin",
+        "method": "SpectralCode",
         "run_plan": [f"{b}_{t}" for b, t in run_plan],
         "results": results,
     }

@@ -139,7 +139,7 @@ def apply_hardware_profile(config: "Config") -> "Config":
     if "H100" not in gpu_name:
         return config
 
-    # H100 profile: prioritize throughput while staying stable for seq_len=512.
+    # H100 profile: maximize throughput on H100 80GB HBM3.
     config.precision = "bf16" if config.precision == "auto" else config.precision
     config.batch_size = max(config.batch_size, 64)
     config.grad_accum_steps = 1
@@ -147,6 +147,8 @@ def apply_hardware_profile(config: "Config") -> "Config":
     config.prefetch_factor = max(config.prefetch_factor, 4)
     config.log_every = max(config.log_every, 200)
     config.eval_every = max(config.eval_every, 2000)
+
+    # torch.compile will be applied after model creation (in main)
 
     logger.info(
         "Applied H100 profile | precision=%s | batch_size=%d | accum=%d | workers=%d | prefetch=%d",
@@ -547,31 +549,43 @@ def _is_droid_adversarial_row(row: Dict[str, object]) -> bool:
 
 
 def _map_droid_label_to_task(row: Dict[str, object], task: str) -> int:
-    """Map DroidCollection rows to task labels."""
+    """
+    Map DroidCollection rows to task labels.
+
+    Label semantics per task:
+      T1 (2-class): 0=human, 1=machine (any non-human)
+      T3 (3-class): 0=human, 1=machine_generated, 2=machine_refined
+      T4 (4-class): 0=human, 1=machine_generated, 2=machine_refined, 3=adversarial
+
+    Note: AICD T3 uses different semantics (4-class: human/machine/hybrid/adversarial).
+          Droid T3 is strictly 3-class. Each benchmark trains independently.
+    """
     normalized = str(row.get("Label", "")).upper()
+    is_adversarial = _is_droid_adversarial_row(row)
+
     if task == "T1":
         return 0 if normalized == "HUMAN_GENERATED" else 1
+
     if task == "T3":
-        # Droid 3-class: human / machine-generated / machine-refined
         if normalized == "HUMAN_GENERATED":
             return 0
-        if normalized == "MACHINE_GENERATED":
+        if normalized == "MACHINE_GENERATED" and not is_adversarial:
             return 1
-        if normalized == "MACHINE_REFINED":
+        if normalized == "MACHINE_REFINED" or is_adversarial:
             return 2
         return -1
+
     if task == "T4":
-        # Droid 4-class: human / machine-generated / machine-refined / adversarial
         if normalized == "HUMAN_GENERATED":
             return 0
+        if is_adversarial:
+            return 3
         if normalized == "MACHINE_GENERATED":
             return 1
-        if _is_droid_adversarial_row(row):
-            return 3
         if normalized == "MACHINE_REFINED":
             return 2
         return -1
-    # T2 family IDs are benchmark-specific, so we do not merge Droid by default.
+
     return -1
 
 
@@ -729,19 +743,26 @@ def preflight_single_benchmark(config: Config) -> Dict[str, object]:
 def preflight_benchmark_suite(task: str, base_config: Config) -> Dict[str, object]:
     """Run preflight checks for all requested benchmarks and print copyable summary."""
     reports: Dict[str, object] = {}
-    planned = [bench for bench in ["aicd", "droid"] if _supports_task_for_benchmark(bench, task)]
 
-    for bench in planned:
+    # Preflight AICD with user-specified task
+    if _supports_task_for_benchmark("aicd", task):
         cfg = Config(**vars(base_config))
         cfg.task = task
-        cfg.benchmark = bench
+        cfg.benchmark = "aicd"
         cfg = apply_hardware_profile(cfg)
-        reports[bench] = preflight_single_benchmark(cfg)
+        reports["aicd"] = preflight_single_benchmark(cfg)
+
+    # Preflight Droid always with T3 (native 3-class)
+    cfg = Config(**vars(base_config))
+    cfg.task = "T3"
+    cfg.benchmark = "droid"
+    cfg = apply_hardware_profile(cfg)
+    reports["droid_T3"] = preflight_single_benchmark(cfg)
 
     # Copy/paste block for research logs
     payload = {
         "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        "task": task,
+        "run_plan": [f"{b}_{t}" for b, t in run_plan],
         "preflight_reports": reports,
     }
     logger.info("\n=== PREFLIGHT_REPORT_START ===")
@@ -1112,7 +1133,10 @@ class CausAST(nn.Module):
         self.num_classes = num_classes
 
         # Token-level encoder (ModernBERT)
-        self.token_encoder = AutoModel.from_pretrained(config.encoder_name)
+        self.token_encoder = AutoModel.from_pretrained(
+            config.encoder_name,
+            attn_implementation="sdpa",  # Flash Attention via PyTorch SDPA
+        )
         token_hidden_size = self.token_encoder.config.hidden_size
 
         # AST-level encoder
@@ -1577,38 +1601,52 @@ def main(task: str = "T1", config: Optional[Config] = None):
     return run_stats
 
 
-def run_benchmark_suite(task: str = "T1", base_config: Optional[Config] = None):
+def run_benchmark_suite(task: str = "T1", base_config: Optional[Config] = None,
+                        droid_ablation_t4: bool = False):
     """
     Train the same method on two independent benchmarks sequentially.
     Each benchmark run initializes a fresh model and optimizer state.
+
+    Droid always runs its native multi-class task:
+      - T3 (3-class: human / machine_generated / machine_refined) as default
+      - T4 (4-class: +adversarial) as optional ablation if droid_ablation_t4=True
+    AICD runs whatever task the user specifies.
     """
     if base_config is None:
         base_config = Config(task=task)
 
     results: Dict[str, Dict[str, float]] = {}
-    benchmarks = [bench for bench in ["aicd", "droid"] if _supports_task_for_benchmark(bench, task)]
     original_save_dir = base_config.save_dir
 
-    for bench in benchmarks:
+    # Build run plan: [(benchmark, task_for_this_run), ...]
+    run_plan = []
+    if _supports_task_for_benchmark("aicd", task):
+        run_plan.append(("aicd", task))
+    # Droid always runs T3 (native 3-class)
+    run_plan.append(("droid", "T3"))
+    if droid_ablation_t4:
+        run_plan.append(("droid", "T4"))
+
+    for bench, bench_task in run_plan:
         cfg = Config(**vars(base_config))
-        cfg.task = task
+        cfg.task = bench_task
         cfg.benchmark = bench
         cfg = apply_hardware_profile(cfg)
-        # Keep checkpoints fully separated between benchmarks.
-        cfg.save_dir = os.path.join(original_save_dir, f"{bench}_{task}")
+        cfg.save_dir = os.path.join(original_save_dir, f"{bench}_{bench_task}")
 
+        run_key = f"{bench}_{bench_task}"
         logger.info("\n" + "=" * 70)
-        logger.info(f"BENCHMARK SUITE RUN: {bench.upper()} | task={task}")
+        logger.info(f"BENCHMARK SUITE RUN: {bench.upper()} | task={bench_task}")
         logger.info("=" * 70)
-        results[bench] = main(task=task, config=cfg)
+        results[run_key] = main(task=bench_task, config=cfg)
 
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
 
     logger.info("\nBenchmark suite summary:")
-    for bench, stats in results.items():
+    for run_key, stats in results.items():
         logger.info(
-            f"{bench.upper()} -> best_val_f1={stats['best_val_f1']:.4f}, "
+            f"{run_key.upper()} -> best_val_f1={stats['best_val_f1']:.4f}, "
             f"test_f1={stats['test_f1']:.4f}"
         )
 
@@ -1618,21 +1656,21 @@ def run_benchmark_suite(task: str = "T1", base_config: Optional[Config] = None):
     logger.info(f"timestamp={ts} | task={task} | method=CausAST")
     logger.info("| benchmark | task | best_val_f1 | test_f1 |")
     logger.info("|---|---|---:|---:|")
-    for bench in ["aicd", "droid"]:
-        if bench in results:
+    for run_key, stats in results.items():
+        logger.info(
+            f"| {run_key.upper()} | "
+            f"{stats['best_val_f1']:.4f} | {stats['test_f1']:.4f} |"
+        )
+        if "test_weighted_f1" in stats:
             logger.info(
-                f"| {bench.upper()} | {task} | "
-                f"{results[bench]['best_val_f1']:.4f} | {results[bench]['test_f1']:.4f} |"
+                f"{run_key.upper()} weighted_test_f1={stats['test_weighted_f1']:.4f}"
             )
-            if "test_weighted_f1" in results[bench]:
-                logger.info(
-                    f"{bench.upper()} weighted_test_f1={results[bench]['test_weighted_f1']:.4f}"
-                )
     logger.info("=== SUITE_RESULTS_END ===")
 
     machine_block = {
         "timestamp": ts,
-        "task": task,
+        "aicd_task": task,
+        "droid_task": "T3",
         "method": "CausAST",
         "results": results,
     }
@@ -1648,10 +1686,29 @@ if __name__ == "__main__":
     # Kaggle standalone defaults:
     # - No CLI/terminal arguments required.
     # - Edit this block directly, then run the script.
+    #
+    # Task semantics per benchmark:
+    # +------+-----------------------------+------------------------------+
+    # | Task | AICD-Bench                  | DroidCollection              |
+    # +------+-----------------------------+------------------------------+
+    # | T1   | 2-cls: human vs machine     | 2-cls: human vs machine      |
+    # | T2   | 12-cls: 11 families + human | (not supported)              |
+    # | T3   | 4-cls: human/machine/       | 3-cls: human/machine_gen/    |
+    # |      |   hybrid/adversarial        |   machine_refined            |
+    # | T4   | (not supported)             | 4-cls: human/machine_gen/    |
+    # |      |                             |   machine_refined/adversar.  |
+    # +------+-----------------------------+------------------------------+
+    #
+    # RUN_MODE="both" trains AICD and Droid independently (separate models).
+    # RUN_MODE="single" trains only the specified BENCHMARK.
+
     RUN_MODE = "both"  # "single" or "both"
-    TASK = "T1"        # "T1", "T2", "T3", "T4" (T4 is Droid-only 4-class)
+    TASK = "T1"        # AICD task: "T1", "T2", "T3"
     BENCHMARK = "aicd" # used only when RUN_MODE == "single"
-    RUN_PREFLIGHT_CHECK = True  # If True, stop training immediately when any check fails.
+    RUN_PREFLIGHT_CHECK = True
+    DROID_ABLATION_T4 = False  # If True, also run Droid 4-class (T4) as ablation
+    # NOTE: In "both" mode, Droid ALWAYS runs T3 (3-class: human/gen/refined).
+    #       Set DROID_ABLATION_T4=True to additionally run T4 (4-class: +adversarial).
 
     cfg = Config(
         task=TASK,
@@ -1678,7 +1735,8 @@ if __name__ == "__main__":
                 preflight_single_benchmark(cfg)
 
         if RUN_MODE == "both":
-            run_benchmark_suite(task=cfg.task, base_config=cfg)
+            run_benchmark_suite(task=cfg.task, base_config=cfg,
+                                droid_ablation_t4=DROID_ABLATION_T4)
         else:
             main(task=cfg.task, config=cfg)
     except PreflightError as e:

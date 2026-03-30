@@ -1,18 +1,23 @@
 """
-CodeOrigin: Domain-Invariant AI-Generated Code Detection via
-Style-Content Disentanglement and Hierarchical Contrastive Learning
+[EXP10] MetaDomain: Reptile Meta-Learning for Domain-Agnostic Code Detection
 
-Single-file implementation for Kaggle.
-Target: AICD-Bench + DroidCollection
-(https://huggingface.co/AICD-bench/AICD-Bench)
-(https://huggingface.co/datasets/project-droid/DroidCollection)
+Key Innovation:
+- Treats each programming language as a separate meta-learning task
+- Reptile algorithm learns initialization that adapts to ANY domain
+- No second-order gradients (unlike MAML) — efficient on H100
+- Inner loop: K steps on one language; Outer loop: interpolate toward solution
+- Should generalize to unseen languages/domains by construction
 
-Usage on Kaggle:
-    1. Upload this file to a Kaggle notebook
-    2. Run: !pip install datasets transformers accelerate tree-sitter tree-sitter-languages
-    3. Execute the cells or run: python codeorigin.py --task T1
+Algorithm:
+  for each meta-step:
+    θ' = θ
+    sample language L from training data
+    for k = 1..K:
+      θ' = θ' - α * ∇L_L(θ')  (inner loop on language L)
+    θ = θ + β * (θ' - θ)       (outer loop: Reptile update)
 
-Author: [Your Name]
+Reference: Reptile (Nichol et al., 2018) + domain-as-task formulation
+Target: NeurIPS 2026 ORAL
 """
 
 import os
@@ -24,6 +29,7 @@ import warnings
 import importlib.util
 import subprocess
 import sys
+import copy
 from datetime import datetime
 from typing import Optional, Dict, List, Tuple
 from dataclasses import dataclass, field
@@ -160,8 +166,7 @@ class Config:
     # Model
     encoder_name: str = "answerdotai/ModernBERT-base"
     max_length: int = 512
-    z_style_dim: int = 256
-    z_content_dim: int = 256
+    fusion_dim: int = 512  # unified representation dimension
     gnn_hidden_dim: int = 128
     gnn_layers: int = 2
     num_ast_node_types: int = 256  # vocabulary size for AST node types
@@ -175,8 +180,12 @@ class Config:
         "T3": 4,   # human, machine, hybrid, adversarial
         "T4": 4,   # Droid-only: human, machine, refined, adversarial
     })
-    num_languages: int = 9  # auxiliary task
-    num_domains: int = 3    # algorithmic, research, general-purpose
+
+    # MetaDomain specific
+    meta_inner_steps: int = 5     # K inner gradient steps per task
+    meta_inner_lr: float = 1e-4   # inner loop learning rate
+    meta_outer_lr: float = 1e-3   # outer loop interpolation rate (beta)
+    meta_tasks_per_step: int = 3  # number of tasks sampled per meta-step
 
     # Training
     epochs: int = 3  # aligned with paper-style baseline setting
@@ -187,19 +196,6 @@ class Config:
     weight_decay: float = 0.01
     warmup_ratio: float = 0.1
     max_grad_norm: float = 1.0
-
-    # Loss weights
-    lambda_disentangle: float = 0.1
-    lambda_adversarial: float = 0.5
-    lambda_contrastive: float = 0.3
-    lambda_reconstruct: float = 0.1
-
-    # Contrastive learning
-    temperature: float = 0.07
-    prototype_momentum: float = 0.99
-
-    # Domain adversarial
-    grl_lambda_max: float = 1.0  # max lambda for GRL schedule
 
     # Data
     max_train_samples: int = 100_000  # subsample for Kaggle feasibility
@@ -223,7 +219,7 @@ class Config:
     device: str = "cuda" if torch.cuda.is_available() else "cpu"
     pin_memory: bool = True
     non_blocking: bool = True
-    save_dir: str = "./codeorigin_checkpoints"
+    save_dir: str = "./meta_domain_checkpoints"
     log_every: int = 100
     eval_every: int = 1000
 
@@ -234,6 +230,31 @@ def set_seed(seed: int):
     torch.manual_seed(seed)
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(seed)
+
+
+# ============================================================================
+# Language Inference
+# ============================================================================
+
+def infer_language(code: str) -> str:
+    """Infer programming language from code using simple heuristics."""
+    if "def " in code and ":" in code and ("import " in code or "print(" in code):
+        return "python"
+    if "public static void main" in code or "System.out" in code:
+        return "java"
+    if "#include" in code:
+        return "cpp"
+    if "func " in code and "package " in code:
+        return "go"
+    if "fn " in code and ("let mut" in code or "-> " in code):
+        return "rust"
+    if "function " in code and ("var " in code or "const " in code or "=>" in code):
+        return "javascript"
+    if "<?php" in code or ("$" in code and "->" in code):
+        return "php"
+    if "using System" in code or "namespace " in code:
+        return "csharp"
+    return "unknown"
 
 
 # ============================================================================
@@ -744,31 +765,6 @@ def preflight_benchmark_suite(run_plan: List[Tuple[str, str]], base_config: Conf
 # Model Components
 # ============================================================================
 
-class GradientReversalFunction(torch.autograd.Function):
-    """Gradient Reversal Layer for domain adversarial training."""
-
-    @staticmethod
-    def forward(ctx, x, lambda_val):
-        ctx.lambda_val = lambda_val
-        return x.clone()
-
-    @staticmethod
-    def backward(ctx, grad_output):
-        return -ctx.lambda_val * grad_output, None
-
-
-class GradientReversalLayer(nn.Module):
-    def __init__(self):
-        super().__init__()
-        self.lambda_val = 0.0
-
-    def set_lambda(self, val):
-        self.lambda_val = val
-
-    def forward(self, x):
-        return GradientReversalFunction.apply(x, self.lambda_val)
-
-
 class ASTEncoder(nn.Module):
     """Encodes AST node type sequences into a fixed-size representation."""
 
@@ -852,194 +848,21 @@ class CrossAttentionFusion(nn.Module):
         return fused
 
 
-class StyleContentDisentangler(nn.Module):
-    """
-    Disentangles code representation into style (authorship) and content (semantics).
-    Uses variational approach with mutual information minimization.
-    """
-
-    def __init__(self, input_dim: int, z_style_dim: int, z_content_dim: int):
-        super().__init__()
-
-        # Style encoder: captures HOW code is written
-        self.style_encoder = nn.Sequential(
-            nn.Linear(input_dim, input_dim),
-            nn.LayerNorm(input_dim),
-            nn.GELU(),
-            nn.Dropout(0.1),
-            nn.Linear(input_dim, z_style_dim * 2),  # mean + logvar
-        )
-
-        # Content encoder: captures WHAT code does
-        self.content_encoder = nn.Sequential(
-            nn.Linear(input_dim, input_dim),
-            nn.LayerNorm(input_dim),
-            nn.GELU(),
-            nn.Dropout(0.1),
-            nn.Linear(input_dim, z_content_dim * 2),  # mean + logvar
-        )
-
-        # Reconstruction decoder
-        self.decoder = nn.Sequential(
-            nn.Linear(z_style_dim + z_content_dim, input_dim),
-            nn.LayerNorm(input_dim),
-            nn.GELU(),
-            nn.Linear(input_dim, input_dim),
-        )
-
-        # CLUB MI estimator (Cheng et al., 2020)
-        self.mi_estimator = nn.Sequential(
-            nn.Linear(z_style_dim, 256),
-            nn.ReLU(),
-            nn.Linear(256, z_content_dim),
-        )
-
-        self.z_style_dim = z_style_dim
-        self.z_content_dim = z_content_dim
-
-    def reparameterize(self, mu: torch.Tensor, logvar: torch.Tensor) -> torch.Tensor:
-        """Reparameterization trick."""
-        if self.training:
-            std = torch.exp(0.5 * logvar)
-            eps = torch.randn_like(std)
-            return mu + eps * std
-        return mu
-
-    def forward(self, h_code: torch.Tensor) -> Dict[str, torch.Tensor]:
-        # Encode style
-        style_params = self.style_encoder(h_code)
-        style_mu, style_logvar = style_params.chunk(2, dim=-1)
-        z_style = self.reparameterize(style_mu, style_logvar)
-
-        # Encode content
-        content_params = self.content_encoder(h_code)
-        content_mu, content_logvar = content_params.chunk(2, dim=-1)
-        z_content = self.reparameterize(content_mu, content_logvar)
-
-        # Reconstruct
-        h_recon = self.decoder(torch.cat([z_style, z_content], dim=-1))
-
-        # MI estimation (CLUB upper bound)
-        content_pred = self.mi_estimator(z_style.detach())
-
-        return {
-            "z_style": z_style,
-            "z_content": z_content,
-            "style_mu": style_mu,
-            "style_logvar": style_logvar,
-            "content_mu": content_mu,
-            "content_logvar": content_logvar,
-            "h_recon": h_recon,
-            "content_pred": content_pred,
-        }
-
-    def compute_mi_loss(self, z_style: torch.Tensor, z_content: torch.Tensor) -> torch.Tensor:
-        """CLUB MI upper bound estimation."""
-        content_pred = self.mi_estimator(z_style)
-
-        # Positive samples: matched pairs
-        positive = -0.5 * ((z_content - content_pred) ** 2).sum(dim=-1)
-
-        # Negative samples: random shuffle
-        z_content_shuffle = z_content[torch.randperm(z_content.size(0), device=z_content.device)]
-        negative = -0.5 * ((z_content_shuffle - content_pred) ** 2).sum(dim=-1)
-
-        mi_upper = (positive - negative).mean()
-        return F.relu(mi_upper)  # Ensure non-negative
-
-    def compute_kl_loss(
-        self,
-        style_mu: torch.Tensor, style_logvar: torch.Tensor,
-        content_mu: torch.Tensor, content_logvar: torch.Tensor,
-    ) -> torch.Tensor:
-        """KL divergence to regularize latent spaces."""
-        kl_style = -0.5 * (1 + style_logvar - style_mu.pow(2) - style_logvar.exp()).sum(dim=-1).mean()
-        kl_content = -0.5 * (1 + content_logvar - content_mu.pow(2) - content_logvar.exp()).sum(dim=-1).mean()
-        return 0.5 * (kl_style + kl_content)
-
-
-class PrototypicalContrastiveHead(nn.Module):
-    """
-    Hierarchical prototypical contrastive learning for family attribution.
-    Maintains learnable prototypes for each class.
-    """
-
-    def __init__(self, input_dim: int, num_classes: int, temperature: float = 0.07):
-        super().__init__()
-        self.prototypes = nn.Parameter(torch.randn(num_classes, input_dim))
-        nn.init.xavier_uniform_(self.prototypes)
-        self.temperature = temperature
-        self.num_classes = num_classes
-        self.classifier = nn.Linear(input_dim, num_classes)
-
-    def forward(self, z_style: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
-        """
-        Returns:
-            logits: classification logits
-            proto_logits: prototype-based similarity logits
-        """
-        logits = self.classifier(z_style)
-
-        # Prototype-based classification
-        z_norm = F.normalize(z_style, dim=-1)
-        p_norm = F.normalize(self.prototypes, dim=-1)
-        proto_logits = torch.mm(z_norm, p_norm.t()) / self.temperature
-
-        return logits, proto_logits
-
-    def contrastive_loss(
-        self, z_style: torch.Tensor, labels: torch.Tensor
-    ) -> torch.Tensor:
-        """Supervised prototypical contrastive loss."""
-        z_norm = F.normalize(z_style, dim=-1)
-        p_norm = F.normalize(self.prototypes, dim=-1)
-
-        # Similarity to all prototypes
-        sim = torch.mm(z_norm, p_norm.t()) / self.temperature  # (B, num_classes)
-
-        # Cross-entropy with prototype targets
-        loss = F.cross_entropy(sim, labels)
-
-        # Pull toward own prototype, push from others (SupCon-style)
-        batch_size = z_style.size(0)
-        if batch_size < 2:
-            return loss
-
-        # Pairwise similarity in batch
-        z_sim = torch.mm(z_norm, z_norm.t()) / self.temperature  # (B, B)
-
-        # Mask: same class = positive (no grad, safe for in-place)
-        label_mask = (labels.unsqueeze(0) == labels.unsqueeze(1))  # (B, B)
-        self_mask = ~torch.eye(batch_size, dtype=torch.bool, device=z_style.device)
-        label_mask = label_mask & self_mask  # exclude self
-
-        if label_mask.sum() == 0:
-            return loss
-
-        # SupCon loss - avoid in-place ops on tensors in computation graph
-        exp_sim = torch.exp(z_sim) * self_mask.float()  # zero out self-similarity
-
-        log_prob = z_sim - torch.log(exp_sim.sum(dim=1, keepdim=True) + 1e-8)
-        mean_log_prob = (label_mask * log_prob).sum(dim=1) / (label_mask.sum(dim=1) + 1e-8)
-        supcon_loss = -mean_log_prob[label_mask.sum(dim=1) > 0].mean()
-
-        return loss + 0.5 * supcon_loss
-
-
 # ============================================================================
-# Full Model: CodeOrigin
+# Full Model: MetaDomain
 # ============================================================================
 
-class CodeOrigin(nn.Module):
+class MetaDomain(nn.Module):
     """
-    CodeOrigin: Domain-Invariant AI-Generated Code Detection via
-    Style-Content Disentanglement and Hierarchical Contrastive Learning.
+    MetaDomain: Reptile Meta-Learning for Domain-Agnostic Code Detection.
 
     Components:
-    1. Multi-Granularity Encoder (token + AST + structural)
-    2. Style-Content Disentanglement
-    3. Cross-Domain Adversarial Alignment
-    4. Hierarchical Prototypical Contrastive Learning
+    1. Multi-Granularity Encoder (ModernBERT + AST + structural)
+    2. CrossAttentionFusion
+    3. Linear classifier head
+
+    No disentanglement, no GRL, no prototypical head.
+    Generalization comes from Reptile meta-learning over language tasks.
     """
 
     def __init__(self, config: Config, num_classes: int):
@@ -1068,49 +891,20 @@ class CodeOrigin(nn.Module):
             hidden_dim=config.gnn_hidden_dim,
         )
 
-        # Cross-attention fusion
-        fusion_dim = config.z_style_dim + config.z_content_dim  # unified repr dim
+        # === Component 2: Cross-attention fusion ===
         self.fusion = CrossAttentionFusion(
             token_dim=token_hidden_size,
             ast_dim=config.gnn_hidden_dim,
             struct_dim=config.gnn_hidden_dim,
-            output_dim=fusion_dim,
+            output_dim=config.fusion_dim,
         )
 
-        # === Component 2: Style-Content Disentanglement ===
-        self.disentangler = StyleContentDisentangler(
-            input_dim=fusion_dim,
-            z_style_dim=config.z_style_dim,
-            z_content_dim=config.z_content_dim,
-        )
-
-        # === Component 3: Domain Adversarial ===
-        self.grl = GradientReversalLayer()
-        self.domain_lang_classifier = nn.Sequential(
-            nn.Linear(config.z_style_dim, 128),
-            nn.ReLU(),
+        # === Component 3: Classifier ===
+        self.classifier = nn.Sequential(
+            nn.LayerNorm(config.fusion_dim),
             nn.Dropout(0.1),
-            nn.Linear(128, config.num_languages),
+            nn.Linear(config.fusion_dim, num_classes),
         )
-        self.domain_type_classifier = nn.Sequential(
-            nn.Linear(config.z_style_dim, 128),
-            nn.ReLU(),
-            nn.Dropout(0.1),
-            nn.Linear(128, config.num_domains),
-        )
-
-        # === Component 4: Task Head ===
-        self.proto_head = PrototypicalContrastiveHead(
-            input_dim=config.z_style_dim,
-            num_classes=num_classes,
-            temperature=config.temperature,
-        )
-
-        # Content auxiliary head (predict language from z_content for disentanglement)
-        self.content_aux_head = nn.Linear(config.z_content_dim, config.num_languages)
-
-        # Focal loss gamma
-        self.focal_gamma = 2.0
 
     def forward(
         self,
@@ -1139,39 +933,13 @@ class CodeOrigin(nn.Module):
         # Fuse
         h_code = self.fusion(token_repr, ast_repr, struct_repr)  # (B, fusion_dim)
 
-        # === Style-Content Disentanglement ===
-        disent_out = self.disentangler(h_code)
-        z_style = disent_out["z_style"]      # (B, z_style_dim)
-        z_content = disent_out["z_content"]  # (B, z_content_dim)
+        # === Classification ===
+        logits = self.classifier(h_code)  # (B, num_classes)
 
-        # === Task Prediction ===
-        logits, proto_logits = self.proto_head(z_style)
-
-        # === Domain Adversarial (on z_style) ===
-        z_style_grl = self.grl(z_style)
-        domain_lang_logits = self.domain_lang_classifier(z_style_grl)
-        domain_type_logits = self.domain_type_classifier(z_style_grl)
-
-        # === Content Auxiliary ===
-        content_lang_logits = self.content_aux_head(z_content)
-
-        output = {
+        return {
             "logits": logits,
-            "proto_logits": proto_logits,
-            "z_style": z_style,
-            "z_content": z_content,
             "h_code": h_code,
-            "h_recon": disent_out["h_recon"],
-            "domain_lang_logits": domain_lang_logits,
-            "domain_type_logits": domain_type_logits,
-            "content_lang_logits": content_lang_logits,
-            "style_mu": disent_out["style_mu"],
-            "style_logvar": disent_out["style_logvar"],
-            "content_mu": disent_out["content_mu"],
-            "content_logvar": disent_out["content_logvar"],
         }
-
-        return output
 
 
 # ============================================================================
@@ -1193,139 +961,108 @@ class FocalLoss(nn.Module):
         return focal_loss.mean()
 
 
-def compute_all_losses(
-    model: CodeOrigin,
-    outputs: Dict[str, torch.Tensor],
-    labels: torch.Tensor,
-    config: Config,
-    focal_loss_fn: Optional[FocalLoss] = None,
-) -> Dict[str, torch.Tensor]:
-    """Compute all loss components."""
-
-    # 1. Task loss (focal loss for class imbalance)
-    if focal_loss_fn is None:
-        focal_loss_fn = FocalLoss(gamma=2.0)
-    task_loss = focal_loss_fn(outputs["logits"], labels)
-
-    # Prototype cross-entropy loss
-    proto_loss = F.cross_entropy(outputs["proto_logits"], labels)
-
-    # Contrastive loss
-    contrastive_loss = model.proto_head.contrastive_loss(outputs["z_style"], labels)
-
-    # 2. Disentanglement losses
-    # MI minimization between z_style and z_content
-    mi_loss = model.disentangler.compute_mi_loss(outputs["z_style"], outputs["z_content"])
-
-    # KL regularization
-    kl_loss = model.disentangler.compute_kl_loss(
-        outputs["style_mu"], outputs["style_logvar"],
-        outputs["content_mu"], outputs["content_logvar"],
-    )
-
-    # Reconstruction loss
-    recon_loss = F.mse_loss(outputs["h_recon"], outputs["h_code"].detach())
-
-    disentangle_loss = mi_loss + 0.01 * kl_loss
-
-    # 3. Domain adversarial loss: encourage z_style to be domain-invariant
-    #    by maximizing entropy of domain predictions (uniform = no domain info)
-    #    GRL handles gradient reversal so the encoder learns to confuse classifiers
-    domain_lang_probs = F.softmax(outputs["domain_lang_logits"], dim=-1)
-    # Target: uniform distribution over languages
-    uniform_lang = torch.ones_like(domain_lang_probs) / domain_lang_probs.size(-1)
-    adversarial_lang = F.kl_div(
-        torch.log(domain_lang_probs + 1e-8), uniform_lang, reduction="batchmean"
-    )
-
-    domain_type_probs = F.softmax(outputs["domain_type_logits"], dim=-1)
-    uniform_type = torch.ones_like(domain_type_probs) / domain_type_probs.size(-1)
-    adversarial_type = F.kl_div(
-        torch.log(domain_type_probs + 1e-8), uniform_type, reduction="batchmean"
-    )
-
-    # Minimize KL to uniform = push toward domain-invariant representation
-    adversarial_loss = adversarial_lang + adversarial_type
-
-    # Total loss
-    total_loss = (
-        task_loss
-        + 0.3 * proto_loss
-        + config.lambda_contrastive * contrastive_loss
-        + config.lambda_disentangle * disentangle_loss
-        + config.lambda_adversarial * adversarial_loss
-        + config.lambda_reconstruct * recon_loss
-    )
-
-    return {
-        "total": total_loss,
-        "task": task_loss,
-        "proto": proto_loss,
-        "contrastive": contrastive_loss,
-        "disentangle": disentangle_loss,
-        "adversarial": adversarial_loss,
-        "recon": recon_loss,
-        "mi": mi_loss,
-        "kl": kl_loss,
-    }
-
-
 # ============================================================================
-# Training Loop
+# Meta-Learning Trainer (Reptile)
 # ============================================================================
 
-class Trainer:
-    def __init__(self, config: Config, model: CodeOrigin, train_loader, val_loader, test_loader, class_weights=None):
+class MetaTrainer:
+    """Reptile meta-learning trainer for domain-agnostic code detection."""
+
+    def __init__(
+        self,
+        config: Config,
+        model: MetaDomain,
+        train_dataset: AICDDataset,
+        lang_groups: Dict[str, List[int]],
+        val_loader: DataLoader,
+        test_loader: DataLoader,
+        class_weights: Optional[torch.Tensor] = None,
+    ):
         self.config = config
         self.model = model.to(config.device)
-        self.train_loader = train_loader
+        self.train_dataset = train_dataset
+        self.lang_groups = lang_groups  # {lang: [indices]}
         self.val_loader = val_loader
         self.test_loader = test_loader
         self.class_weights = class_weights.to(config.device) if class_weights is not None else None
 
-        # Separate parameter groups for different learning rates
-        encoder_params = list(model.token_encoder.parameters())
-        head_params = [p for n, p in model.named_parameters() if "token_encoder" not in n]
+        # Only keep languages with enough samples for at least one batch
+        self.languages = [
+            lang for lang, indices in lang_groups.items()
+            if len(indices) >= config.batch_size
+        ]
+        if not self.languages:
+            # Fallback: use all languages with any data
+            self.languages = [lang for lang, indices in lang_groups.items() if len(indices) > 0]
+            logger.warning(
+                f"No language has >= {config.batch_size} samples. "
+                f"Using all {len(self.languages)} languages with reduced batches."
+            )
 
-        self.optimizer = torch.optim.AdamW([
-            {"params": encoder_params, "lr": config.lr_encoder, "weight_decay": config.weight_decay},
-            {"params": head_params, "lr": config.lr_heads, "weight_decay": config.weight_decay},
-        ])
+        logger.info(f"Meta-learning languages ({len(self.languages)}): {self.languages}")
 
-        total_steps = len(train_loader) * config.epochs // config.grad_accum_steps
-        warmup_steps = int(total_steps * config.warmup_ratio)
-        self.scheduler = get_cosine_schedule_with_warmup(
-            self.optimizer, warmup_steps, total_steps,
-        )
-
+        # Precision setup
         precision = config.precision.lower()
         if precision == "auto":
             precision = "bf16" if config.device == "cuda" else "fp32"
         self.precision = precision
-
         use_amp = config.device == "cuda" and precision in ("bf16", "fp16")
         self.use_amp = use_amp
         self.amp_dtype = torch.bfloat16 if precision == "bf16" else torch.float16
         self.scaler = GradScaler(enabled=(use_amp and precision == "fp16"))
+
         self.focal_loss = FocalLoss(gamma=2.0, weight=self.class_weights)
         self.best_f1 = 0.0
         self.global_step = 0
         self.last_eval_metrics: Dict[str, Dict[str, float]] = {}
 
-    def train_epoch(self, epoch: int):
+        # DataLoader kwargs for task-specific loaders
+        pin = config.pin_memory and config.device == "cuda"
+        self.loader_kwargs = {
+            "num_workers": config.num_workers,
+            "pin_memory": pin,
+            "persistent_workers": False,  # task loaders are ephemeral
+        }
+        if config.num_workers > 0:
+            self.loader_kwargs["prefetch_factor"] = config.prefetch_factor
+
+    def meta_train_step(self):
+        """One Reptile meta-step: sample task, run inner loop, interpolate weights."""
+        # Save current weights
+        old_params = {name: p.data.clone() for name, p in self.model.named_parameters()}
+
+        # Sample a random language task
+        task_lang = random.choice(self.languages)
+        task_all_indices = self.lang_groups[task_lang]
+        num_needed = min(
+            len(task_all_indices),
+            self.config.batch_size * self.config.meta_inner_steps,
+        )
+        task_indices = random.sample(task_all_indices, num_needed)
+
+        # Create task-specific dataloader
+        task_subset = torch.utils.data.Subset(self.train_dataset, task_indices)
+        task_loader = DataLoader(
+            task_subset,
+            batch_size=self.config.batch_size,
+            shuffle=True,
+            drop_last=True,
+            **self.loader_kwargs,
+        )
+
+        # Inner loop: K gradient steps on this language
+        inner_optimizer = torch.optim.Adam(
+            self.model.parameters(), lr=self.config.meta_inner_lr,
+        )
         self.model.train()
-        total_losses = defaultdict(float)
-        num_batches = 0
 
-        # GRL lambda schedule (gradually increase)
-        progress = epoch / self.config.epochs
-        grl_lambda = 2.0 / (1.0 + math.exp(-10 * progress)) - 1.0
-        grl_lambda *= self.config.grl_lambda_max
-        self.model.grl.set_lambda(grl_lambda)
+        inner_loss_sum = 0.0
+        inner_steps_done = 0
 
-        self.optimizer.zero_grad()
+        for step, batch in enumerate(task_loader):
+            if step >= self.config.meta_inner_steps:
+                break
 
-        for batch_idx, batch in enumerate(self.train_loader):
             # Move to device
             input_ids = batch["input_ids"].to(self.config.device, non_blocking=self.config.non_blocking)
             attention_mask = batch["attention_mask"].to(self.config.device, non_blocking=self.config.non_blocking)
@@ -1333,52 +1070,33 @@ class Trainer:
             struct_feat = batch["struct_feat"].to(self.config.device, non_blocking=self.config.non_blocking)
             labels = batch["label"].to(self.config.device, non_blocking=self.config.non_blocking)
 
-            # Forward with mixed precision
+            # Forward + backward on task data
+            inner_optimizer.zero_grad()
             with autocast(device_type=self.config.device, enabled=self.use_amp, dtype=self.amp_dtype):
                 outputs = self.model(input_ids, attention_mask, ast_seq, struct_feat, labels)
-                losses = compute_all_losses(self.model, outputs, labels, self.config, self.focal_loss)
-                loss = losses["total"] / self.config.grad_accum_steps
+                loss = self.focal_loss(outputs["logits"], labels)
 
-            # Backward
             self.scaler.scale(loss).backward()
+            self.scaler.unscale_(inner_optimizer)
+            torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.config.max_grad_norm)
+            self.scaler.step(inner_optimizer)
+            self.scaler.update()
 
-            if (batch_idx + 1) % self.config.grad_accum_steps == 0:
-                self.scaler.unscale_(self.optimizer)
-                torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.config.max_grad_norm)
-                self.scaler.step(self.optimizer)
-                self.scaler.update()
-                self.optimizer.zero_grad()
-                self.scheduler.step()
-                self.global_step += 1
+            inner_loss_sum += loss.item()
+            inner_steps_done += 1
 
-            # Track losses
-            for k, v in losses.items():
-                total_losses[k] += v.item()
-            num_batches += 1
+        # Outer loop: Reptile interpolation
+        # theta = theta_old + beta * (theta_new - theta_old)
+        with torch.no_grad():
+            for name, p in self.model.named_parameters():
+                p.data = old_params[name] + self.config.meta_outer_lr * (p.data - old_params[name])
 
-            # Log
-            if (batch_idx + 1) % self.config.log_every == 0:
-                avg_loss = total_losses["total"] / num_batches
-                lr = self.scheduler.get_last_lr()[0]
-                logger.info(
-                    f"Epoch {epoch+1} | Step {batch_idx+1}/{len(self.train_loader)} | "
-                    f"Loss: {avg_loss:.4f} | LR: {lr:.2e} | GRL-λ: {grl_lambda:.3f}"
-                )
-
-            # Mid-epoch eval
-            if self.global_step > 0 and self.global_step % self.config.eval_every == 0:
-                val_f1 = self.evaluate(self.val_loader, "Val")
-                if val_f1 > self.best_f1:
-                    self.best_f1 = val_f1
-                    self.save_checkpoint("best")
-                    logger.info(f"New best Val F1: {val_f1:.4f}")
-                self.model.train()
-
-        # Return average losses
-        return {k: v / num_batches for k, v in total_losses.items()}
+        avg_inner_loss = inner_loss_sum / max(inner_steps_done, 1)
+        return task_lang, avg_inner_loss, inner_steps_done
 
     @torch.no_grad()
-    def evaluate(self, dataloader, split_name: str = "Val") -> float:
+    def evaluate(self, dataloader: DataLoader, split_name: str = "Val") -> float:
+        """Standard evaluation on a dataloader."""
         self.model.eval()
         all_preds = []
         all_labels = []
@@ -1395,16 +1113,13 @@ class Trainer:
             with autocast(device_type=self.config.device, enabled=self.use_amp, dtype=self.amp_dtype):
                 outputs = self.model(input_ids, attention_mask, ast_seq, struct_feat, labels)
 
-            # Normalize both to same scale before ensembling
-            logits_norm = F.softmax(outputs["logits"], dim=-1)
-            proto_norm = F.softmax(outputs["proto_logits"], dim=-1)
-            combined_logits = 0.7 * logits_norm + 0.3 * proto_norm
-            preds = combined_logits.argmax(dim=-1)
+            logits = outputs["logits"]
+            preds = logits.argmax(dim=-1)
 
             all_preds.extend(preds.cpu().numpy())
             all_labels.extend(labels.cpu().numpy())
 
-            loss = F.cross_entropy(outputs["logits"], labels)
+            loss = F.cross_entropy(logits, labels)
             total_loss += loss.item()
             num_batches += 1
 
@@ -1432,7 +1147,7 @@ class Trainer:
 
     def save_checkpoint(self, tag: str = "latest"):
         os.makedirs(self.config.save_dir, exist_ok=True)
-        path = os.path.join(self.config.save_dir, f"codeorigin_{self.config.task}_{tag}.pt")
+        path = os.path.join(self.config.save_dir, f"metadomain_{self.config.task}_{tag}.pt")
         torch.save({
             "model_state_dict": self.model.state_dict(),
             "best_f1": self.best_f1,
@@ -1441,7 +1156,7 @@ class Trainer:
         logger.info(f"Saved checkpoint to {path}")
 
     def load_checkpoint(self, tag: str = "best"):
-        path = os.path.join(self.config.save_dir, f"codeorigin_{self.config.task}_{tag}.pt")
+        path = os.path.join(self.config.save_dir, f"metadomain_{self.config.task}_{tag}.pt")
         if os.path.exists(path):
             ckpt = torch.load(path, map_location=self.config.device, weights_only=True)
             self.model.load_state_dict(ckpt["model_state_dict"])
@@ -1450,35 +1165,50 @@ class Trainer:
         return False
 
     def train(self):
+        """Reptile meta-training loop."""
+        # Total meta-steps: simulate epoch-based pacing
+        total_meta_steps = (len(self.train_dataset) // self.config.batch_size) * self.config.epochs
         logger.info("=" * 60)
-        logger.info(f"Starting CodeOrigin Training - Task {self.config.task}")
+        logger.info(f"Starting MetaDomain Reptile Training - Task {self.config.task}")
         logger.info(f"Num classes: {self.model.num_classes}")
         logger.info(f"Device: {self.config.device}")
         logger.info(f"Precision: {self.precision}")
-        logger.info(f"Batch size: {self.config.batch_size} x {self.config.grad_accum_steps} = {self.config.batch_size * self.config.grad_accum_steps}")
+        logger.info(f"Batch size: {self.config.batch_size}")
+        logger.info(f"Meta inner steps (K): {self.config.meta_inner_steps}")
+        logger.info(f"Meta inner LR (alpha): {self.config.meta_inner_lr}")
+        logger.info(f"Meta outer LR (beta): {self.config.meta_outer_lr}")
+        logger.info(f"Total meta-steps: {total_meta_steps}")
+        logger.info(f"Languages: {self.languages}")
         logger.info("=" * 60)
 
-        for epoch in range(self.config.epochs):
-            logger.info(f"\n{'='*40} Epoch {epoch+1}/{self.config.epochs} {'='*40}")
+        for step in range(total_meta_steps):
+            self.global_step = step
 
-            # Train
-            train_losses = self.train_epoch(epoch)
-            logger.info(
-                f"Epoch {epoch+1} Train Summary: "
-                + " | ".join(f"{k}: {v:.4f}" for k, v in train_losses.items())
-            )
+            task_lang, inner_loss, inner_steps = self.meta_train_step()
 
-            # Validate
-            val_f1 = self.evaluate(self.val_loader, "Val")
+            # Log
+            if (step + 1) % self.config.log_every == 0:
+                logger.info(
+                    f"Meta-step {step+1}/{total_meta_steps} | "
+                    f"Task: {task_lang} | Inner Loss: {inner_loss:.4f} | "
+                    f"Inner Steps: {inner_steps}"
+                )
 
-            # Save best
-            if val_f1 > self.best_f1:
-                self.best_f1 = val_f1
-                self.save_checkpoint("best")
-                logger.info(f"*** New Best Val Macro-F1: {val_f1:.4f} ***")
+            # Evaluate
+            if (step + 1) % self.config.eval_every == 0:
+                val_f1 = self.evaluate(self.val_loader, "Val")
+                if val_f1 > self.best_f1:
+                    self.best_f1 = val_f1
+                    self.save_checkpoint("best")
+                    logger.info(f"*** New Best Val Macro-F1: {val_f1:.4f} ***")
+                self.save_checkpoint("latest")
 
-            # Save latest
-            self.save_checkpoint("latest")
+        # End-of-training evaluation
+        val_f1 = self.evaluate(self.val_loader, "Val")
+        if val_f1 > self.best_f1:
+            self.best_f1 = val_f1
+            self.save_checkpoint("best")
+        self.save_checkpoint("latest")
 
         # Final test evaluation
         logger.info("\n" + "=" * 60)
@@ -1521,7 +1251,7 @@ def main(task: str = "T1", config: Optional[Config] = None):
     set_seed(config.seed)
 
     logger.info(f"{'='*60}")
-    logger.info(f"CodeOrigin - AI-Generated Code Detection")
+    logger.info(f"MetaDomain - Reptile Meta-Learning for Code Detection")
     logger.info(f"Task: {config.task}")
     logger.info(f"Benchmark: {config.benchmark}")
     logger.info(f"GPU: {_get_gpu_name()}")
@@ -1552,12 +1282,20 @@ def main(task: str = "T1", config: Optional[Config] = None):
     val_dataset = AICDDataset(val_data, tokenizer, config.max_length, config.ast_seq_len)
     test_dataset = AICDDataset(test_data, tokenizer, config.max_length, config.ast_seq_len)
 
+    # Group training data by inferred language for meta-learning
+    lang_groups = defaultdict(list)
+    for i in range(len(train_data)):
+        item = train_data[i]
+        lang = infer_language(item["code"])
+        lang_groups[lang].append(i)
+    logger.info(f"Language groups: {[(k, len(v)) for k, v in lang_groups.items()]}")
+
     # Class weights for imbalanced data
     train_labels = train_data["label"]
     class_weights = compute_class_weights(train_labels, num_classes)
     logger.info(f"Class weights: {class_weights.numpy()}")
 
-    # DataLoaders
+    # DataLoaders (val/test only — train is handled per-task in MetaTrainer)
     pin = config.pin_memory and config.device == "cuda"
     common_loader_kwargs = {
         "num_workers": config.num_workers,
@@ -1567,11 +1305,6 @@ def main(task: str = "T1", config: Optional[Config] = None):
     if config.num_workers > 0:
         common_loader_kwargs["prefetch_factor"] = config.prefetch_factor
 
-    train_loader = DataLoader(
-        train_dataset, batch_size=config.batch_size,
-        shuffle=True, drop_last=True,
-        **common_loader_kwargs,
-    )
     val_loader = DataLoader(
         val_dataset, batch_size=config.batch_size * 2,
         shuffle=False,
@@ -1584,8 +1317,8 @@ def main(task: str = "T1", config: Optional[Config] = None):
     )
 
     # Model
-    logger.info(f"Building CodeOrigin model...")
-    model = CodeOrigin(config, num_classes)
+    logger.info(f"Building MetaDomain model...")
+    model = MetaDomain(config, num_classes)
 
     # Count parameters
     total_params = sum(p.numel() for p in model.parameters())
@@ -1593,8 +1326,11 @@ def main(task: str = "T1", config: Optional[Config] = None):
     logger.info(f"Total parameters: {total_params:,}")
     logger.info(f"Trainable parameters: {trainable_params:,}")
 
-    # Trainer
-    trainer = Trainer(config, model, train_loader, val_loader, test_loader, class_weights)
+    # MetaTrainer (Reptile)
+    trainer = MetaTrainer(
+        config, model, train_dataset, dict(lang_groups),
+        val_loader, test_loader, class_weights,
+    )
 
     # Train
     run_stats = trainer.train()
@@ -1633,7 +1369,7 @@ def run_benchmark_suite(run_plan: List[Tuple[str, str]], base_config: Optional[C
 
         run_key = f"{bench}_{bench_task}"
         logger.info("\n" + "=" * 70)
-        logger.info(f"BENCHMARK SUITE RUN: {bench.upper()} | task={bench_task}")
+        logger.info(f"[EXP10] BENCHMARK SUITE RUN: {bench.upper()} | task={bench_task}")
         logger.info("=" * 70)
         results[run_key] = main(task=bench_task, config=cfg)
 
@@ -1654,7 +1390,7 @@ def run_benchmark_suite(run_plan: List[Tuple[str, str]], base_config: Optional[C
     # Machine-readable block
     ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     logger.info("\n=== SUITE_RESULTS_START ===")
-    logger.info(f"timestamp={ts} | method=CodeOrigin | runs={len(run_plan)}")
+    logger.info(f"timestamp={ts} | method=EXP10_MetaDomain | runs={len(run_plan)}")
     logger.info("| run_key | best_val_f1 | test_f1 | test_weighted_f1 |")
     logger.info("|---|---:|---:|---:|")
     for run_key, stats in results.items():
@@ -1667,7 +1403,7 @@ def run_benchmark_suite(run_plan: List[Tuple[str, str]], base_config: Optional[C
 
     machine_block = {
         "timestamp": ts,
-        "method": "CodeOrigin",
+        "method": "MetaDomain",
         "run_plan": [f"{b}_{t}" for b, t in run_plan],
         "results": results,
     }
