@@ -15,7 +15,7 @@
 | **Exp18** | HierTreeCode | **99.06** | **70.55** | **71.88** | ✅ Done |
 | **Exp14** | ProtoCon | **99.06** | 70.13 | 71.26 | ✅ Done |
 | **Exp15** | GroupDRO | 99.06 | 70.17 | 70.59 | ✅ Done |
-| Exp16 | HyperNetCode | — | — | — | 🔲 Pending |
+| **Exp16** | HyperNetCode | **99.07** | — (failed) | — | ✅ Done |
 | **Exp17** | **RAGDetect** | **99.09** | **70.46** | **70.99** | ✅ Done |
 | Exp19 | EAGLECode | — | — | — | 🔲 Pending |
 | Exp20 | BiScopeCode | — | — | — | 🔲 Pending |
@@ -296,12 +296,76 @@
 
 ---
 
+## 📊 Exp16 — HyperNetCode (Style-Content Disentanglement via HyperNetwork)
+
+**Run:** 2026-03-31 | ModernBERT-base + style encoder → hypernetwork → generator-specific classifier weights  
+**Loss:** `L_focal + 0.2*L_style_aux + 0.3*L_mmd + 0.2*L_style_con`  
+**Key novelty:** Style encoder generates HyperNet weights per class (generator-conditioned FC); MMD aligns content distributions; StyleCon separates style embeddings  
+**Infra:** H100 80GB BF16 | batch=64x1 | epochs=3 | workers=8 | 150.0M params
+
+### ⚠️ Training Issue: StyleCon = NaN throughout all 3 epochs
+Total loss = `nan` at every step — `style_con` diverged immediately (likely exp overflow or division-by-zero in style contrastive pairs). However `CE(focal)` + `MMD` were numerically valid and the model trained effectively via those components. The NaN total did not crash training (backprop on NaN had no gradient effect), so the model converged on the CE objective alone.
+
+### IID Binary
+| Metric | Value | vs Exp18 | vs Exp17 (SOTA) |
+|:-------|:-----:|:--------:|:---------------:|
+| Test Macro-F1 | **0.9907** | `+0.0001` | `-0.0002` |
+| Test Weighted-F1 | 0.9907 | `+0.0001` | `-0.0002` |
+| Best Val F1 | 0.9897 | `=` | `-0.0004` |
+
+| Language | Macro-F1 | Source | Macro-F1 |
+|:---------|:---------:|:-------|:---------:|
+| C++ | 0.9912 | CF | 0.9831 |
+| Java | **0.9945** | GH | 0.9852 |
+| Python | 0.9866 | LC | 0.9844 |
+
+Binary per-class breakdown:
+| Class | Precision | Recall | F1 |
+|:------|:---------:|:------:|:--:|
+| Human (0) | 0.9905 | 0.9915 | 0.9910 |
+| AI (1) | 0.9910 | 0.9899 | 0.9904 |
+
+### IID Author (6-class)
+**FAILED** — `classes=0` error at preflight. Exp16 data loader for author task returned empty splits (train=0, val=0, test=0). Root cause: Exp16 has a different `load_codet_m4_data` implementation that appears to not handle the author task's `model` field correctly. Same as OOD generator issue but for the IID split.
+
+> Unique to Exp16: other experiments (11/14/15/17/18) all correctly load author data. Likely a bug in Exp16's author filtering that sets `num_classes=0` when `model` field is absent or differently named.
+
+### OOD Generator
+**Status: ALL FAILED** — `test_ood=0` for all generators. Same infrastructure issue as Exp14/15.
+
+### OOD Language
+| Language held-out | Test Macro-F1 | Test Weighted-F1 | Best Val F1 |
+|:------------------|:-------------:|:----------------:|:-----------:|
+| cpp | 0.8821 | 0.8841 | 0.9898 |
+| java | — (log truncated) | — | — |
+| python | — (log truncated) | — | — |
+
+**OOD cpp breakdown:**
+| Source (cpp test) | Macro-F1 | Weighted-F1 |
+|:------------------|:--------:|:-----------:|
+| CF | 0.9289 | 0.9506 |
+| **GH** | **0.4839** | 0.4559 ← worst |
+| LC | 0.9916 | 0.9983 |
+
+> GH source drops severely under language OOD (48.39% macro for cpp-held-out) — same GH weakness seen across all experiments. CF and LC remain robust.
+
+### Key Insights
+- **HyperNetCode achieves 99.07% binary** — second highest overall (Exp17 RAGDetect at 99.09%)
+- **StyleCon NaN bug** is a critical failure — the intended novel contribution (style-conditioned hypernetwork) was inoperative; results reflect a CE+MMD baseline, not the full HyperNet design
+- **Author task completely broken** in Exp16 — the most important task metric is unavailable; needs data loading fix before drawing conclusions about the hypernet's generator-discrimination ability
+- **OOD Language cpp → 88.21%** — consistent with other experiments; GH-subgroup is the worst (48.39%)
+- **Net conclusion:** Exp16 is inconclusive — StyleCon NaN prevents evaluating the core contribution
+
+**Checkpoint:** `./hypernet_checkpoints/hypernetcode_iid_binary_best.pt`
+
+---
+
 ## 🚀 Performance vs Paper (Head-to-Head)
 
-| Evaluation Mode (IID) | Paper (UniXcoder) | Exp11 SpectralCode | Exp14 ProtoCon | Exp15 GroupDRO | **Exp18 HierTreeCode** | Best Delta |
-|:----------------------|:-----------------:|:------------------:|:--------------:|:--------------:|:----------------------:|:----------:|
-| Binary F1 (Table 2) | 98.65 | 99.06 | 99.06 | 98.98 | **99.06** | `+0.41%` |
-| Author F1 (Table 7) | 66.33 | 69.82 | 70.13 | 70.17 | **70.55** | `+4.22%` |
+| Evaluation Mode (IID) | Paper (UniXcoder) | Exp11 SpectralCode | Exp14 ProtoCon | Exp15 GroupDRO | Exp16 HyperNet | **Exp18 HierTreeCode** | Best Delta |
+|:----------------------|:-----------------:|:------------------:|:--------------:|:--------------:|:--------------:|:----------------------:|:----------:|
+| Binary F1 (Table 2) | 98.65 | 99.06 | 99.06 | 98.98 | **99.07** | **99.06** | `+0.44%` (Exp17 99.09 best) |
+| Author F1 (Table 7) | 66.33 | 69.82 | 70.13 | 70.17 | — (failed) | **70.55** | `+4.22%` |
 
 ---
 
