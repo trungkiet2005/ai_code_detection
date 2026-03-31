@@ -16,7 +16,7 @@
 | Exp14 | ProtoCon | — | — | — | 🔲 Pending |
 | Exp15 | GroupDRO | — | — | — | 🔲 Pending |
 | Exp16 | HyperNetCode | — | — | — | 🔲 Pending |
-| Exp17 | RAGDetect | — | — | — | 🔲 Pending |
+| **Exp17** | **RAGDetect** | **99.09** | **70.46** | **70.99** | ✅ Done |
 | Exp19 | EAGLECode | — | — | — | 🔲 Pending |
 | Exp20 | BiScopeCode | — | — | — | 🔲 Pending |
 
@@ -101,6 +101,68 @@
 
 ---
 
+## 📊 Exp17 — RAGDetect (Train+Test-Time Blending)
+
+**Run:** 2026-03-31 | ModernBERT-base (bf16, H100)  
+**Training:** IID (binary + author), `epochs=3`, `batch=64x1`, `workers=8`  
+**Test-time RAG:** embedding bank `max=50000`, `dim=512`; retrieve `k=32`, blend `alpha=0.3`
+
+### IID Binary (2-class)
+| Metric | Value |
+|:-------|:-----:|
+| Test Macro-F1 | **0.9909** |
+| Test Weighted-F1 | 0.9909 |
+| Best Val F1 | 0.9901 |
+
+| Language | Macro-F1 |
+|:---------|:---------:|
+| C++ | 0.9916 |
+| Java | **0.9952** |
+| Python | 0.9860 |
+
+**Insight:** Binary is near ceiling; the harder part shows up clearly in **author (6-class)**.
+
+### IID Author (6-class)
+| Metric | Value |
+|:-------|:-----:|
+| Test Macro-F1 | **0.7046** |
+| Test Weighted-F1 | 0.8109 |
+| Best Val F1 | 0.7099 |
+
+| Language | Macro-F1 |
+|:---------|:---------:|
+| C++ | 0.6994 |
+| Java | **0.7526** |
+| Python | 0.6670 |
+
+| Source | Macro-F1 |
+|:-------|:---------:|
+| CF | **0.7636** |
+| GH | 0.5680 |
+| LC | 0.5973 |
+
+**Classwise (Author, final test):**
+| Class (generator) | F1 |
+|:------------------|:--:|
+| Human | 0.9818 |
+| CodeLlama (codellama) | 0.7456 |
+| GPT (gpt) | 0.7667 |
+| Llama3.1 | 0.8164 |
+| Nxcode (nxcode) | **0.4389** |
+| Qwen1.5 (qwen1.5) | **0.4783** |
+
+**Key failure mode (most important insight):** Strong confusion between **Nxcode <-> Qwen1.5**.
+- `true=nxcode -> pred=qwen1.5` = `2442/5537`
+- `true=qwen1.5 -> pred=nxcode` = `1482/5254`
+
+**Interpretation:** Human is very strong (F1 0.9818) but generated classes remain poorly separated, which drags down `macro-F1` (macro 0.7046 < weighted 0.8109).
+
+### Infra / Reliability Notes (from logs)
+- HF Hub warning: unauthenticated requests (set `HF_TOKEN` to improve rate limits/speed).
+- `ModernBertModel LOAD REPORT`: there are `UNEXPECTED` keys (e.g., `head.dense.weight`, `decoder.bias`, `head.norm.weight`) - may be ignorable if architectures/tasks differ, but worth tracking.
+- Dataset loading: some `404` for `.py`/`dataset_infos.json` paths, but the pipeline still uses the **built-in split column** from CoDET-M4.
+
+---
 ## 🚀 Performance vs Paper (Head-to-Head)
 
 | Evaluation Mode (IID) | Paper (UniXcoder) | Exp11 SpectralCode | **Exp18 HierTreeCode** | Best Delta |
@@ -180,7 +242,7 @@ These evaluations were not included in the latest `iid_only` run but are mapped 
 ## 🧪 Next Experiments (Targeting A* Paper — NeurIPS/ICLR 2026)
 
 Current bottlenecks to attack:
-1. **Author F1 = 69.82%** — Nxcode/Qwen confusion, weak cross-source generalization
+1. **Author F1 = 70.55% (best: Exp18) / 70.46% (Exp17)** — Nxcode/Qwen confusion persists; generated-class separation still the main failure mode
 2. **OOD evaluation pending** — ood_generator / ood_language / ood_source all untested
 3. **GitHub source is hardest** (macro 0.5540 vs CF 0.7685) — domain shift problem
 
@@ -202,9 +264,59 @@ Current bottlenecks to attack:
 
 ### Expected Performance Targets
 
-| Eval Mode | Current (Exp11) | ProtoCon Target | GroupDRO Target | HyperNet Target |
+| Eval Mode | Current (best so far) | ProtoCon Target | GroupDRO Target | HyperNet Target |
 |:----------|:---------------:|:---------------:|:---------------:|:---------------:|
 | Binary IID Macro-F1 | 99.06 | 99.10+ | 99.05+ | 99.08+ |
-| Author IID Macro-F1 | 69.82 | **77–80** | 72–75 | **75–78** |
+| Author IID Macro-F1 | **70.55** | **77–80** | 72–75 | **75–78** |
 | OOD Generator | pending | 94+ | **95+** | 92+ |
 | OOD Source (hardest) | pending | 57+ | **62+** | 58+ |
+
+---
+
+## 🧪 New Experiments — Batch 2 (Exp21–Exp26)
+
+Designed 2026-03-31 | Based on ICML 2025, NeurIPS 2024, CVPR/ICCV/AAAI survey
+
+> **Research sources:** DeTeCtive (NeurIPS 2024), MH-MoE (NeurIPS 2024), TLM-LoRA (ICML 2025),
+> FA-AST+GNN (AAAI/ICSE 2024), BYOL/DINO (NeurIPS 2020/2021), CosFace (CVPR 2019),
+> CharCNN (NIPS 2015), DinoSR (NeurIPS 2023), SAR (ICLR 2023)
+
+| Exp | File | Method | Core Novelty | Target | Inspired By |
+|-----|------|--------|--------------|--------|-------------|
+| **Exp21** | `exp21_moe.py` | **MoECode** | Sparse MoE (4 experts, top-2 routing) over fusion repr. Load-balance auxiliary loss. Each expert specializes: syntax/semantic/style/frequency | Author 72%+ OOD robustness | MH-MoE (NeurIPS 2024), Mixtral, Switch Transformer |
+| **Exp22** | `exp22_tta.py` | **TTACode** | Test-Time Adaptation via entropy minimization. Updates only LayerNorm params at inference (TENT-style). SAR filter for high-entropy samples | OOD +5-10% F1, no labels needed | TENT (ICLR 2021), SAR (ICLR 2023), TLM (ICML 2025) |
+| **Exp23** | `exp23_graphstyle.py` | **GraphStyleCode** | Replaces BiLSTM AST with Graph Attention Network (GAT). GraphSAGE-style concat+project, 2-layer stacked, attention-weighted global pooling | GH source +4-8%, structural OOD | FA-AST+GNN (AAAI 2020/ICSE 2024), GraphCodeBERT (ICLR 2021) |
+| **Exp24** | `exp24_cosineproto.py` | **CosineProtoCode** | Cosine similarity to learnable class prototypes (EMA-updated). Learnable per-class temperature. Hyperspherical uniformity regularization | Author 74%+, Nxcode/Qwen separation | CosFace/ArcFace (CVPR 2018/19), ProtoNet (NeurIPS 2017), Hyperspherical Uniformity (NeurIPS 2018) |
+| **Exp25** | `exp25_multigran.py` | **MultiGranCode** | Adds CharCNN (3 parallel Conv1D, k=3,5,7) as 3rd feature stream. 3-way gated fusion: neural+spectral+char. Char stream captures micro-stylometry | Binary 99.1%+, Author 71%+ | CharCNN (NIPS 2015), TextCNN (EMNLP 2014), Multi-granularity NLP (ACL 2020) |
+| **Exp26** | `exp26_selfdistill.py` | **SelfDistillCode** | BYOL-style EMA teacher self-distillation. Student matches teacher (its own past self) representation — no labels for distillation loss. Teacher updated as EMA after each step | OOD robustness 72%+, stable repr | BYOL (NeurIPS 2020), DINO (ICCV 2021), Mean Teacher (NeurIPS 2017), DinoSR (NeurIPS 2023) |
+
+### Leaderboard Update (Exp21-26 all Pending)
+
+| Exp | Method | Binary F1 | Author F1 | Val F1 | Status |
+|:----|:-------|:---------:|:---------:|:------:|:------:|
+| Exp18 | HierTreeCode | 99.06 | **70.55** | **71.88** | ✅ SOTA |
+| Exp21 | MoECode | — | — | — | 🔲 Pending |
+| Exp22 | TTACode | — | — | — | 🔲 Pending |
+| Exp23 | GraphStyleCode | — | — | — | 🔲 Pending |
+| Exp24 | CosineProtoCode | — | — | — | 🔲 Pending |
+| Exp25 | MultiGranCode | — | — | — | 🔲 Pending |
+| Exp26 | SelfDistillCode | — | — | — | 🔲 Pending |
+
+### Research Agent Findings (2026-03-31)
+
+Top-rated paper ideas from NeurIPS/ICML/CVPR survey for NeurIPS 2026 ORAL:
+
+| Priority | Paper | Venue | Year | Addresses |
+|:---------|:------|:-----:|:----:|:----------|
+| **S-tier** | DeTeCtive: Multi-Level Contrastive + kNN inference | NeurIPS | 2024 | Nxcode/Qwen, OOD, GH |
+| **S-tier** | TLM: Test-Time Learning via LoRA perplexity min | ICML | 2025 | OOD collapse (0.29→0.7?) |
+| **A-tier** | MH-MoE: Sub-token routing (h=4, 8 experts) | NeurIPS | 2024 | Nxcode/Qwen, GH |
+| **A-tier** | FA-AST+CPG: AST+CFG+DFG graph, GATv2 | AAAI/ICSE | 2024 | GH source, structural |
+| **A-tier** | SHAP Attribution Meta-features | SciReports | 2025 | Nxcode/Qwen, interpretability |
+| **A-tier** | Deep Ensemble Disagreement (5 seeds, mutual info) | NeurIPS | 2017 | OOD flagging, uncertainty |
+| **B-tier** | DiffPath: Diffusion score curvature for OOD | NeurIPS | 2024 | Novel signal, no retraining |
+| **B-tier** | Span-level CRF segmentation | arXiv | 2025 | GH mixed-authorship, T3 |
+
+> **Next priority after Exp21-26:** Implement DeTeCtive multi-level contrastive (Exp27) and
+> LoRA-TTA upgrade of Exp22 (replaces norm-layer TTA with full LoRA adaptation → Exp27 or v2).
+> **Ensemble of Exp18×5 seeds** (zero training cost) estimated +1-2% from mutual-info reranking.
