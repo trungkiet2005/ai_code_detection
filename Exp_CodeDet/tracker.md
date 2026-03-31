@@ -1,19 +1,112 @@
-# [CoDET-M4] SpectralCode Runner – Full Benchmark Evaluation
+# [CoDET-M4] Experiment Tracker — NeurIPS 2026
 
-> **Method Name:** SpectralCode (ModernBERT-base + AST + Structural + FFT Spectral)  
-> **Status:** **SOTA (REACHED)**  
-> **Benchmark Dataset:** `DaniilOr/CoDET-M4` (~500K samples)
+> **Benchmark Dataset:** `DaniilOr/CoDET-M4` (~500K samples, Python/Java/C++)  
+> **Paper Baseline:** Orel, Azizov & Nakov, ACL Findings 2025 (UniXcoder)  
+> **Current Best:** **Exp18 HierTreeCode** — Author IID 70.55 F1 (new SOTA)
 
 ---
 
-## 🚀 Performance Overview (Head-to-Head)
+## 🏆 Leaderboard (IID Results — All Experiments)
 
-Comparison against Paper Results (Orel, Azizov & Nakov, ACL Findings 2025). SpectralCode outperforms the `UniXcoder` baseline in all in-distribution (IID) metrics.
+| Exp | Method | Binary Macro-F1 | Author Macro-F1 | Author Val F1 | Status |
+|:----|:-------|:---------------:|:---------------:|:-------------:|:------:|
+| Paper (UniXcoder) | Baseline | 98.65 | 66.33 | — | reference |
+| **Exp11** | SpectralCode | **99.06** | 69.82 | 70.80 | ✅ Done |
+| **Exp18** | HierTreeCode | **99.06** | **70.55** | **71.88** | ✅ Done |
+| Exp14 | ProtoCon | — | — | — | 🔲 Pending |
+| Exp15 | GroupDRO | — | — | — | 🔲 Pending |
+| Exp16 | HyperNetCode | — | — | — | 🔲 Pending |
+| Exp17 | RAGDetect | — | — | — | 🔲 Pending |
+| Exp19 | EAGLECode | — | — | — | 🔲 Pending |
+| Exp20 | BiScopeCode | — | — | — | 🔲 Pending |
 
-| Evaluation Mode (IID) | Paper Baseliner (UniXcoder) | **SpectralCode (Exp11)** | **Delta (Gain)** |
-|:----------------------|:---------------------------:|:------------------------:|:----------------:|
-| **Binary Classification** (Table 2) | 98.65 F1                | **99.06 F1**             | `+ 0.41%`        |
-| **Authorship Identification** (Table 7) | 66.33 F1                | **69.82 F1**             | `+ 3.49%`        |
+---
+
+## 📊 Exp11 — SpectralCode (Baseline SOTA)
+
+**Run:** 2026-03-30 | ModernBERT-base + AST + Structural + FFT Spectral  
+**Loss:** `L_task + 0.3*L_neural + 0.3*L_spectral`
+
+### IID Binary
+| Metric | Value |
+|:-------|:-----:|
+| Test Macro-F1 | **0.9906** |
+| Test Weighted-F1 | 0.9906 |
+| Best Val F1 | 0.9893 |
+
+| Language | F1 | Source | F1 |
+|:---------|:--:|:-------|:--:|
+| C++ | 99.09 | CF | 98.39 |
+| Java | **99.54** | LC | 98.69 |
+| Python | 98.61 | GH | 98.38 |
+
+### IID Author (6-class)
+| Metric | Value |
+|:-------|:-----:|
+| Test Macro-F1 | **0.6982** |
+| Test Weighted-F1 | 0.8065 |
+| Best Val F1 | 0.7080 |
+
+| Class | F1 | | Class | F1 |
+|:------|:--:|-|:------|:--:|
+| Human | 0.9764 | | Llama3.1 | 0.8217 |
+| CodeLlama | 0.7359 | | Nxcode | 0.4988 |
+| GPT | 0.7434 | | Qwen1.5 | **0.4129** ← weakest |
+
+**Key weakness:** Nxcode/Qwen1.5 confusion — Qwen recall only 36.28%
+
+---
+
+## 📊 Exp18 — HierTreeCode ⭐ NEW BEST
+
+**Run:** 2026-03-31 | SpectralCode backbone + HierarchicalAffinityLoss  
+**Loss:** `L_task + 0.3*L_neural + 0.3*L_spectral + 0.4*L_hier`  
+**Key novelty:** Generator family tree constraint — Nxcode/Qwen1.5 forced to cluster together (within-family < cross-family + margin)
+
+### IID Binary
+| Metric | Value | vs Exp11 |
+|:-------|:-----:|:--------:|
+| Test Macro-F1 | **0.9906** | `=` |
+| Test Weighted-F1 | 0.9906 | `=` |
+| Best Val F1 | 0.9897 | `+0.0004` |
+
+> Note: `Hier=0.0000` for binary task (correct — loss inactive when num_classes=2)
+
+### IID Author (6-class)
+| Metric | Value | vs Exp11 | Delta |
+|:-------|:-----:|:--------:|:-----:|
+| Test Macro-F1 | **0.7055** | `+0.0073` | `+0.73%` |
+| Test Weighted-F1 | 0.8133 | `+0.0068` | `+0.68%` |
+| Best Val F1 | **0.7188** | `+0.0108` | `+1.08%` |
+
+| Class | F1 (Exp18) | F1 (Exp11) | Δ |
+|:------|:----------:|:----------:|:--:|
+| Human | 0.9820 | 0.9764 | `+0.0056` ↑ |
+| CodeLlama | 0.7429 | 0.7359 | `+0.0070` ↑ |
+| GPT | 0.7481 | 0.7434 | `+0.0047` ↑ |
+| Llama3.1 | 0.8153 | 0.8217 | `-0.0064` ↓ |
+| Nxcode | 0.5015 | 0.4988 | `+0.0027` ↑ |
+| **Qwen1.5** | **0.4431** | **0.4129** | **`+0.0302` ↑↑** |
+
+**Key finding:** Hier loss actively converges for author task (0.397 → 0.302 over 3 epochs). Qwen1.5 gains most (+3.02%) — family constraint working. Nxcode/Qwen confusion still significant but improving. Human recall jumps to 96.96% (was 95.83%).
+
+#### Per-source breakdown (Author)
+| Source | Exp18 | Exp11 | Δ |
+|:-------|:-----:|:-----:|:--:|
+| CF | 0.7717 | 0.7685 | `+0.0032` |
+| GH | 0.5618 | 0.5540 | `+0.0078` |
+| LC | 0.6035 | 0.5965 | `+0.0070` |
+
+**Checkpoint:** `./codet_m4_checkpoints/codet_author/hiertreecode_CoDET_author_best.pt`
+
+---
+
+## 🚀 Performance vs Paper (Head-to-Head)
+
+| Evaluation Mode (IID) | Paper (UniXcoder) | Exp11 SpectralCode | **Exp18 HierTreeCode** | Best Delta |
+|:----------------------|:-----------------:|:------------------:|:----------------------:|:----------:|
+| Binary F1 (Table 2) | 98.65 | 99.06 | **99.06** | `+0.41%` |
+| Author F1 (Table 7) | 66.33 | 69.82 | **70.55** | `+4.22%` |
 
 ---
 
