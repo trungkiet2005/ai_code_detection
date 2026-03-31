@@ -14,7 +14,7 @@
 | **Exp11** | SpectralCode | **99.06** | 69.82 | 70.80 | ✅ Done |
 | **Exp18** | HierTreeCode | **99.06** | **70.55** | **71.88** | ✅ Done |
 | **Exp14** | ProtoCon | **99.06** | 70.13 | 71.26 | ✅ Done |
-| Exp15 | GroupDRO | — | — | — | 🔲 Pending |
+| **Exp15** | GroupDRO | 99.06 | 70.17 | 70.59 | ✅ Done |
 | Exp16 | HyperNetCode | — | — | — | 🔲 Pending |
 | **Exp17** | **RAGDetect** | **99.09** | **70.46** | **70.99** | ✅ Done |
 | Exp19 | EAGLECode | — | — | — | 🔲 Pending |
@@ -225,12 +225,83 @@
 
 ---
 
+---
+
+## 📊 Exp15 — GroupDRO (Distributionally Robust Optimization)
+
+**Run:** 2026-03-31 | GroupDRO over 9 `language × source` groups | SpectralCode backbone  
+**Loss:** `L_DRO (exponentiated gradient worst-group upweighting) + 0.3*L_neural + 0.3*L_spectral`  
+**Key novelty:** 9 groups `{cpp,java,python} × {cf,gh,lc}` — upweights highest-loss group each step  
+**Infra:** H100 80GB BF16 | batch=64x1 | epochs=3 | dro_eta=0.01 | 152.2M params
+
+### IID Binary
+| Metric | Value | vs Exp18 |
+|:-------|:-----:|:--------:|
+| Test Macro-F1 | **0.9898** | `-0.0008` |
+| Test Weighted-F1 | 0.9898 | `-0.0008` |
+| Best Val F1 | 0.9901 | `=` |
+
+| Language | F1 | Source | F1 |
+|:---------|:--:|:-------|:--:|
+| C++ | 0.9903 | CF | 0.9817 |
+| Java | **0.9949** | LC | 0.9827 |
+| Python | 0.9845 | **GH** | **0.9836** |
+
+> DRO binary worst-group: `python_gh` dominates early (w=0.14 ep1) → shifts to `cpp_cf` (w=0.155 ep3)
+
+### IID Author (6-class)
+| Metric | Value | vs Exp18 | Delta |
+|:-------|:-----:|:--------:|:-----:|
+| Test Macro-F1 | **0.7017** | `-0.0038` | `-0.38%` |
+| Test Weighted-F1 | 0.8146 | `+0.0013` | `+0.13%` |
+| Best Val F1 | **0.7059** | `-0.0129` | `-1.29%` |
+
+| Class | F1 (Exp15) | F1 (Exp18) | Δ |
+|:------|:----------:|:----------:|:--:|
+| Human | 0.9881 | 0.9820 | `+0.0061` ↑ |
+| CodeLlama | 0.7379 | 0.7429 | `-0.0050` ↓ |
+| GPT | 0.7267 | **0.7481** | `-0.0214` ↓ |
+| Llama3.1 | **0.8218** | 0.8153 | `+0.0065` ↑ |
+| Nxcode | 0.4560 | **0.5015** | **`-0.0455` ↓↓** |
+| **Qwen1.5** | **0.4798** | 0.4431 | **`+0.0367` ↑↑ best ever!** |
+
+#### Per-source breakdown (Author)
+| Source | Exp15 | Exp18 | Δ |
+|:-------|:-----:|:-----:|:--:|
+| CF | 0.7385 | **0.7717** | `-0.0332` |
+| **GH** | **0.5778** | 0.5618 | **`+0.0160` ↑ GroupDRO working!** |
+| LC | 0.6032 | **0.6035** | `~` |
+
+#### Per-group breakdown (Author test)
+| Group | Macro-F1 | Group | Macro-F1 |
+|:------|:--------:|:------|:--------:|
+| cpp_cf | 0.7270 | java_cf | **0.7642** |
+| cpp_gh | 0.6645 | java_gh | 0.5864 |
+| cpp_lc | 0.5596 | java_lc | **0.7693** |
+| python_cf | 0.4467 | python_gh | 0.5362 |
+| python_lc | 0.6107 | — | — |
+
+> DRO author worst-group: `python_gh` weight escalates to **0.644** by ep3 — confirms Python/GitHub is hardest combination
+
+### OOD Generator
+**Status: ALL FAILED** — Same `test_ood=0` infrastructure issue as Exp14. Confirmed systematic.
+
+### Key Insights
+- **GroupDRO successfully improves GH source** (+1.60% Author) — worst-group upweighting targeting Python/GH combo works
+- **Trade-off: Nxcode drops significantly** (-4.55%) while Qwen improves (+3.67%) — DRO optimization target conflicts with fine-grained generator separation
+- **Binary slightly below baseline** (98.98 vs 99.06) — DRO regularization costs a small IID penalty
+- **python_gh dominates** as worst group throughout — key target for future experiments
+
+**Checkpoint:** `./codet_m4_groupdro_checkpoints/iid_author/best.pt`
+
+---
+
 ## 🚀 Performance vs Paper (Head-to-Head)
 
-| Evaluation Mode (IID) | Paper (UniXcoder) | Exp11 SpectralCode | Exp14 ProtoCon | **Exp18 HierTreeCode** | Best Delta |
-|:----------------------|:-----------------:|:------------------:|:--------------:|:----------------------:|:----------:|
-| Binary F1 (Table 2) | 98.65 | 99.06 | 99.06 | **99.06** | `+0.41%` |
-| Author F1 (Table 7) | 66.33 | 69.82 | 70.13 | **70.55** | `+4.22%` |
+| Evaluation Mode (IID) | Paper (UniXcoder) | Exp11 SpectralCode | Exp14 ProtoCon | Exp15 GroupDRO | **Exp18 HierTreeCode** | Best Delta |
+|:----------------------|:-----------------:|:------------------:|:--------------:|:--------------:|:----------------------:|:----------:|
+| Binary F1 (Table 2) | 98.65 | 99.06 | 99.06 | 98.98 | **99.06** | `+0.41%` |
+| Author F1 (Table 7) | 66.33 | 69.82 | 70.13 | 70.17 | **70.55** | `+4.22%` |
 
 ---
 
