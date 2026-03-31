@@ -16,7 +16,7 @@ Evaluation coverage mapped to paper tables
   │  └ per-source          │ Table 4  │ Breakdown by CF / LC / GH           │
   │  └ per-generator       │ (Fig 8)  │ Breakdown by generator              │
   │ iid_author             │ Table 7  │ Authorship 6-class                  │
-  │  └ confusion matrix    │ (Fig 2)  │ Nxcode↔Qwen confusion highlighted  │
+  │  └ confusion matrix    │ (Fig 2)  │ QNxcode↔Qwen confusion highlighted  │
   │ ood_generator          │ ~Table 8 │ Leave-one-generator-out (proxy)     │
   │ ood_language            │ ~Tbl 10  │ Leave-one-language-out (proxy)      │
   │ ood_source             │ ~Table 9 │ Leave-one-source-out (proxy)        │

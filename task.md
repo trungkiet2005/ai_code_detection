@@ -1,0 +1,7 @@
+- [x] Create `Exp_CodeDet/tracker.md` with full benchmark results
+    - [x] Add Premium Header and Metadata (Model: SpectralCode / ModernBERT)
+    - [x] Map and insert Comparison Table (Paper Table 2, 3, 4, 7)
+    - [x] Insert detailed Breakdown Tables (Language, Source, Generator)
+    - [x] Add Confusion Matrix Analysis & Key Insights
+- [x] Update Implementation Plan status
+- [x] Verify formatting and delta calculations (+0.41% / +3.49%)
