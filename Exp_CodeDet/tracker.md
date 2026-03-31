@@ -2,23 +2,124 @@
 
 > **Benchmark Dataset:** `DaniilOr/CoDET-M4` (~500K samples, Python/Java/C++)  
 > **Paper Baseline:** Orel, Azizov & Nakov, ACL Findings 2025 (UniXcoder)  
-> **Current Best:** **Exp18 HierTreeCode** — Author IID 70.55 F1 (new SOTA, Exp14 ProtoCon at 70.13 close second)
+> **Current Best:** **Exp18 HierTreeCode** — Author IID 70.55 F1 (+4.22% vs UniXcoder)
 
 ---
 
-## 🏆 Leaderboard (IID Results — All Experiments)
+## 🏆 Leaderboard — Ranked by Author Macro-F1 ↓
 
-| Exp | Method | Binary Macro-F1 | Author Macro-F1 | Author Val F1 | Status |
-|:----|:-------|:---------------:|:---------------:|:-------------:|:------:|
-| Paper (UniXcoder) | Baseline | 98.65 | 66.33 | — | reference |
-| **Exp11** | SpectralCode | **99.06** | 69.82 | 70.80 | ✅ Done |
-| **Exp18** | HierTreeCode | **99.06** | **70.55** | **71.88** | ✅ Done |
-| **Exp14** | ProtoCon | **99.06** | 70.13 | 71.26 | ✅ Done |
-| **Exp15** | GroupDRO | 99.06 | 70.17 | 70.59 | ✅ Done |
-| **Exp16** | HyperNetCode | **99.07** | — (failed) | — | ✅ Done |
-| **Exp17** | **RAGDetect** | **99.09** | **70.46** | **70.99** | ✅ Done |
-| **Exp19** | EAGLECode (DANN) | 98.73 | 62.89 | 64.23 | ✅ Done |
-| Exp20 | BiScopeCode | — | — | — | 🔲 Pending |
+> Primary metric = **Author IID Macro-F1** (6-class, hardest task). Binary is near-ceiling for all modern PLMs.  
+> Δ-Paper = delta vs paper's best (UniXcoder: Binary 98.65 / Author 66.33)
+
+| Rank | Exp | Method | Binary F1 | Δ-Paper | Author F1 | Δ-Paper | Val F1 | Status |
+|:----:|:----|:-------|:---------:|:-------:|:---------:|:-------:|:------:|:------:|
+| 🥇 | **Exp18** | **HierTreeCode** | **99.06** | `+0.41` | **70.55** | **`+4.22`** | **71.88** | ✅ |
+| 🥈 | **Exp17** | RAGDetect | **99.09** | `+0.44` | 70.46 | `+4.13` | 70.99 | ✅ |
+| 🥉 | **Exp15** | GroupDRO | 98.98 | `+0.33` | 70.17 | `+3.84` | 70.59 | ✅ |
+| 4 | **Exp14** | ProtoCon | **99.06** | `+0.41` | 70.13 | `+3.80` | 71.26 | ✅ |
+| 5 | **Exp11** | SpectralCode | **99.06** | `+0.41` | 69.82 | `+3.49` | 70.80 | ✅ |
+| — | **Exp16** | HyperNetCode | **99.07** | `+0.42` | — ❌ bug | — | — | ✅ |
+| — | **Exp19** | EAGLECode (DANN) | 98.73 | `+0.08` | 62.89 ↓↓ | `-3.44` | 64.23 | ✅ |
+| — | Exp20 | BiScopeCode | — | — | — | — | — | 🔲 |
+| — | Exp21–26 | Batch 2 | — | — | — | — | — | 🔲 |
+| **REF** | Paper | UniXcoder | 98.65 | — | 66.33 | — | — | reference |
+| REF | Paper | CodeT5 | 98.35 | `-0.30` | 62.45 | `-3.88` | — | reference |
+| REF | Paper | CodeBERT | 95.70 | `-2.95` | 64.80 | `-1.53` | — | reference |
+| REF | Paper | CatBoost | 88.78 | `-9.87` | 45.42 | `-20.91` | — | reference |
+
+---
+
+## 📊 Full Paper Baseline Comparison (All Tables)
+
+### Table 2 — Binary IID Detection (Macro-F1 %)
+
+| Model | Binary F1 | Binary Acc | Our Best (Exp17) | Δ |
+|:------|:---------:|:----------:|:----------------:|:--:|
+| **Exp17 RAGDetect (ours)** | **99.09** | **99.07** | — | — |
+| **Exp18 HierTreeCode (ours)** | **99.06** | **99.06** | — | — |
+| **Exp11–Exp14 SpectralCode family** | **99.06** | **99.06** | — | — |
+| UniXcoder (paper best) | 98.65 | 98.65 | `+0.44` | ↑ |
+| CodeT5 | 98.35 | 98.35 | `+0.74` | ↑ |
+| CodeBERT | 95.70 | 95.71 | `+3.39` | ↑ |
+| CatBoost | 88.78 | 88.79 | `+10.31` | ↑ |
+| SVM | 72.19 | 72.19 | `+26.90` | ↑ |
+| Baseline (logistic) | 62.03 | 65.17 | `+37.06` | ↑ |
+
+### Table 3 — Binary Per-Language (F1 %)
+
+| Language | UniXcoder | CodeT5 | CodeBERT | **Our Best (Exp17/18)** | Δ vs UniXcoder |
+|:---------|:---------:|:------:|:--------:|:-----------------------:|:--------------:|
+| **C++** | 98.24 | 97.86 | 95.73 | **99.12** (Exp16) | `+0.88` ↑ |
+| **Java** | 99.02 | 98.89 | 96.54 | **99.54** (Exp11) | `+0.52` ↑ |
+| **Python** | 98.60 | 98.22 | 94.84 | **98.66** (Exp11) | `+0.06` ↑ |
+
+### Table 4 — Binary Per-Source (F1 %)
+
+| Source | UniXcoder | CodeT5 | CodeBERT | **Our Best** | Δ vs UniXcoder |
+|:-------|:---------:|:------:|:--------:|:------------:|:--------------:|
+| **CodeForces** | 96.54 | 97.24 | 91.67 | **98.39** (Exp11) | `+1.85` ↑ |
+| **LeetCode** | 97.87 | 66.23 | 87.63 | **99.35** (Exp15) | `+1.48` ↑ |
+| **GitHub** | 98.46 | 98.54 | 95.31 | **98.54** (Exp11) | `+0.08` ↑ |
+
+### Table 7 — Author IID (6-class Macro-F1 %)
+
+| Model | Author F1 | Author Acc | **Our Best (Exp18)** | Δ |
+|:------|:---------:|:----------:|:--------------------:|:--:|
+| **Exp18 HierTreeCode (ours)** | **70.55** | ~80+ | — | — |
+| **Exp17 RAGDetect (ours)** | **70.46** | — | — | — |
+| UniXcoder (paper best) | 66.33 | 79.35 | `+4.22` | ↑ |
+| CodeBERT | 64.80 | 77.65 | `+5.75` | ↑ |
+| CodeT5 | 62.45 | 78.25 | `+8.10` | ↑ |
+| CatBoost | 45.42 | 66.19 | `+25.13` | ↑ |
+| SVM | 27.63 | 49.70 | `+42.92` | ↑ |
+
+### Table 8 — OOD Generator LOO (F1 %) [pending our eval]
+
+| Model | OOD-Gen F1 | OOD-Gen Recall | OOD-Gen Acc |
+|:------|:----------:|:--------------:|:-----------:|
+| UniXcoder | **93.22** | 87.30 | 87.30 |
+| CatBoost | 92.31 | 85.71 | 85.71 |
+| SVM | 88.99 | 80.16 | 80.16 |
+| CodeT5 | 79.43 | 65.87 | 65.87 |
+| CodeBERT | 66.67 | 50.00 | 50.00 |
+| Baseline | 59.65 | 29.37 | 64.68 |
+| **Our experiments** | ❌ test_ood=0 | — | — |
+
+> ⚠️ All our experiments fail OOD-generator LOO: CoDET-M4 test split has no `model` field → `test_ood=0`. Needs custom train-split LOO.
+
+### Table 9 — OOD Source LOO (F1 %) [pending our eval]
+
+| Model | OOD-Source F1 | OOD-Source Acc |
+|:------|:-------------:|:--------------:|
+| CodeT5 | **58.22** | 74.11 |
+| UniXcoder | 55.01 | 72.81 |
+| CatBoost | 50.62 | 69.11 |
+| Baseline | 49.84 | 50.30 |
+| CodeBERT | 43.16 | 66.01 |
+| SVM | 38.66 | 55.16 |
+| **Our experiments** | ❌ pending | — |
+
+### Table 10 / 12 — OOD Language LOO (F1 %)
+
+**Aggregate (Table 12):**
+| Model | OOD-Lang F1 | OOD-Lang Acc |
+|:------|:-----------:|:------------:|
+| UniXcoder | **88.96** | 88.96 |
+| CodeT5 | 71.47 | 72.17 |
+| CodeBERT | 58.78 | 59.10 |
+| CatBoost | 53.42 | 56.26 |
+| Baseline | 51.53 | 59.64 |
+| SVM | 28.68 | 36.29 |
+
+**Per-language (Table 10):**
+| Language | UniXcoder | CodeT5 | CodeBERT | CatBoost |
+|:---------|:---------:|:------:|:--------:|:--------:|
+| C# | **91.31** | 78.55 | 45.31 | 51.01 |
+| Go | **90.01** | 88.78 | 52.46 | 64.72 |
+| JavaScript | **81.48** | 34.81 | 26.84 | 26.03 |
+| PHP | **96.17** | 93.66 | 56.68 | 45.08 |
+
+> Our Exp16 cpp-OOD: 88.21%; GH subgroup 48.39% (worst). Java/Python OOD pending.
 
 ---
 
