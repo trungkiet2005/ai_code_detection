@@ -2,7 +2,7 @@
 
 > **Benchmark Dataset:** `DaniilOr/CoDET-M4` (~500K samples, Python/Java/C++)  
 > **Paper Baseline:** Orel, Azizov & Nakov, ACL Findings 2025 (UniXcoder)  
-> **Current Best:** **Exp18 HierTreeCode** — Author IID 70.55 F1 (new SOTA)
+> **Current Best:** **Exp18 HierTreeCode** — Author IID 70.55 F1 (new SOTA, Exp14 ProtoCon at 70.13 close second)
 
 ---
 
@@ -13,7 +13,7 @@
 | Paper (UniXcoder) | Baseline | 98.65 | 66.33 | — | reference |
 | **Exp11** | SpectralCode | **99.06** | 69.82 | 70.80 | ✅ Done |
 | **Exp18** | HierTreeCode | **99.06** | **70.55** | **71.88** | ✅ Done |
-| Exp14 | ProtoCon | — | — | — | 🔲 Pending |
+| **Exp14** | ProtoCon | **99.06** | 70.13 | 71.26 | ✅ Done |
 | Exp15 | GroupDRO | — | — | — | 🔲 Pending |
 | Exp16 | HyperNetCode | — | — | — | 🔲 Pending |
 | **Exp17** | **RAGDetect** | **99.09** | **70.46** | **70.99** | ✅ Done |
@@ -163,12 +163,74 @@
 - Dataset loading: some `404` for `.py`/`dataset_infos.json` paths, but the pipeline still uses the **built-in split column** from CoDET-M4.
 
 ---
+---
+
+## 📊 Exp14 — ProtoCon (Prototype Contrastive Learning)
+
+**Run:** 2026-03-31 | ModernBERT-base + EMA Prototype Bank + Hyperspherical Uniformity + SupCon  
+**Loss:** `L_focal + 0.3*L_proto_attract + 0.1*L_unif + 0.2*L_supcon`  
+**Key novelty:** Prototype memory bank pulled toward class centroids per batch; uniformity loss maximizes sphere separation
+**Infra:** H100 80GB BF16 | batch=64x1 | epochs=3 | workers=8 | 149.5M params
+
+### IID Binary
+| Metric | Value | vs Exp18 |
+|:-------|:-----:|:--------:|
+| Test Macro-F1 | **0.9906** | `=` |
+| Test Weighted-F1 | 0.9906 | `=` |
+| Best Val F1 | 0.9902 | `=` |
+
+| Language | F1 | Source | F1 |
+|:---------|:--:|:-------|:--:|
+| C++ | 0.9903 | CF | 0.9824 |
+| Java | **0.9947** | LC | 0.9841 |
+| Python | 0.9869 | GH | 0.9853 |
+
+### IID Author (6-class)
+| Metric | Value | vs Exp18 | Delta |
+|:-------|:-----:|:--------:|:-----:|
+| Test Macro-F1 | **0.7013** | `-0.0042` | `-0.42%` |
+| Test Weighted-F1 | 0.8130 | `-0.0003` | `~` |
+| Best Val F1 | **0.7126** | `-0.0062` | `-0.62%` |
+
+| Class | F1 (Exp14) | F1 (Exp18) | Δ |
+|:------|:----------:|:----------:|:--:|
+| Human | 0.9826 | 0.9820 | `+0.0006` ↑ |
+| CodeLlama | 0.7415 | 0.7429 | `-0.0014` ↓ |
+| GPT | **0.7188** | 0.7481 | `-0.0293` ↓ |
+| Llama3.1 | **0.8246** | 0.8153 | **`+0.0093` ↑↑** |
+| Nxcode | **0.5073** | 0.5015 | **`+0.0058` ↑** |
+| Qwen1.5 | 0.4329 | **0.4431** | `-0.0102` ↓ |
+
+#### Per-source breakdown (Author)
+| Source | Exp14 | Exp18 | Δ |
+|:-------|:-----:|:-----:|:--:|
+| CF | 0.7618 | **0.7717** | `-0.0099` |
+| GH | 0.5591 | **0.5618** | `-0.0027` |
+| LC | **0.6047** | 0.6035 | `+0.0012` |
+
+**Key insights:**
+- ProtoCon slightly below HierTreeCode overall (70.13 vs 70.55) but **Llama3.1 is best ever (+0.93%)** and Nxcode improves
+- Prototype uniformity converges (unif: -0.08 → -1.03 over 3 epochs) — sphere separation working  
+- SupCon stays high (3.62 → 3.06): author-level discrimination still hard, confirming Nxcode/Qwen confusion as main bottleneck
+- Confusion: nxcode→qwen (1886 samples) and qwen→nxcode (1961 samples) — comparable to Exp18
+
+### OOD Generator
+**Status: ALL FAILED** — Known infrastructure issue: CoDET-M4 test split does not expose generator labels for LOO filtering. `test_ood=0` for all 5 generators.  
+→ OOD generator evaluation requires custom dataset split; flag for fix in future runs.
+
+### OOD Language (partial — log truncated)
+`cpp`, `java`, `python` LOO runs started but log was truncated. Results pending.
+
+**Checkpoint:** `./codet_m4_checkpoints/codet_author/protocon_CoDET_author_best.pt`
+
+---
+
 ## 🚀 Performance vs Paper (Head-to-Head)
 
-| Evaluation Mode (IID) | Paper (UniXcoder) | Exp11 SpectralCode | **Exp18 HierTreeCode** | Best Delta |
-|:----------------------|:-----------------:|:------------------:|:----------------------:|:----------:|
-| Binary F1 (Table 2) | 98.65 | 99.06 | **99.06** | `+0.41%` |
-| Author F1 (Table 7) | 66.33 | 69.82 | **70.55** | `+4.22%` |
+| Evaluation Mode (IID) | Paper (UniXcoder) | Exp11 SpectralCode | Exp14 ProtoCon | **Exp18 HierTreeCode** | Best Delta |
+|:----------------------|:-----------------:|:------------------:|:--------------:|:----------------------:|:----------:|
+| Binary F1 (Table 2) | 98.65 | 99.06 | 99.06 | **99.06** | `+0.41%` |
+| Author F1 (Table 7) | 66.33 | 69.82 | 70.13 | **70.55** | `+4.22%` |
 
 ---
 
