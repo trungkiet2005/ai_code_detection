@@ -17,7 +17,7 @@
 | **Exp15** | GroupDRO | 99.06 | 70.17 | 70.59 | ✅ Done |
 | **Exp16** | HyperNetCode | **99.07** | — (failed) | — | ✅ Done |
 | **Exp17** | **RAGDetect** | **99.09** | **70.46** | **70.99** | ✅ Done |
-| Exp19 | EAGLECode | — | — | — | 🔲 Pending |
+| **Exp19** | EAGLECode (DANN) | 98.73 | 62.89 | 64.23 | ✅ Done |
 | Exp20 | BiScopeCode | — | — | — | 🔲 Pending |
 
 ---
@@ -360,12 +360,94 @@ Binary per-class breakdown:
 
 ---
 
+## 📊 Exp19 — EAGLECode (DANN Adversarial Domain Adaptation)
+
+**Run:** 2026-03-31 | ModernBERT-base + GradientReversalLayer (DANN) for generator-invariant features  
+**Loss:** `L_focal + L_neural + L_spectral + λ_adv * L_adv`  
+**Key novelty:** λ_adv anneals 0→0.1 over epoch 1; GRL reverses gradient from generator discriminator → encoder learns generator-invariant binary features  
+**Infra:** H100 80GB BF16 | batch=64x1 | epochs=3 | 151.8M params
+
+### IID Binary
+| Metric | Value | vs Exp18 |
+|:-------|:-----:|:--------:|
+| Test Macro-F1 | 0.9873 | `-0.0033` |
+| Test Weighted-F1 | 0.9873 | `-0.0033` |
+| Best Val F1 | 0.9879 | `-0.0018` |
+
+| Language | Macro-F1 | Source | Macro-F1 |
+|:---------|:---------:|:-------|:---------:|
+| C++ | 0.9876 | CF | 0.9758 |
+| Java | **0.9927** | GH | 0.9808 |
+| Python | 0.9819 | LC | 0.9777 |
+
+**Binary training dynamics:**
+- Epoch 1: λ_adv=0.000, Adv=0.000 → pure CE, val=0.9726
+- Epoch 2+: λ_adv=0.100, Adv≈3-4 (GRL active) → val improves to 0.9879 but lower than baselines
+- Adversarial signal (Adv loss ~2.7 final) indicates GRL is active but hurts overall accuracy
+
+### IID Author (6-class) ⚠️ CATASTROPHIC DEGRADATION
+| Metric | Value | vs Exp18 | Delta |
+|:-------|:-----:|:--------:|:-----:|
+| Test Macro-F1 | **0.6289** | `-0.0766` | **`-7.66%` ↓↓↓** |
+| Test Weighted-F1 | 0.7408 | `-0.0725` | `-7.25%` |
+| Best Val F1 | **0.6423** | `-0.0765` | `-7.65%` |
+
+Per-class F1:
+| Class | F1 (Exp19) | F1 (Exp18) | Δ |
+|:------|:----------:|:----------:|:--:|
+| Human | 0.9172 | 0.9820 | `-0.0648` ↓↓ |
+| CodeLlama | 0.6762 | 0.7429 | `-0.0667` ↓↓ |
+| GPT | 0.6891 | 0.7481 | `-0.0590` ↓↓ |
+| Llama3.1 | **0.7878** | 0.8153 | `-0.0275` ↓ |
+| Nxcode | 0.5052 | **0.5015** | `+0.0037` ↑ |
+| **Qwen1.5** | **0.1981** | 0.4431 | **`-0.2450` ↓↓↓ worst ever!** |
+
+#### Per-source (Author)
+| Source | Exp19 | Exp18 | Δ |
+|:-------|:-----:|:-----:|:--:|
+| CF | 0.6267 | **0.7717** | `-0.1450` ↓↓ |
+| GH | 0.4738 | **0.5618** | `-0.0880` ↓↓ |
+| LC | 0.5452 | **0.6035** | `-0.0583` ↓ |
+
+#### Confusion matrix analysis
+```
+           H     CL    GPT   L3.1  NX    QW
+Human:  [20868,  829,  199,  217, 2062, 383]  ← 2062 humans pred as Nxcode!
+CodeLL: [   24, 3834,  167,  656,  449,  96]
+GPT:    [   15,   84, 1465,   89,  104,   3]
+L3.1:   [   13,  248,  319, 4606,  219,   4]
+Nxcode: [   16,  437,  165,  373, 3917, 629]
+Qwen:   [   14,  695,  169,  356, 3293, 727]  ← 3293 Qwen pred as Nxcode
+```
+> **Root failure**: DANN forces encoder to produce generator-invariant features. This is *exactly the opposite* of what author identification needs. Qwen1.5 (F1=0.198) collapses almost entirely into Nxcode — GRL successfully erases generator-style information, destroying fine-grained discrimination.
+
+### Training dynamics (Author — DANN degradation)
+| Epoch | Val Macro-F1 | Adv Loss | λ_adv |
+|:------|:-----------:|:--------:|:------:|
+| 1 | **0.6423** (best) | 0.00 | 0.000 |
+| 2 | 0.4111 | 1.61 | 0.100 |
+| 3 | 0.5569 | 1.37 | 0.100 |
+> Best checkpoint from epoch 2 (before full GRL damage). Val F1 drops 23% when λ_adv activates.
+
+### OOD Generator / Source
+Not evaluated (log only shows iid_only run plan).
+
+### Key Insights
+- **DANN is fundamentally misaligned with author identification**: the GRL objective (make features indistinguishable by generator) directly conflicts with the task (identify generator). This was a known risk but the degree of failure (-7.66%) confirms it
+- **Binary also hurt** (-0.33%) — forcing generator-invariant binary features removes useful discriminative signal even for the simple human vs AI task
+- **Qwen1.5 worst ever** (0.198): DANN most aggressively collapses Qwen→Nxcode since they're the most similar pair; the adversarial training exacerbates the existing confusion
+- **Experiment conclusion**: GRL/DANN is contra-indicated for author identification; adversarial invariance is only appropriate when the domain factor is orthogonal to the label
+
+**Checkpoint:** `./codet_m4_checkpoints/codet_author/eaglecode_CoDET_author_best.pt`
+
+---
+
 ## 🚀 Performance vs Paper (Head-to-Head)
 
-| Evaluation Mode (IID) | Paper (UniXcoder) | Exp11 SpectralCode | Exp14 ProtoCon | Exp15 GroupDRO | Exp16 HyperNet | **Exp18 HierTreeCode** | Best Delta |
-|:----------------------|:-----------------:|:------------------:|:--------------:|:--------------:|:--------------:|:----------------------:|:----------:|
-| Binary F1 (Table 2) | 98.65 | 99.06 | 99.06 | 98.98 | **99.07** | **99.06** | `+0.44%` (Exp17 99.09 best) |
-| Author F1 (Table 7) | 66.33 | 69.82 | 70.13 | 70.17 | — (failed) | **70.55** | `+4.22%` |
+| Evaluation Mode (IID) | Paper (UniXcoder) | Exp11 SpectralCode | Exp14 ProtoCon | Exp15 GroupDRO | Exp16 HyperNet | Exp19 EAGLE | **Exp18 HierTreeCode** | Best Delta |
+|:----------------------|:-----------------:|:------------------:|:--------------:|:--------------:|:--------------:|:-----------:|:----------------------:|:----------:|
+| Binary F1 (Table 2) | 98.65 | 99.06 | 99.06 | 98.98 | **99.07** | 98.73 | **99.06** | `+0.44%` (Exp17 99.09 best) |
+| Author F1 (Table 7) | 66.33 | 69.82 | 70.13 | 70.17 | — (failed) | 62.89 ↓↓ | **70.55** | `+4.22%` |
 
 ---
 
