@@ -483,7 +483,8 @@ class SupConLoss(nn.Module):
         log_probs = F.log_softmax(sim, dim=1)
 
         # Mean over positive pairs
-        pos_log_probs = (log_probs * pos_mask.float()).sum(dim=1) / pos_mask.float().sum(dim=1).clamp(min=1.0)
+        # NOTE: use masked_fill instead of direct multiply to avoid 0 * -inf = NaN
+        pos_log_probs = (log_probs.masked_fill(~pos_mask, 0.0)).sum(dim=1) / pos_mask.float().sum(dim=1).clamp(min=1.0)
         loss = -pos_log_probs.mean()
         return loss
 
@@ -621,13 +622,22 @@ def _is_human_target(target: str) -> bool:
 
 
 def _build_generator_vocab(train_split: Dataset) -> Dict[str, int]:
-    """Build a mapping from generator name → integer label."""
+    """Build a mapping from generator name → integer label.
+    human = 0, AI generators sorted alphabetically = 1, 2, ...
+    Falls back to 'model' field (CoDET-M4 uses 'model', not 'generator').
+    """
     generators = set()
     for row in train_split:
-        gen = str(row.get("generator", "") or "").strip().lower()
-        if gen:
-            generators.add(gen)
-    ordered = sorted(generators)
+        target = _normalize_target(row.get("target", ""))
+        if _is_human_target(target):
+            generators.add("human")
+        else:
+            # CoDET-M4 stores generator name in 'model' field
+            gen = str(row.get("model", "") or row.get("generator", "") or "").strip().lower()
+            if gen:
+                generators.add(gen)
+    ai_gens = sorted(g for g in generators if g != "human")
+    ordered = (["human"] if "human" in generators else []) + ai_gens
     return {g: i for i, g in enumerate(ordered)}
 
 
