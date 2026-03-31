@@ -1120,7 +1120,7 @@ def run_iid_suite(
     is_binary = task == "binary"
 
     logger.info("=" * 70)
-    logger.info("[IID] HyperNetCode | task=%s | Exp16", task)
+    logger.info("[Exp16][IID] HyperNetCode | task=%s | Exp16", task)
     logger.info("GPU=%s | precision=%s | batch=%dx%d | epochs=%d",
                 _get_gpu_name(), cfg.precision, cfg.batch_size, cfg.grad_accum_steps, cfg.epochs)
     logger.info("=" * 70)

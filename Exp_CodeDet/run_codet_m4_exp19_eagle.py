@@ -1,21 +1,23 @@
 """
-[CoDET-M4] HierTreeCode Runner – Full Benchmark Evaluation  (Kaggle standalone)
-      Exp18: HierTreeCode (Hierarchical Generator Affinity Tree Loss)
+[CoDET-M4] EAGLECode Runner – Full Benchmark Evaluation  (Kaggle standalone)
+      Exp19: EAGLECode (Domain Adversarial + Generator-Invariant Features)
 
-Core novelty: Models the 6 author classes as a Hierarchical Affinity Tree:
-  Root → Human (leaf)
-       → AI-generated
-             → GPT (leaf)
-             → Llama family: Llama3.1 (leaf), CodeLlama (leaf)
-             → Qwen family: Qwen1.5 (leaf), Nxcode (leaf)  ← KEY: Nxcode IS fine-tuned Qwen
+Core novelty: Gradient Reversal Layer (GRL) forces the encoder to learn features
+that are generator-agnostic for binary detection. A generator discriminator head
+trained via GRL pushes the encoder to remove generator identity from its features,
+yielding strong OOD generalization to unseen generators.
 
-HierarchicalAffinityLoss enforces:
-  - within-family samples must be closer than cross-family samples
-  - Qwen↔Nxcode distances constrained at BOTH feature and prediction level
-  - loss = L_focal + 0.3*L_neural + 0.3*L_spectral + 0.4*L_hier
+Architecture:
+  SpectralCode backbone → h_neural
+      ├── ClassifierHead (binary/author) — normal gradient
+      └── GeneratorDiscriminator (6-way generator CE) — REVERSED gradient (GRL)
 
-Inspired by: DETree (arXiv:2510.17489, Oct 2025, NeurIPS), ProtoNets, DML
-Target: Author IID Macro-F1 77%+ (from 69.82% SpectralCode baseline)
+Loss: L_focal(class) + 0.3*L_neural + 0.3*L_spectral + λ_adv * L_gen_adv(GRL)
+  - λ_adv = 0.1 (adversarial weight; annealed from 0 → 0.1 over first epoch)
+  - L_gen_adv: CE predicting which generator wrote the code (using reversed gradient)
+
+Inspired by: EAGLE (arXiv:2403.15690), DANN (Ganin et al. JMLR 2016)
+Target: ood_generator Macro-F1 95%+ (unseen generator generalization)
 Target venue: NeurIPS 2026 ORAL
 """
 
@@ -189,8 +191,9 @@ class SpectralConfig:
     max_grad_norm: float = 1.0
 
     temperature: float = 0.07
-    lambda_hier: float = 0.4
-    hier_margin: float = 0.3
+    lambda_adv: float = 0.1          # adversarial loss weight
+    adv_anneal_epochs: int = 1        # epochs to ramp lambda from 0 → lambda_adv
+    num_generators: int = 6           # human + 5 LLMs (for discriminator head)
     max_train_samples: int = 100_000
     max_val_samples: int = 20_000
     max_test_samples: int = 50_000
@@ -468,6 +471,7 @@ class AICDDataset(TorchDataset):
             "ast_seq": torch.tensor(ast_seq, dtype=torch.long),
             "struct_feat": torch.tensor(struct_feat, dtype=torch.float32),
             "label": torch.tensor(label, dtype=torch.long),
+            "gen_label": torch.tensor(item.get("gen_label", -1), dtype=torch.long),
         }
 
 
@@ -555,6 +559,13 @@ class SpectralCode(nn.Module):
         )
         self.focal_gamma = 2.0
 
+        # Generator discriminator head (for adversarial domain confusion)
+        self.grl = GradientReversalLayer(alpha=1.0)
+        self.generator_discriminator = nn.Sequential(
+            nn.Linear(fusion_dim, 128), nn.ReLU(), nn.Dropout(0.1),
+            nn.Linear(128, config.num_generators),
+        )
+
     def forward(self, input_ids, attention_mask, ast_seq, struct_feat, labels=None):
         token_out = self.token_encoder(input_ids=input_ids, attention_mask=attention_mask)
         token_repr = token_out.last_hidden_state[:, 0, :]
@@ -572,12 +583,15 @@ class SpectralCode(nn.Module):
         gate_weights = F.softmax(self.gate(gate_input), dim=-1)
         logits = gate_weights[:, 0:1] * neural_logits + gate_weights[:, 1:2] * spectral_logits
 
+        # Generator adversarial branch (GRL reverses gradient)
+        gen_logits = self.generator_discriminator(self.grl(h_neural))
+
         return {
             "logits": logits,
             "neural_logits": neural_logits,
             "spectral_logits": spectral_logits,
             "gate_weights": gate_weights,
-            "embeddings": h_neural,  # for HierTree loss
+            "gen_logits": gen_logits,
         }
 
 
@@ -598,110 +612,45 @@ class FocalLoss(nn.Module):
 
 
 # ============================================================================
-# Hierarchical Affinity Tree Loss (Exp18 novelty)
+# Gradient Reversal Layer + Generator Discriminator (Exp19 novelty)
 # ============================================================================
 
-# Tree structure: defines parent groups for the 6 author classes
-# class indices in author task: 0=human, 1=codellama, 2=gpt, 3=llama3.1, 4=nxcode, 5=qwen1.5
-AUTHOR_TREE = {
-    "human":    {"family": 0},  # family 0 = human
-    "codellama":{"family": 1},  # family 1 = llama-family
-    "gpt":      {"family": 2},  # family 2 = gpt-family (singleton)
-    "llama3.1": {"family": 1},  # family 1 = llama-family
-    "nxcode":   {"family": 3},  # family 3 = qwen-family (KEY: nxcode IS fine-tuned qwen)
-    "qwen1.5":  {"family": 3},  # family 3 = qwen-family
-}
-# Maps class index → family index (used at train time)
-AUTHOR_FAMILY = [0, 1, 2, 1, 3, 3]  # indexed by class 0..5
+class GradientReversalFunction(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, x, alpha):
+        ctx.save_for_backward(torch.tensor(alpha))
+        return x.clone()
 
-class HierarchicalAffinityLoss(nn.Module):
-    """
-    Hierarchical Affinity Tree Loss.
+    @staticmethod
+    def backward(ctx, grad_output):
+        alpha = ctx.saved_tensors[0].item()
+        return -alpha * grad_output, None
 
-    For each anchor sample, enforces:
-      dist(anchor, same_family_sample) + margin < dist(anchor, diff_family_sample)
 
-    This directly forces the Qwen-family (nxcode, qwen1.5) to cluster together
-    while being pushed away from the Llama-family and GPT.
-
-    Only active for the author (6-class) task; returns 0 for binary task.
-    """
-    def __init__(self, margin: float = 0.3, num_classes: int = 6):
+class GradientReversalLayer(nn.Module):
+    """Reverses gradient during backprop. alpha controls reversal strength."""
+    def __init__(self, alpha: float = 1.0):
         super().__init__()
-        self.margin = margin
-        self.num_classes = num_classes
-        self.active = (num_classes == 6)
+        self.alpha = alpha
 
-    def forward(self, embeddings: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
-        """
-        Args:
-            embeddings: (B, D) L2-normalized feature vectors
-            labels: (B,) class indices 0..5
-        """
-        if not self.active or embeddings.shape[0] < 4:
-            return embeddings.new_zeros(1).squeeze()
-
-        # Build family labels for this batch
-        family_labels = torch.tensor(
-            [AUTHOR_FAMILY[l.item()] if l.item() < len(AUTHOR_FAMILY) else -1 for l in labels],
-            device=labels.device
-        )
-
-        # Pairwise cosine distances (1 - cos_sim), shape (B, B)
-        emb_norm = F.normalize(embeddings, p=2, dim=-1)
-        cos_sim = torch.mm(emb_norm, emb_norm.t())  # (B, B)
-        dist = 1.0 - cos_sim  # distance in [0, 2]
-
-        loss = embeddings.new_zeros(1).squeeze()
-        count = 0
-
-        B = embeddings.shape[0]
-        for i in range(B):
-            fi = family_labels[i].item()
-            if fi == -1:
-                continue
-            # same-family positives (excluding self)
-            same_mask = (family_labels == fi)
-            same_mask[i] = False
-            # different-family negatives
-            diff_mask = (family_labels != fi) & (family_labels != -1)
-
-            if same_mask.sum() == 0 or diff_mask.sum() == 0:
-                continue
-
-            # Hardest positive (farthest same-family)
-            d_pos = dist[i][same_mask].max()
-            # Hardest negative (closest diff-family)
-            d_neg = dist[i][diff_mask].min()
-
-            triplet = F.relu(d_pos - d_neg + self.margin)
-            loss = loss + triplet
-            count += 1
-
-        return loss / max(count, 1)
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return GradientReversalFunction.apply(x, self.alpha)
 
 
-_hier_loss_fn = None  # module-level singleton
-
-def _get_hier_loss(num_classes: int, margin: float) -> "HierarchicalAffinityLoss":
-    global _hier_loss_fn
-    if _hier_loss_fn is None or _hier_loss_fn.num_classes != num_classes:
-        _hier_loss_fn = HierarchicalAffinityLoss(margin=margin, num_classes=num_classes)
-    return _hier_loss_fn
-
-def compute_all_losses(model, outputs, labels, config, focal_loss_fn=None):
+def compute_all_losses(model, outputs, labels, config, focal_loss_fn=None, gen_labels=None, adv_lambda=0.0):
     if focal_loss_fn is None:
         focal_loss_fn = FocalLoss(gamma=2.0)
     task_loss = focal_loss_fn(outputs["logits"], labels)
     neural_loss = focal_loss_fn(outputs["neural_logits"], labels)
     spectral_loss = focal_loss_fn(outputs["spectral_logits"], labels)
-    # Hierarchical affinity tree loss
-    hier_fn = _get_hier_loss(model.num_classes, getattr(config, "hier_margin", 0.3))
-    hier_fn = hier_fn.to(outputs["embeddings"].device)
-    hier_loss = hier_fn(outputs["embeddings"], labels)
-    lambda_hier = getattr(config, "lambda_hier", 0.4)
-    total_loss = task_loss + 0.3 * neural_loss + 0.3 * spectral_loss + lambda_hier * hier_loss
-    return {"total": total_loss, "task": task_loss, "neural": neural_loss, "spectral": spectral_loss, "hier": hier_loss}
+    # Adversarial generator confusion loss
+    adv_loss = torch.zeros(1, device=labels.device).squeeze()
+    if gen_labels is not None and adv_lambda > 0 and "gen_logits" in outputs:
+        valid_mask = gen_labels >= 0
+        if valid_mask.sum() > 0:
+            adv_loss = F.cross_entropy(outputs["gen_logits"][valid_mask], gen_labels[valid_mask])
+    total_loss = task_loss + 0.3 * neural_loss + 0.3 * spectral_loss + adv_lambda * adv_loss
+    return {"total": total_loss, "task": task_loss, "neural": neural_loss, "spectral": spectral_loss, "adv": adv_loss}
 
 
 def compute_class_weights(labels: List[int], num_classes: int) -> torch.Tensor:
@@ -747,11 +696,24 @@ class Trainer:
         self.amp_dtype = torch.bfloat16 if precision == "bf16" else torch.float16
         self.scaler = GradScaler(enabled=(use_amp and precision == "fp16"))
         self.focal_loss = FocalLoss(gamma=2.0, weight=self.class_weights)
+        self.current_adv_lambda = 0.0  # will be annealed
         self.best_f1 = 0.0
         self.global_step = 0
         self.last_eval_metrics: Dict[str, Dict[str, float]] = {}
 
     def train_epoch(self, epoch: int):
+        # Anneal adversarial lambda
+        anneal_epochs = getattr(self.config, "adv_anneal_epochs", 1)
+        max_lambda = getattr(self.config, "lambda_adv", 0.1)
+        self.current_adv_lambda = min(max_lambda, max_lambda * (epoch / max(anneal_epochs, 1)))
+
+        # Update GRL reversal strength (schedule from 0 → 1 over training)
+        total_epochs = self.config.epochs
+        p = (epoch + 1) / total_epochs
+        grl_alpha = 2.0 / (1.0 + math.exp(-10 * p)) - 1.0  # standard DANN schedule
+        if hasattr(self.model, "grl"):
+            self.model.grl.alpha = grl_alpha
+
         self.model.train()
         total_losses = defaultdict(float)
         num_batches = 0
@@ -763,10 +725,14 @@ class Trainer:
             ast_seq = batch["ast_seq"].to(self.config.device, non_blocking=self.config.non_blocking)
             struct_feat = batch["struct_feat"].to(self.config.device, non_blocking=self.config.non_blocking)
             labels = batch["label"].to(self.config.device, non_blocking=self.config.non_blocking)
+            gen_labels = batch.get("gen_label")
+            if gen_labels is not None:
+                gen_labels = gen_labels.to(self.config.device, non_blocking=self.config.non_blocking)
 
             with autocast(device_type=self.config.device, enabled=self.use_amp, dtype=self.amp_dtype):
                 outputs = self.model(input_ids, attention_mask, ast_seq, struct_feat, labels)
-                losses = compute_all_losses(self.model, outputs, labels, self.config, self.focal_loss)
+                losses = compute_all_losses(self.model, outputs, labels, self.config, self.focal_loss,
+                                            gen_labels=gen_labels, adv_lambda=self.current_adv_lambda)
                 loss = losses["total"] / self.config.grad_accum_steps
 
             self.scaler.scale(loss).backward()
@@ -786,11 +752,11 @@ class Trainer:
 
             if (batch_idx + 1) % self.config.log_every == 0:
                 avg_loss = total_losses["total"] / num_batches
+                avg_adv = total_losses.get("adv", 0.0) / num_batches
                 lr = self.scheduler.get_last_lr()[0]
-                avg_hier = total_losses.get("hier", 0.0) / num_batches
                 logger.info(
                     f"Epoch {epoch+1} | Step {batch_idx+1}/{len(self.train_loader)} | "
-                    f"Loss: {avg_loss:.4f} | Hier: {avg_hier:.4f} | LR: {lr:.2e}"
+                    f"Loss: {avg_loss:.4f} | Adv: {avg_adv:.4f} | λ_adv: {self.current_adv_lambda:.3f} | LR: {lr:.2e}"
                 )
 
             if self.global_step > 0 and self.global_step % self.config.eval_every == 0:
@@ -840,12 +806,12 @@ class Trainer:
 
     def save_checkpoint(self, tag: str = "latest"):
         os.makedirs(self.config.save_dir, exist_ok=True)
-        path = os.path.join(self.config.save_dir, f"hiertreecode_{self.config.task}_{tag}.pt")
+        path = os.path.join(self.config.save_dir, f"eaglecode_{self.config.task}_{tag}.pt")
         torch.save({"model_state_dict": self.model.state_dict(), "best_f1": self.best_f1, "global_step": self.global_step}, path)
         logger.info(f"Saved checkpoint to {path}")
 
     def load_checkpoint(self, tag: str = "best"):
-        path = os.path.join(self.config.save_dir, f"hiertreecode_{self.config.task}_{tag}.pt")
+        path = os.path.join(self.config.save_dir, f"eaglecode_{self.config.task}_{tag}.pt")
         if os.path.exists(path):
             ckpt = torch.load(path, map_location=self.config.device, weights_only=True)
             self.model.load_state_dict(ckpt["model_state_dict"])
@@ -855,7 +821,7 @@ class Trainer:
 
     def train(self):
         logger.info("=" * 60)
-        logger.info(f"Starting HierTreeCode Training - {self.config.task}")
+        logger.info(f"[Exp19] Starting EAGLECode Training - {self.config.task}")
         logger.info(f"Classes: {self.model.num_classes} | Device: {self.config.device} | Precision: {self.precision}")
         logger.info(f"Batch: {self.config.batch_size}x{self.config.grad_accum_steps} = {self.config.batch_size * self.config.grad_accum_steps}")
         logger.info("=" * 60)
@@ -959,6 +925,9 @@ def _map_author_label(row: Dict[str, object], author_vocab: Dict[str, int]) -> i
     return author_vocab.get(model_name, -1)
 
 
+_GENERATOR_VOCAB = {"human": 0, "codellama": 1, "gpt": 2, "llama3.1": 3, "nxcode": 4, "qwen1.5": 5}
+
+
 def _convert_split(
     split_ds: Dataset,
     cfg: CoDETM4Config,
@@ -973,12 +942,14 @@ def _convert_split(
         else:
             raise ValueError(f"Unsupported task: {cfg.task}")
         target = _normalize_target(row.get("target", ""))
+        generator = "human" if _is_human_target(target) else str(row.get("model", "") or "").strip().lower()
         return {
             "code": code,
             "label": label,
             "language": str(row.get("language", "")).strip().lower(),
             "source": str(row.get("source", "")).strip().lower(),
-            "generator": "human" if _is_human_target(target) else str(row.get("model", "") or "").strip().lower(),
+            "generator": generator,
+            "gen_label": _GENERATOR_VOCAB.get(generator, -1),
         }
 
     converted = split_ds.map(_convert_row, remove_columns=split_ds.column_names)
@@ -1200,7 +1171,7 @@ def preflight(cfg: CoDETM4Config, exp_cfg: SpectralConfig) -> Dict[str, object]:
 # BUILD CONFIG
 # ============================================================================
 
-def build_hiertree_config(task_tag: str, save_root: str) -> SpectralConfig:
+def build_eagle_config(task_tag: str, save_root: str) -> SpectralConfig:
     strict_ts = importlib.util.find_spec("tree_sitter_languages") is not None
     cfg = SpectralConfig(
         epochs=3,
@@ -1250,10 +1221,10 @@ def run_iid(task: str = "binary", codet_cfg: Optional[CoDETM4Config] = None, run
         codet_cfg.task = task
     set_seed(codet_cfg.seed)
 
-    exp_cfg = build_hiertree_config(f"CoDET_{task}", codet_cfg.save_root)
+    exp_cfg = build_eagle_config(f"CoDET_{task}", codet_cfg.save_root)
 
     logger.info("=" * 70)
-    logger.info(f"[IID] HierTreeCode | task={task}")
+    logger.info(f"[Exp19][IID] EAGLECode | task={task}")
     logger.info(f"GPU={_get_gpu_name()} | precision={exp_cfg.precision} | batch={exp_cfg.batch_size}x{exp_cfg.grad_accum_steps} | epochs={exp_cfg.epochs}")
     logger.info("=" * 70)
 
@@ -1302,7 +1273,7 @@ def _run_single_loo(hold_out_field: str, hold_out_value: str, codet_cfg: CoDETM4
     set_seed(cfg.seed)
 
     tag = f"CoDET_ood_{hold_out_field}_{hold_out_value}"
-    exp_cfg = build_hiertree_config(tag, cfg.save_root)
+    exp_cfg = build_eagle_config(tag, cfg.save_root)
 
     logger.info("=" * 70)
     logger.info(f"[OOD] LOO {hold_out_field}={hold_out_value}")
@@ -1422,7 +1393,7 @@ def run_suite(
     all_results: Dict[str, Any] = {}
 
     logger.info("\n" + "=" * 70)
-    logger.info(f"CoDET-M4 FULL BENCHMARK SUITE: {len(run_plan)} evaluation modes")
+    logger.info(f"[Exp19] CoDET-M4 FULL BENCHMARK SUITE: {len(run_plan)} evaluation modes")
     for i, (mode, task) in enumerate(run_plan):
         logger.info(f"  [{i+1}] {mode}/{task}")
     logger.info("=" * 70)
@@ -1490,7 +1461,7 @@ def _log_final_summary(all_results: Dict[str, Any], run_plan: List[Tuple[str, st
             safe[k] = {sk: sv for sk, sv in v.items() if not isinstance(sv, (np.ndarray, torch.Tensor))}
     try:
         logger.info("\nSUITE_RESULTS_JSON=" + json.dumps(
-            {"timestamp": ts, "method": "HierTreeCode_CoDET_M4", "results": safe},
+            {"timestamp": ts, "method": "Exp19_EAGLECode_CoDET_M4", "results": safe},
             ensure_ascii=True, default=str,
         ))
     except (TypeError, ValueError):

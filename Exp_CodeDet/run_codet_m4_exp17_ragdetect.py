@@ -855,7 +855,7 @@ class Trainer:
 
     def train(self):
         logger.info("=" * 60)
-        logger.info(f"Starting RAGDetect Training - {self.config.task}")
+        logger.info(f"[Exp17] Starting RAGDetect Training - {self.config.task}")
         logger.info(f"Classes: {self.model.num_classes} | Device: {self.config.device} | Precision: {self.precision}")
         logger.info(f"Batch: {self.config.batch_size}x{self.config.grad_accum_steps} = {self.config.batch_size * self.config.grad_accum_steps}")
         logger.info("=" * 60)
@@ -1270,7 +1270,7 @@ def run_iid(task: str = "binary", codet_cfg: Optional[CoDETM4Config] = None, run
     exp_cfg = build_ragdetect_config(f"CoDET_{task}", codet_cfg.save_root)
 
     logger.info("=" * 70)
-    logger.info(f"[IID] RAGDetect | task={task}")
+    logger.info(f"[Exp17][IID] RAGDetect | task={task}")
     logger.info(f"GPU={_get_gpu_name()} | precision={exp_cfg.precision} | batch={exp_cfg.batch_size}x{exp_cfg.grad_accum_steps} | epochs={exp_cfg.epochs}")
     logger.info("=" * 70)
 
@@ -1439,7 +1439,7 @@ def run_suite(
     all_results: Dict[str, Any] = {}
 
     logger.info("\n" + "=" * 70)
-    logger.info(f"CoDET-M4 FULL BENCHMARK SUITE: {len(run_plan)} evaluation modes")
+    logger.info(f"[Exp17] CoDET-M4 FULL BENCHMARK SUITE: {len(run_plan)} evaluation modes")
     for i, (mode, task) in enumerate(run_plan):
         logger.info(f"  [{i+1}] {mode}/{task}")
     logger.info("=" * 70)
@@ -1507,7 +1507,7 @@ def _log_final_summary(all_results: Dict[str, Any], run_plan: List[Tuple[str, st
             safe[k] = {sk: sv for sk, sv in v.items() if not isinstance(sv, (np.ndarray, torch.Tensor))}
     try:
         logger.info("\nSUITE_RESULTS_JSON=" + json.dumps(
-            {"timestamp": ts, "method": "RAGDetect_CoDET_M4", "results": safe},
+            {"timestamp": ts, "method": "Exp17_RAGDetect_CoDET_M4", "results": safe},
             ensure_ascii=True, default=str,
         ))
     except (TypeError, ValueError):

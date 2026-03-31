@@ -1157,7 +1157,7 @@ def run_iid_suite(
     )
 
     logger.info("=" * 70)
-    logger.info("[IID] ProtoCon | task=%s | GPU=%s | precision=%s | batch=%dx%d | epochs=%d",
+    logger.info("[Exp14][IID] ProtoCon | task=%s | GPU=%s | precision=%s | batch=%dx%d | epochs=%d",
                 task, _get_gpu_name(), proto_cfg.precision,
                 proto_cfg.batch_size, proto_cfg.grad_accum_steps, proto_cfg.epochs)
     logger.info("=" * 70)

@@ -1,23 +1,21 @@
 """
-[CoDET-M4] BiScopeCode Runner – Full Benchmark Evaluation  (Kaggle standalone)
-      Exp20: BiScopeCode (Bidirectional Token Memorization Features)
+[CoDET-M4] HierTreeCode Runner – Full Benchmark Evaluation  (Kaggle standalone)
+      Exp18: HierTreeCode (Hierarchical Generator Affinity Tree Loss)
 
-Core novelty: Extracts bidirectional memorization statistics from ModernBERT MLM
-head — NO additional model needed. AI-generated code has characteristically HIGH
-token predictability (each token is predictable from surrounding context), while
-human code has more "creative surprises" (lower per-token MLM probability).
+Core novelty: Models the 6 author classes as a Hierarchical Affinity Tree:
+  Root → Human (leaf)
+       → AI-generated
+             → GPT (leaf)
+             → Llama family: Llama3.1 (leaf), CodeLlama (leaf)
+             → Qwen family: Qwen1.5 (leaf), Nxcode (leaf)  ← KEY: Nxcode IS fine-tuned Qwen
 
-BiScope features (8-dim per sample):
-  [mean(p_correct), std(p_correct), min(p_correct), max(p_correct),
-   token_entropy, fraction_high_conf(p>0.9), fraction_low_conf(p<0.1),
-   predictability_range(max-min)]
-extracted by sampling K=16 masked positions per sequence.
+HierarchicalAffinityLoss enforces:
+  - within-family samples must be closer than cross-family samples
+  - Qwen↔Nxcode distances constrained at BOTH feature and prediction level
+  - loss = L_focal + 0.3*L_neural + 0.3*L_spectral + 0.4*L_hier
 
-Loss: L_focal(gated) + 0.3*L_neural + 0.3*L_spectral + 0.3*L_biscope
-    where L_biscope = focal(biscope_head(biscope_features), labels)
-
-Inspired by: BiScope (NeurIPS 2024), forward/backward token CE asymmetry
-Target: Binary IID F1 99.15%+, Author IID 72%+
+Inspired by: DETree (arXiv:2510.17489, Oct 2025, NeurIPS), ProtoNets, DML
+Target: Author IID Macro-F1 77%+ (from 69.82% SpectralCode baseline)
 Target venue: NeurIPS 2026 ORAL
 """
 
@@ -191,9 +189,8 @@ class SpectralConfig:
     max_grad_norm: float = 1.0
 
     temperature: float = 0.07
-    biscope_k_positions: int = 16    # masked positions to sample per sequence
-    biscope_feature_dim: int = 8     # BiScope feature vector dimension
-    lambda_biscope: float = 0.3      # BiScope auxiliary loss weight
+    lambda_hier: float = 0.4
+    hier_margin: float = 0.3
     max_train_samples: int = 100_000
     max_val_samples: int = 20_000
     max_test_samples: int = 50_000
@@ -379,7 +376,6 @@ def extract_structural_features(code: str) -> List[float]:
 # ============================================================================
 
 SPECTRAL_FEATURE_DIM = 64
-BISCOPE_FEATURE_DIM = 8  # must match SpectralConfig.biscope_feature_dim
 
 
 def extract_spectral_features(input_ids: torch.Tensor, attention_mask: torch.Tensor) -> torch.Tensor:
@@ -437,96 +433,6 @@ def extract_spectral_features(input_ids: torch.Tensor, attention_mask: torch.Ten
         features.append(sample_feats[:SPECTRAL_FEATURE_DIM])
 
     return torch.tensor(np.array(features), dtype=torch.float32, device=input_ids.device)
-
-
-# ============================================================================
-# BiScope Memorization Features (Exp20 novelty)
-# ============================================================================
-
-@torch.no_grad()
-def extract_biscope_features(
-    model_encoder: nn.Module,
-    input_ids: torch.Tensor,
-    attention_mask: torch.Tensor,
-    k_positions: int = 16,
-) -> torch.Tensor:
-    """
-    Extract BiScope memorization features using the ModernBERT MLM head.
-
-    For K random token positions per sequence, mask each position and measure
-    how confidently ModernBERT predicts the original token (bidirectional context).
-
-    Returns:
-        (B, 8) float32 feature tensor:
-        [mean_p, std_p, min_p, max_p, entropy, frac_high, frac_low, p_range]
-    """
-    B, L = input_ids.shape
-    device = input_ids.device
-
-    features = torch.zeros(B, BISCOPE_FEATURE_DIM, device=device)
-
-    # Determine valid positions (non-padding, non-special tokens, min length 4)
-    seq_lens = attention_mask.sum(dim=1).clamp(min=4)  # (B,)
-
-    p_list = []  # will collect (B, k_positions) probabilities
-
-    for ki in range(k_positions):
-        # Sample a different random position for each sample in batch
-        pos = torch.floor(torch.rand(B, device=device) * (seq_lens - 2).float() + 1).long()
-        pos = pos.clamp(1, L - 2)  # avoid CLS/SEP
-
-        # Create masked input
-        masked_ids = input_ids.clone()
-        for b in range(B):
-            masked_ids[b, pos[b]] = 103  # BERT [MASK] token id (close enough for ModernBERT)
-
-        # Forward pass through backbone (no grad, uses current model weights)
-        try:
-            out = model_encoder(input_ids=masked_ids, attention_mask=attention_mask)
-            hidden = out.last_hidden_state  # (B, L, H)
-        except Exception:
-            # Fallback: if model forward fails with masked input, use all-zero features
-            break
-
-        # Project hidden state at masked position → vocab logits
-        # ModernBERT has a decoder head (tied embeddings) — use embedding matrix
-        try:
-            embed_weight = model_encoder.embeddings.tok_embeddings.weight  # (V, H)
-        except AttributeError:
-            try:
-                embed_weight = model_encoder.embeddings.word_embeddings.weight
-            except AttributeError:
-                break
-
-        # Cosine similarity between hidden[pos] and embedding vectors → surrogate logits
-        h_at_pos = torch.stack([hidden[b, pos[b]] for b in range(B)])  # (B, H)
-        h_norm = F.normalize(h_at_pos, p=2, dim=-1)
-        e_norm = F.normalize(embed_weight.detach()[:, :h_at_pos.shape[-1]], p=2, dim=-1)
-        logits = torch.mm(h_norm, e_norm.t()) / 0.07  # (B, V)
-
-        # Get probability of the ORIGINAL token (before masking)
-        orig_tokens = input_ids[torch.arange(B), pos]  # (B,)
-        probs = F.softmax(logits, dim=-1)  # (B, V)
-        p_correct = probs[torch.arange(B), orig_tokens]  # (B,) probability of original token
-        p_list.append(p_correct)
-
-    if not p_list:
-        return features  # fallback: all zeros
-
-    p_matrix = torch.stack(p_list, dim=1).float()  # (B, k_positions)
-
-    # Compute 8 statistics
-    mean_p = p_matrix.mean(dim=1)                           # (B,)
-    std_p = p_matrix.std(dim=1).clamp(min=1e-6)
-    min_p = p_matrix.min(dim=1).values
-    max_p = p_matrix.max(dim=1).values
-    entropy = -(p_matrix * (p_matrix + 1e-8).log()).sum(dim=1) / math.log(k_positions + 1)
-    frac_high = (p_matrix > 0.9).float().mean(dim=1)
-    frac_low = (p_matrix < 0.1).float().mean(dim=1)
-    p_range = max_p - min_p
-
-    features = torch.stack([mean_p, std_p, min_p, max_p, entropy, frac_high, frac_low, p_range], dim=1)
-    return features.detach()
 
 
 # ============================================================================
@@ -649,18 +555,6 @@ class SpectralCode(nn.Module):
         )
         self.focal_gamma = 2.0
 
-        # BiScope memorization feature stream
-        self.biscope_encoder = nn.Sequential(
-            nn.Linear(BISCOPE_FEATURE_DIM, 32), nn.LayerNorm(32), nn.GELU(), nn.Dropout(0.1),
-            nn.Linear(32, 64), nn.LayerNorm(64), nn.GELU(),
-        )
-        self.biscope_head = nn.Linear(64, num_classes)
-        # Update gate to include biscope stream (3-way gate now)
-        del self.gate  # remove old 2-way gate
-        self.gate = nn.Sequential(
-            nn.Linear(fusion_dim + spectral_dim + 64, 64), nn.GELU(), nn.Linear(64, 3),
-        )
-
     def forward(self, input_ids, attention_mask, ast_seq, struct_feat, labels=None):
         token_out = self.token_encoder(input_ids=input_ids, attention_mask=attention_mask)
         token_repr = token_out.last_hidden_state[:, 0, :]
@@ -671,30 +565,19 @@ class SpectralCode(nn.Module):
         spectral_feats = extract_spectral_features(input_ids, attention_mask)
         h_spectral = self.spectral_encoder(spectral_feats)
 
-        # BiScope memorization features (bidirectional MLM probe)
-        biscope_raw = extract_biscope_features(
-            self.token_encoder, input_ids, attention_mask,
-            k_positions=getattr(self.config, "biscope_k_positions", 16)
-        )
-        h_biscope = self.biscope_encoder(biscope_raw)
-        biscope_logits = self.biscope_head(h_biscope)
-
         neural_logits = self.neural_head(h_neural)
         spectral_logits = self.spectral_head(h_spectral)
-        biscope_logits = self.biscope_head(h_biscope)
 
-        gate_input = torch.cat([h_neural, h_spectral, h_biscope], dim=-1)
+        gate_input = torch.cat([h_neural, h_spectral], dim=-1)
         gate_weights = F.softmax(self.gate(gate_input), dim=-1)
-        logits = (gate_weights[:, 0:1] * neural_logits +
-                  gate_weights[:, 1:2] * spectral_logits +
-                  gate_weights[:, 2:3] * biscope_logits)
+        logits = gate_weights[:, 0:1] * neural_logits + gate_weights[:, 1:2] * spectral_logits
 
         return {
             "logits": logits,
             "neural_logits": neural_logits,
             "spectral_logits": spectral_logits,
-            "biscope_logits": biscope_logits,
             "gate_weights": gate_weights,
+            "embeddings": h_neural,  # for HierTree loss
         }
 
 
@@ -714,16 +597,111 @@ class FocalLoss(nn.Module):
         return (((1 - pt) ** self.gamma) * ce_loss).mean()
 
 
+# ============================================================================
+# Hierarchical Affinity Tree Loss (Exp18 novelty)
+# ============================================================================
+
+# Tree structure: defines parent groups for the 6 author classes
+# class indices in author task: 0=human, 1=codellama, 2=gpt, 3=llama3.1, 4=nxcode, 5=qwen1.5
+AUTHOR_TREE = {
+    "human":    {"family": 0},  # family 0 = human
+    "codellama":{"family": 1},  # family 1 = llama-family
+    "gpt":      {"family": 2},  # family 2 = gpt-family (singleton)
+    "llama3.1": {"family": 1},  # family 1 = llama-family
+    "nxcode":   {"family": 3},  # family 3 = qwen-family (KEY: nxcode IS fine-tuned qwen)
+    "qwen1.5":  {"family": 3},  # family 3 = qwen-family
+}
+# Maps class index → family index (used at train time)
+AUTHOR_FAMILY = [0, 1, 2, 1, 3, 3]  # indexed by class 0..5
+
+class HierarchicalAffinityLoss(nn.Module):
+    """
+    Hierarchical Affinity Tree Loss.
+
+    For each anchor sample, enforces:
+      dist(anchor, same_family_sample) + margin < dist(anchor, diff_family_sample)
+
+    This directly forces the Qwen-family (nxcode, qwen1.5) to cluster together
+    while being pushed away from the Llama-family and GPT.
+
+    Only active for the author (6-class) task; returns 0 for binary task.
+    """
+    def __init__(self, margin: float = 0.3, num_classes: int = 6):
+        super().__init__()
+        self.margin = margin
+        self.num_classes = num_classes
+        self.active = (num_classes == 6)
+
+    def forward(self, embeddings: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
+        """
+        Args:
+            embeddings: (B, D) L2-normalized feature vectors
+            labels: (B,) class indices 0..5
+        """
+        if not self.active or embeddings.shape[0] < 4:
+            return embeddings.new_zeros(1).squeeze()
+
+        # Build family labels for this batch
+        family_labels = torch.tensor(
+            [AUTHOR_FAMILY[l.item()] if l.item() < len(AUTHOR_FAMILY) else -1 for l in labels],
+            device=labels.device
+        )
+
+        # Pairwise cosine distances (1 - cos_sim), shape (B, B)
+        emb_norm = F.normalize(embeddings, p=2, dim=-1)
+        cos_sim = torch.mm(emb_norm, emb_norm.t())  # (B, B)
+        dist = 1.0 - cos_sim  # distance in [0, 2]
+
+        loss = embeddings.new_zeros(1).squeeze()
+        count = 0
+
+        B = embeddings.shape[0]
+        for i in range(B):
+            fi = family_labels[i].item()
+            if fi == -1:
+                continue
+            # same-family positives (excluding self)
+            same_mask = (family_labels == fi)
+            same_mask[i] = False
+            # different-family negatives
+            diff_mask = (family_labels != fi) & (family_labels != -1)
+
+            if same_mask.sum() == 0 or diff_mask.sum() == 0:
+                continue
+
+            # Hardest positive (farthest same-family)
+            d_pos = dist[i][same_mask].max()
+            # Hardest negative (closest diff-family)
+            d_neg = dist[i][diff_mask].min()
+
+            triplet = F.relu(d_pos - d_neg + self.margin)
+            loss = loss + triplet
+            count += 1
+
+        return loss / max(count, 1)
+
+
+_hier_loss_fn = None  # module-level singleton
+
+def _get_hier_loss(num_classes: int, margin: float) -> "HierarchicalAffinityLoss":
+    global _hier_loss_fn
+    if _hier_loss_fn is None or _hier_loss_fn.num_classes != num_classes:
+        _hier_loss_fn = HierarchicalAffinityLoss(margin=margin, num_classes=num_classes)
+    return _hier_loss_fn
+
 def compute_all_losses(model, outputs, labels, config, focal_loss_fn=None):
     if focal_loss_fn is None:
         focal_loss_fn = FocalLoss(gamma=2.0)
     task_loss = focal_loss_fn(outputs["logits"], labels)
     neural_loss = focal_loss_fn(outputs["neural_logits"], labels)
     spectral_loss = focal_loss_fn(outputs["spectral_logits"], labels)
-    biscope_loss = focal_loss_fn(outputs["biscope_logits"], labels)
-    lambda_biscope = getattr(config, "lambda_biscope", 0.3)
-    total_loss = task_loss + 0.3 * neural_loss + 0.3 * spectral_loss + lambda_biscope * biscope_loss
-    return {"total": total_loss, "task": task_loss, "neural": neural_loss, "spectral": spectral_loss, "biscope": biscope_loss}
+    # Hierarchical affinity tree loss
+    hier_fn = _get_hier_loss(model.num_classes, getattr(config, "hier_margin", 0.3))
+    hier_fn = hier_fn.to(outputs["embeddings"].device)
+    hier_loss = hier_fn(outputs["embeddings"], labels)
+    lambda_hier = getattr(config, "lambda_hier", 0.4)
+    total_loss = task_loss + 0.3 * neural_loss + 0.3 * spectral_loss + lambda_hier * hier_loss
+    return {"total": total_loss, "task": task_loss, "neural": neural_loss, "spectral": spectral_loss, "hier": hier_loss}
 
 
 def compute_class_weights(labels: List[int], num_classes: int) -> torch.Tensor:
@@ -808,11 +786,11 @@ class Trainer:
 
             if (batch_idx + 1) % self.config.log_every == 0:
                 avg_loss = total_losses["total"] / num_batches
-                avg_biscope = total_losses.get("biscope", 0.0) / num_batches
                 lr = self.scheduler.get_last_lr()[0]
+                avg_hier = total_losses.get("hier", 0.0) / num_batches
                 logger.info(
                     f"Epoch {epoch+1} | Step {batch_idx+1}/{len(self.train_loader)} | "
-                    f"Loss: {avg_loss:.4f} | BiScope: {avg_biscope:.4f} | LR: {lr:.2e}"
+                    f"Loss: {avg_loss:.4f} | Hier: {avg_hier:.4f} | LR: {lr:.2e}"
                 )
 
             if self.global_step > 0 and self.global_step % self.config.eval_every == 0:
@@ -862,12 +840,12 @@ class Trainer:
 
     def save_checkpoint(self, tag: str = "latest"):
         os.makedirs(self.config.save_dir, exist_ok=True)
-        path = os.path.join(self.config.save_dir, f"biscopecode_{self.config.task}_{tag}.pt")
+        path = os.path.join(self.config.save_dir, f"hiertreecode_{self.config.task}_{tag}.pt")
         torch.save({"model_state_dict": self.model.state_dict(), "best_f1": self.best_f1, "global_step": self.global_step}, path)
         logger.info(f"Saved checkpoint to {path}")
 
     def load_checkpoint(self, tag: str = "best"):
-        path = os.path.join(self.config.save_dir, f"biscopecode_{self.config.task}_{tag}.pt")
+        path = os.path.join(self.config.save_dir, f"hiertreecode_{self.config.task}_{tag}.pt")
         if os.path.exists(path):
             ckpt = torch.load(path, map_location=self.config.device, weights_only=True)
             self.model.load_state_dict(ckpt["model_state_dict"])
@@ -877,7 +855,7 @@ class Trainer:
 
     def train(self):
         logger.info("=" * 60)
-        logger.info(f"Starting BiScopeCode Training - {self.config.task}")
+        logger.info(f"[Exp18] Starting HierTreeCode Training - {self.config.task}")
         logger.info(f"Classes: {self.model.num_classes} | Device: {self.config.device} | Precision: {self.precision}")
         logger.info(f"Batch: {self.config.batch_size}x{self.config.grad_accum_steps} = {self.config.batch_size * self.config.grad_accum_steps}")
         logger.info("=" * 60)
@@ -1222,7 +1200,7 @@ def preflight(cfg: CoDETM4Config, exp_cfg: SpectralConfig) -> Dict[str, object]:
 # BUILD CONFIG
 # ============================================================================
 
-def build_biscope_config(task_tag: str, save_root: str) -> SpectralConfig:
+def build_hiertree_config(task_tag: str, save_root: str) -> SpectralConfig:
     strict_ts = importlib.util.find_spec("tree_sitter_languages") is not None
     cfg = SpectralConfig(
         epochs=3,
@@ -1272,10 +1250,10 @@ def run_iid(task: str = "binary", codet_cfg: Optional[CoDETM4Config] = None, run
         codet_cfg.task = task
     set_seed(codet_cfg.seed)
 
-    exp_cfg = build_biscope_config(f"CoDET_{task}", codet_cfg.save_root)
+    exp_cfg = build_hiertree_config(f"CoDET_{task}", codet_cfg.save_root)
 
     logger.info("=" * 70)
-    logger.info(f"[IID] BiScopeCode | task={task}")
+    logger.info(f"[Exp18][IID] HierTreeCode | task={task}")
     logger.info(f"GPU={_get_gpu_name()} | precision={exp_cfg.precision} | batch={exp_cfg.batch_size}x{exp_cfg.grad_accum_steps} | epochs={exp_cfg.epochs}")
     logger.info("=" * 70)
 
@@ -1324,7 +1302,7 @@ def _run_single_loo(hold_out_field: str, hold_out_value: str, codet_cfg: CoDETM4
     set_seed(cfg.seed)
 
     tag = f"CoDET_ood_{hold_out_field}_{hold_out_value}"
-    exp_cfg = build_biscope_config(tag, cfg.save_root)
+    exp_cfg = build_hiertree_config(tag, cfg.save_root)
 
     logger.info("=" * 70)
     logger.info(f"[OOD] LOO {hold_out_field}={hold_out_value}")
@@ -1444,7 +1422,7 @@ def run_suite(
     all_results: Dict[str, Any] = {}
 
     logger.info("\n" + "=" * 70)
-    logger.info(f"CoDET-M4 FULL BENCHMARK SUITE: {len(run_plan)} evaluation modes")
+    logger.info(f"[Exp18] CoDET-M4 FULL BENCHMARK SUITE: {len(run_plan)} evaluation modes")
     for i, (mode, task) in enumerate(run_plan):
         logger.info(f"  [{i+1}] {mode}/{task}")
     logger.info("=" * 70)
@@ -1512,7 +1490,7 @@ def _log_final_summary(all_results: Dict[str, Any], run_plan: List[Tuple[str, st
             safe[k] = {sk: sv for sk, sv in v.items() if not isinstance(sv, (np.ndarray, torch.Tensor))}
     try:
         logger.info("\nSUITE_RESULTS_JSON=" + json.dumps(
-            {"timestamp": ts, "method": "BiScopeCode_CoDET_M4", "results": safe},
+            {"timestamp": ts, "method": "Exp18_HierTreeCode_CoDET_M4", "results": safe},
             ensure_ascii=True, default=str,
         ))
     except (TypeError, ValueError):
