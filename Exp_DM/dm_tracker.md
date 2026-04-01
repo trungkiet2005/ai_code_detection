@@ -8,7 +8,10 @@ All methods build on `exp00_codeorigin.py` (CodeOrigin baseline) with novel comp
 **Protocol:**
 - Train/evaluate **separate models per benchmark** (AICD-Bench / DroidCollection).
 - Each file is **standalone** and Kaggle-runnable (`python exp0X_xxx.py`).
-- Metrics: Macro-F1 (primary), Weighted-F1, per-class report.
+- **Paper-aligned metrics by benchmark:**
+  - **AICD-Bench:** `Macro-F1` = primary.
+  - **DroidCollection:** `Weighted-F1` = primary (report `Macro-F1` as auxiliary), and include recall-focused view for adversarial robustness.
+- Always export full metric pack to logs/markdown: `Primary`, `Macro-F1`, `Weighted-F1`, `Macro-Recall`, `Weighted-Recall`, `Accuracy`, `per-class report`.
 - Hardware target: Kaggle H100 80GB, BF16, effective batch 64.
 
 ---
@@ -30,6 +33,7 @@ All methods build on `exp00_codeorigin.py` (CodeOrigin baseline) with novel comp
 | exp11 | **SpectralCode** | FFT spectral analysis on token sequences. Multi-scale (32-256) frequency band features | `L_focal (gated) + 0.3·L_neural + 0.3·L_spectral` | S (Cross-domain transfer) | Done (suite 5 runs) |
 | exp12 | **WatermarkStat** | Watermark-detection-inspired: green-list proxy, n-gram entropy, Zipf deviation, chi-sq | `L_focal (gated) + 0.3·L_neural + 0.3·L_wmark` | S (Cross-domain transfer) | Pending |
 | exp13 | **SlotCode** | Slot Attention decomposes code into K structural slots. Slot consistency = detection signal | `L_task + 0.3·L_agg + 0.2·L_consist` | S (Object-centric) | Done (suite 5 runs) |
+| exp18 | **HierTreeCode** | Hierarchical affinity constraint on latent groups (task-dependent; inactive on binary) with spectral-neural backbone | `L_task + 0.3·L_neural + 0.3·L_spectral (+ L_hier)` | S (Cross-domain stress-test) | Done (suite 5 runs) |
 
 ---
 
@@ -46,7 +50,7 @@ All methods build on `exp00_codeorigin.py` (CodeOrigin baseline) with novel comp
 
 ## Results
 
-### AICD-Bench (Benchmark A)
+### AICD-Bench (Benchmark A, Primary = Macro-F1)
 
 | Exp | Method | Task | Epochs | Best Val F1 | Test Macro-F1 | Test Weighted-F1 | ECE | Brier | Notes |
 |-----|--------|------|--------|-------------|---------------|------------------|-----|-------|-------|
@@ -64,36 +68,60 @@ All methods build on `exp00_codeorigin.py` (CodeOrigin baseline) with novel comp
 | exp11 | SpectralCode | T1/T2/T3 | 3 | 0.9956 / 0.1785 / 0.7848 | 0.2983 / 0.1893 / 0.5631 | 0.2918 / 0.1797 / 0.6524 | - | - | Best AICD T1 among exp08/09/11; T2/T3 slightly stronger than exp09 |
 | exp12 | WatermarkStat | T1 | 3 | - | - | - | - | - | Watermark-inspired stats |
 | exp13 | SlotCode | T1/T2/T3 | 3 | 0.9951 / 0.1485 / 0.7620 | 0.2569 / 0.1596 / 0.5706 | 0.2156 / 0.1571 / 0.6404 | - | - | Improves AICD T3 but underperforms exp11 on T1/T2 and keeps large T1 OOD gap |
+| exp18 | HierTreeCode | T1/T2/T3 | 3 | 0.9949 / 0.2543 / 0.7783 | 0.2572 / 0.2071 / 0.5502 | 0.2235 / 0.1802 / 0.6407 | - | - | Strongest AICD T2 so far; T1 still catastrophic val-test collapse |
 
-### DroidCollection (Benchmark B)
+### DroidCollection (Benchmark B, Primary = Weighted-F1)
 
-| Exp | Method | Task | Epochs | Best Val F1 | Test Macro-F1 | Test Weighted-F1 | Notes |
-|-----|--------|------|--------|-------------|---------------|------------------|-------|
-| baseline | CodeOrigin | T1 | 3 | 0.9693 | 0.9708 | 0.9709 | Strong baseline |
-| exp01 | CausAST | T1 | 3 | 0.9672 | 0.9686 | 0.9687 | Droid stable |
+| Exp | Method | Task | Epochs | Best Val (Primary) | Test Primary (Weighted-F1) | Test Macro-F1 | Notes |
+|-----|--------|------|--------|--------------------|-----------------------------|---------------|-------|
+| baseline | CodeOrigin | T1 | 3 | 0.9693 | 0.9709 | 0.9708 | Strong baseline |
+| exp01 | CausAST | T1 | 3 | 0.9672 | 0.9687 | 0.9686 | Droid stable |
 | exp02 | TTA-Evident | T1 | 3 | - | - | - | |
 | exp03 | AP-NRL | T1 | 3 | 0.9702 | 0.9699 | 0.9699 | Droid stable |
-| exp04 | BH-SCM | T1 | 3 | 0.9698 | 0.9700 | 0.9701 | Stable, ngang baseline |
+| exp04 | BH-SCM | T1 | 3 | 0.9698 | 0.9701 | 0.9700 | Stable, ngang baseline |
 | exp05 | OSCP | T1 | 3 | 0.9640 | 0.9649 | 0.9649 | Slightly below baseline. Whitening hurts capacity |
 | exp06 | AST-IRM | T1 | 3 | 0.9674 | 0.9685 | 0.9685 | Stable. IRM penalty ~0.073 |
-| exp07 | DomainMix | T3/T4 | 3 | 0.7273 / 0.7071 | 0.7278 / 0.7036 | 0.7930 / 0.7706 | Stable and strong on Droid; close val-test alignment |
-| exp08 | MoE-Code | T3/T4 | 3 | 0.8504 / 0.8460 | 0.8526 / 0.8454 | 0.8914 / 0.8785 | Strongest so far on Droid; val-test alignment is very close |
-| exp09 | TokenStat | T3/T4 | 3 | 0.8574 / 0.8478 | 0.8556 / 0.8488 | 0.8941 / 0.8815 | Very strong and stable on Droid; best among current methods on T3/T4 |
+| exp07 | DomainMix | T3/T4 | 3 | 0.7273 / 0.7071 | 0.7930 / 0.7706 | 0.7278 / 0.7036 | Stable and strong on Droid; close val-test alignment |
+| exp08 | MoE-Code | T3/T4 | 3 | 0.8504 / 0.8460 | 0.8914 / 0.8785 | 0.8526 / 0.8454 | Strongest so far on Droid; val-test alignment is very close |
+| exp09 | TokenStat | T3/T4 | 3 | 0.8574 / 0.8478 | 0.8941 / 0.8815 | 0.8556 / 0.8488 | Very strong and stable on Droid; best among current methods on T3/T4 |
 | exp10 | MetaDomain | T1 | 3 | - | - | - | |
-| exp11 | SpectralCode | T3/T4 | 3 | 0.8500 / 0.8494 | 0.8473 / 0.8467 | 0.8877 / 0.8802 | Strong on Droid but slightly below exp09 on both tasks |
+| exp11 | SpectralCode | T3/T4 | 3 | 0.8500 / 0.8494 | 0.8877 / 0.8802 | 0.8473 / 0.8467 | Strong on Droid but slightly below exp09 on both tasks |
 | exp12 | WatermarkStat | T1 | 3 | - | - | - | |
-| exp13 | SlotCode | T3/T4 | 3 | 0.8429 / 0.8388 | 0.8432 / 0.8337 | 0.8821 / 0.8679 | Solid Droid performance but below exp09/exp11 across both tasks |
+| exp13 | SlotCode | T3/T4 | 3 | 0.8429 / 0.8388 | 0.8821 / 0.8679 | 0.8432 / 0.8337 | Solid Droid performance but below exp09/exp11 across both tasks |
+| exp18 | HierTreeCode | T3/T4 | 3 | 0.8560 / 0.8474 | 0.8917 / 0.8793 | 0.8531 / 0.8453 | Very strong and stable on Droid; runner-up on T3, below exp09 on aggregate |
+
+---
+
+### Droid Paper Head-to-Head (Weighted-F1, Table 3/4 alignment)
+
+Reference from `paper_Droid.md`:
+- Droid paper reports **Weighted-F1** as the main table metric (2-class/3-class setups).
+- Closest comparable line to our DM multi-class Droid runs is **3-class Full Training avg Weighted-F1**.
+
+| Model/System | Droid paper 3-class Weighted-F1 (Avg) | Our closest run (Droid T3 Weighted-F1) | Delta (ours - paper) |
+|---|---:|---:|---:|
+| M4FT | 0.7350 | 0.8941 (exp09 TokenStat) | +0.1591 |
+| GPT-SnifferFT | 0.8275 | 0.8941 (exp09 TokenStat) | +0.0666 |
+| CoDet-M4FT | 0.8325 | 0.8941 (exp09 TokenStat) | +0.0616 |
+| DroidDetectCLS-Base | 0.8676 | 0.8941 (exp09 TokenStat) | +0.0265 |
+| DroidDetectCLS-Large | 0.8878 | 0.8941 (exp09 TokenStat) | +0.0063 |
+
+Notes for paper writing:
+- This is a **near-aligned** comparison (both Weighted-F1 centered), but not a perfect protocol match because our tracker currently logs task-level `T3/T4` while Droid table is averaged by domain/split setting.
+- For strict camera-ready comparison, keep both:
+  - **Main**: paper-protocol metric/setting match.
+  - **Supplementary**: our full metric pack (`Macro/Weighted F1`, `Macro/Weighted Recall`, `Accuracy`) exported by DM scripts.
 
 ---
 
 ## Leaderboard (Current Runs)
 
-Methods included: `exp07`, `exp08`, `exp09`, `exp11`, `exp13` (all with 5-run suite done).
+Methods included: `exp07`, `exp08`, `exp09`, `exp11`, `exp13`, `exp18` (all with 5-run suite done).
 
 | Rank | Task | Best Method | Test Macro-F1 | Runner-up | Delta |
 |------|------|-------------|---------------|-----------|-------|
 | 1 | AICD T1 | exp07 DomainMix | 0.3088 | exp11 SpectralCode (0.2983) | +0.0105 |
-| 1 | AICD T2 | exp11 SpectralCode | 0.1893 | exp09 TokenStat (0.1787) | +0.0106 |
+| 1 | AICD T2 | exp18 HierTreeCode | 0.2071 | exp11 SpectralCode (0.1893) | +0.0178 |
 | 1 | AICD T3 | exp13 SlotCode | 0.5706 | exp11 SpectralCode (0.5631) | +0.0075 |
 | 1 | DROID T3 | exp09 TokenStat | 0.8556 | exp08 MoE-Code (0.8526) | +0.0030 |
 | 1 | DROID T4 | exp09 TokenStat | 0.8488 | exp11 SpectralCode (0.8467) | +0.0021 |
@@ -101,13 +129,15 @@ Methods included: `exp07`, `exp08`, `exp09`, `exp11`, `exp13` (all with 5-run su
 | Rank | Method | Avg Macro-F1 (5 tasks) | Avg AICD (T1/T2/T3) | Avg DROID (T3/T4) | Status |
 |------|--------|--------------------------|----------------------|-------------------|--------|
 | 1 | exp11 SpectralCode | 0.5489 | 0.3502 | 0.8470 | Best overall currently |
-| 2 | exp09 TokenStat | 0.5388 | 0.3299 | 0.8522 | Best on Droid aggregate |
-| 3 | exp08 MoE-Code | 0.5340 | 0.3240 | 0.8490 | Strong, balanced |
-| 4 | exp13 SlotCode | 0.5328 | 0.3290 | 0.8385 | Best AICD T3 single-task |
-| 5 | exp07 DomainMix | 0.4581 | 0.2863 | 0.7157 | Baseline among new methods |
+| 2 | exp18 HierTreeCode | 0.5426 | 0.3382 | 0.8492 | Best AICD T2; strong Droid stability |
+| 3 | exp09 TokenStat | 0.5388 | 0.3299 | 0.8522 | Best on Droid aggregate |
+| 4 | exp08 MoE-Code | 0.5340 | 0.3240 | 0.8490 | Strong, balanced |
+| 5 | exp13 SlotCode | 0.5328 | 0.3290 | 0.8385 | Best AICD T3 single-task |
+| 6 | exp07 DomainMix | 0.4581 | 0.2863 | 0.7157 | Baseline among new methods |
 
 Quick take:
 - If you want **best overall now** -> `exp11 SpectralCode`.
+- If you want **best AICD T2 single-task** -> `exp18 HierTreeCode`.
 - If you want **best Droid robustness** -> `exp09 TokenStat`.
 - For **AICD T1 OOD bottleneck**, no method solves it yet (all still show large val-test collapse).
 
@@ -222,6 +252,16 @@ Quick take:
 - Droid final test Macro-F1: `T3=0.8432`, `T4=0.8337`
 - Best Val Macro-F1: `AICD_T1=0.9951`, `AICD_T2=0.1485`, `AICD_T3=0.7620`, `DROID_T3=0.8429`, `DROID_T4=0.8388`
 - Overall: slot decomposition helps on AICD T3, but ranking is below SpectralCode/TokenStat on most tasks and does not address AICD T1 OOD collapse
+
+### exp18 - HierTreeCode (Cross-domain stress-test)
+
+**Run timestamp:** `2026-04-01 07:22:11` (full suite done)
+
+- Preflight + full suite completed for 5 runs on H100 BF16: `aicd_T1`, `aicd_T2`, `aicd_T3`, `droid_T3`, `droid_T4`
+- AICD final test Macro-F1: `T1=0.2572`, `T2=0.2071`, `T3=0.5502`
+- Droid final test Macro-F1: `T3=0.8531`, `T4=0.8453`
+- Best Val Macro-F1: `AICD_T1=0.9949`, `AICD_T2=0.2543`, `AICD_T3=0.7783`, `DROID_T3=0.8560`, `DROID_T4=0.8474`
+- Overall: strongest AICD T2 so far, strong Droid stability, but AICD T1 remains severe val-test collapse (0.9949 -> 0.2572)
 
 ---
 

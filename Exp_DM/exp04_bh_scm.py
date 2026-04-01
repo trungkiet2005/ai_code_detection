@@ -98,7 +98,12 @@ from transformers import (
     AutoModel,
     get_cosine_schedule_with_warmup,
 )
-from sklearn.metrics import f1_score, classification_report
+from sklearn.metrics import (
+    f1_score,
+    classification_report,
+    precision_recall_fscore_support,
+    accuracy_score,
+)
 
 warnings.filterwarnings("ignore")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
@@ -241,6 +246,14 @@ class Config:
     lambda_cross_view: float = 0.3
     triplet_margin: float = 0.3
     view_proj_dim: int = 128
+    primary_metric: str = "auto"  # "auto" | "macro_f1" | "weighted_f1"
+
+
+def resolve_primary_metric(config: "Config") -> str:
+    metric = str(getattr(config, "primary_metric", "auto")).strip().lower()
+    if metric in {"macro_f1", "weighted_f1"}:
+        return metric
+    return "weighted_f1" if config.benchmark == "droid" else "macro_f1"
 
 
 def set_seed(seed: int):
@@ -1295,6 +1308,10 @@ class Trainer:
         self.best_f1 = 0.0
         self.global_step = 0
         self.last_eval_metrics: Dict[str, Dict[str, float]] = {}
+        self.primary_metric = resolve_primary_metric(config)
+
+    def _select_primary_score(self, macro_f1: float, weighted_f1: float) -> float:
+        return weighted_f1 if self.primary_metric == "weighted_f1" else macro_f1
 
     def train_epoch(self, epoch: int):
         self.model.train()
@@ -1384,19 +1401,35 @@ class Trainer:
             total_loss += loss.item()
             num_batches += 1
 
-        # Macro F1
         macro_f1 = f1_score(all_labels, all_preds, average="macro")
         weighted_f1 = f1_score(all_labels, all_preds, average="weighted")
+        macro_precision, macro_recall, _, _ = precision_recall_fscore_support(
+            all_labels, all_preds, average="macro", zero_division=0
+        )
+        weighted_precision, weighted_recall, _, _ = precision_recall_fscore_support(
+            all_labels, all_preds, average="weighted", zero_division=0
+        )
+        accuracy = accuracy_score(all_labels, all_preds)
+        primary_score = self._select_primary_score(macro_f1, weighted_f1)
         avg_loss = total_loss / max(num_batches, 1)
 
         logger.info(
             f"{split_name} | Loss: {avg_loss:.4f} | Macro-F1: {macro_f1:.4f} | "
-            f"Weighted-F1: {weighted_f1:.4f}"
+            f"Weighted-F1: {weighted_f1:.4f} | Macro-R: {macro_recall:.4f} | "
+            f"Weighted-R: {weighted_recall:.4f} | Acc: {accuracy:.4f} | "
+            f"Primary({self.primary_metric}): {primary_score:.4f}"
         )
         self.last_eval_metrics[split_name] = {
             "loss": float(avg_loss),
             "macro_f1": float(macro_f1),
             "weighted_f1": float(weighted_f1),
+            "macro_precision": float(macro_precision),
+            "macro_recall": float(macro_recall),
+            "weighted_precision": float(weighted_precision),
+            "weighted_recall": float(weighted_recall),
+            "accuracy": float(accuracy),
+            "primary_score": float(primary_score),
+            "primary_metric": self.primary_metric,
         }
 
         # Per-class report
@@ -1404,7 +1437,7 @@ class Trainer:
             report = classification_report(all_labels, all_preds, digits=4)
             logger.info(f"\n{split_name} Classification Report:\n{report}")
 
-        return macro_f1
+        return primary_score
 
     def save_checkpoint(self, tag: str = "latest"):
         os.makedirs(self.config.save_dir, exist_ok=True)
@@ -1451,7 +1484,7 @@ class Trainer:
             if val_f1 > self.best_f1:
                 self.best_f1 = val_f1
                 self.save_checkpoint("best")
-                logger.info(f"*** New Best Val Macro-F1: {val_f1:.4f} ***")
+                logger.info(f"*** New Best Val {self.primary_metric}: {val_f1:.4f} ***")
 
             # Save latest
             self.save_checkpoint("latest")
@@ -1468,11 +1501,27 @@ class Trainer:
             test_f1 = self.evaluate(self.test_loader, "Test")
 
         test_weighted = self.last_eval_metrics.get("Test", {}).get("weighted_f1", test_f1)
-        logger.info(f"\n*** Final Test Macro-F1: {test_f1:.4f} | Weighted-F1: {test_weighted:.4f} ***")
+        test_metrics = self.last_eval_metrics.get("Test", {})
+        test_macro = test_metrics.get("macro_f1", 0.0)
+        test_mr = test_metrics.get("macro_recall", 0.0)
+        test_wr = test_metrics.get("weighted_recall", 0.0)
+        test_acc = test_metrics.get("accuracy", 0.0)
+        logger.info(
+            f"\n*** Final Test Primary({self.primary_metric}): {test_f1:.4f} | "
+            f"Macro-F1: {test_macro:.4f} | Weighted-F1: {test_weighted:.4f} | "
+            f"Macro-R: {test_mr:.4f} | Weighted-R: {test_wr:.4f} | Acc: {test_acc:.4f} ***"
+        )
         return {
             "test_f1": float(test_f1),
+            "test_macro_f1": float(test_macro),
             "test_weighted_f1": float(test_weighted),
+            "test_macro_recall": float(test_mr),
+            "test_weighted_recall": float(test_wr),
+            "test_accuracy": float(test_acc),
             "best_val_f1": float(self.best_f1),
+            "best_val_macro_f1": float(self.last_eval_metrics.get("Val", {}).get("macro_f1", self.best_f1)),
+            "best_val_weighted_f1": float(self.last_eval_metrics.get("Val", {}).get("weighted_f1", self.best_f1)),
+            "paper_primary_metric": self.primary_metric,
         }
 
 
@@ -1623,25 +1672,30 @@ def run_benchmark_suite(task: str = "T1", base_config: Optional[Config] = None,
     logger.info("\nBenchmark suite summary:")
     for run_key, stats in results.items():
         logger.info(
-            f"{run_key.upper()} -> best_val_f1={stats['best_val_f1']:.4f}, "
-            f"test_f1={stats['test_f1']:.4f}"
+            f"{run_key.upper()} -> primary={stats.get('paper_primary_metric', 'macro_f1')} | "
+            f"best_val_primary={stats['best_val_f1']:.4f}, test_primary={stats['test_f1']:.4f}, "
+            f"test_macro_f1={stats.get('test_macro_f1', 0):.4f}, "
+            f"test_weighted_f1={stats.get('test_weighted_f1', 0):.4f}, "
+            f"test_macro_recall={stats.get('test_macro_recall', 0):.4f}, "
+            f"test_weighted_recall={stats.get('test_weighted_recall', 0):.4f}, "
+            f"test_accuracy={stats.get('test_accuracy', 0):.4f}"
         )
 
     # Copy-paste friendly block for tracker logging.
     ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     logger.info("\n=== SUITE_RESULTS_START ===")
     logger.info(f"timestamp={ts} | task={task} | method=BH-SCM")
-    logger.info("| benchmark | task | best_val_f1 | test_f1 |")
-    logger.info("|---|---|---:|---:|")
+    logger.info("| run_key | primary_metric | best_val_primary | test_primary | test_macro_f1 | test_weighted_f1 | test_macro_recall | test_weighted_recall | test_accuracy |")
+    logger.info("|---|---|---:|---:|---:|---:|---:|---:|---:|")
     for run_key, stats in results.items():
         logger.info(
             f"| {run_key.upper()} | "
-            f"{stats['best_val_f1']:.4f} | {stats['test_f1']:.4f} |"
+            f"{stats.get('paper_primary_metric', 'macro_f1')} | "
+            f"{stats['best_val_f1']:.4f} | {stats['test_f1']:.4f} | "
+            f"{stats.get('test_macro_f1', 0):.4f} | {stats.get('test_weighted_f1', 0):.4f} | "
+            f"{stats.get('test_macro_recall', 0):.4f} | {stats.get('test_weighted_recall', 0):.4f} | "
+            f"{stats.get('test_accuracy', 0):.4f} |"
         )
-        if "test_weighted_f1" in stats:
-            logger.info(
-                f"{run_key.upper()} weighted_test_f1={stats['test_weighted_f1']:.4f}"
-            )
     logger.info("=== SUITE_RESULTS_END ===")
 
     machine_block = {

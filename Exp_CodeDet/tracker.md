@@ -21,11 +21,12 @@
 | 6 | **Exp15** | GroupDRO | 98.98 | `+0.33` | 70.17 | `+3.84` | 70.59 | ✅ |
 | 7 | **Exp26** | SelfDistillCode | 99.04 | `+0.39` | 70.14 | `+3.81` | 71.22 | ✅ |
 | 8 | **Exp14** | ProtoCon | **99.06** | `+0.41` | 70.13 | `+3.80` | 71.26 | ✅ |
-| 9 | **Exp11** | SpectralCode | **99.06** | `+0.41` | 69.82 | `+3.49` | 70.80 | ✅ |
-| 10 | **Exp23** | GraphStyleCode | 99.00 | `+0.35` | 69.71 | `+3.38` | 70.89 | ✅ |
+| 9 | **Exp21** | MoECode | **99.09** | `+0.44` | 70.04 | `+3.71` | 71.20 | ✅ |
+| 10 | **Exp11** | SpectralCode | **99.06** | `+0.41` | 69.82 | `+3.49` | 70.80 | ✅ |
+| 11 | **Exp23** | GraphStyleCode | 99.00 | `+0.35` | 69.71 | `+3.38` | 70.89 | ✅ |
+| 12 | **Exp24** | CosineProtoCode | 99.03 | `+0.38` | 67.80 | `+1.47` | 68.70 | ✅ |
 | — | **Exp16** | HyperNetCode | **99.07** | `+0.42` | — ❌ bug | — | — | ✅ |
 | — | **Exp19** | EAGLECode (DANN) | 98.73 | `+0.08` | 62.89 ↓↓ | `-3.44` | 64.23 | ✅ |
-| — | Exp21, Exp24 | Batch 2 (pending) | — | — | — | — | — | 🔲 |
 | **REF** | Paper | UniXcoder | 98.65 | — | 66.33 | — | — | reference |
 | REF | Paper | CodeT5 | 98.35 | `-0.30` | 62.45 | `-3.88` | — | reference |
 | REF | Paper | CodeBERT | 95.70 | `-2.95` | 64.80 | `-1.53` | — | reference |
@@ -610,6 +611,128 @@ Not evaluated (log only shows iid_only run plan).
 
 ---
 
+## 📊 Exp21 — MoECode (Sparse MoE top-2 routing)
+
+**Run:** 2026-04-01 | ModernBERT-base + neural + spectral fusion + **MoE head** (4 experts, top-2 routing, load-balance aux)  
+**Loss:** `L_task + 0.3*L_neural + 0.3*L_spectral + L_moe_lb`  
+**Key novelty:** Expert specialization over syntax/semantic/style/frequency channels with explicit routing balance regularization  
+**Infra:** H100 80GB BF16 | batch=64x1 | epochs=3 | workers=8 | **~155.94M** params (binary: 155,941,834; author: 155,944,402)
+
+### IID Binary
+| Metric | Value | vs Exp18 |
+|:-------|:-----:|:--------:|
+| Test Macro-F1 | **0.9909** | `+0.0003` |
+| Test Weighted-F1 | 0.9909 | `+0.0003` |
+| Best Val F1 | **0.9898** | `+0.0001` |
+
+| Language | Macro-F1 | Source | Macro-F1 |
+|:---------|:---------:|:-------|:---------:|
+| C++ | 0.9910 | CF | 0.9838 |
+| Java | **0.9947** | GH | 0.9849 |
+| Python | 0.9874 | LC | 0.9867 |
+
+### IID Author (6-class)
+| Metric | Value | vs Exp18 | Delta |
+|:-------|:-----:|:--------:|:-----:|
+| Test Macro-F1 | **0.7004** | `-0.0051` | `-0.51%` |
+| Test Weighted-F1 | 0.8066 | `-0.0067` | `-0.67%` |
+| Best Val F1 | **0.7120** | `-0.0068` | `-0.68%` |
+
+| Class | F1 (Exp21) | F1 (Exp18) | Δ |
+|:------|:----------:|:----------:|:--:|
+| Human | 0.9737 | **0.9820** | `-0.0083` ↓ |
+| CodeLlama | 0.7334 | **0.7429** | `-0.0095` ↓ |
+| GPT | 0.7477 | 0.7481 | `-0.0004` ↓ |
+| **Llama3.1** | **0.8191** | 0.8153 | `+0.0038` ↑ |
+| Nxcode | 0.5012 | **0.5015** | `-0.0003` ~ |
+| Qwen1.5 | 0.4272 | **0.4431** | `-0.0159` ↓ |
+
+#### Per-source breakdown (Author)
+| Source | Exp21 | Exp18 | Δ |
+|:-------|:-----:|:-----:|:--:|
+| CF | 0.7205 | **0.7717** | `-0.0512` |
+| GH | 0.5521 | **0.5618** | `-0.0097` |
+| LC | 0.6015 | **0.6035** | `-0.0020` |
+
+#### Confusion matrix focus (Author)
+- `true=nxcode -> pred=qwen1.5` = `1808/5537`
+- `true=qwen1.5 -> pred=nxcode` = `2095/5254`
+
+### Training notes
+- MoE load-balance term remains small and stable (`moe_lb` ~0.0023 -> 0.0014 on author; ~0.0019 -> 0.0001 on binary), so routing does not collapse.
+- Binary improves over Exp18, but author remains in the same Nxcode/Qwen bottleneck regime as prior runs.
+
+### Key Insights
+- **Strong binary result (99.09)** — ties best binary tier and matches Exp17 headline.
+- **Author reaches 70.04** (better than Exp11/23) but still below Exp18/17/20/22/25/26 cluster.
+- Persistent **Qwen1.5 weakness** and Nxcode↔Qwen confusion remain dominant error mass.
+- One dataset preflight load retry occurred (`ReadTimeout` then success), likely from unauthenticated HF rate/latency.
+
+**Checkpoint:** `./codet_m4_checkpoints/codet_author/moecode_CoDET_author_best.pt`
+
+---
+
+## 📊 Exp24 — CosineProtoCode (Cosine prototypes + uniformity)
+
+**Run:** 2026-04-01 | ModernBERT-base + neural + spectral + **Cosine prototype head** (EMA-updated class prototypes, learnable temperature)  
+**Loss:** `L_task + 0.3*L_neural + 0.3*L_spectral + L_aux(proto)`  
+**Key novelty:** Hyperspherical prototype geometry for class separation via cosine margins  
+**Infra:** H100 80GB BF16 | batch=64x1 | epochs=3 | workers=8 | **~151.74M** params (binary: 151,739,333; author: 151,741,897)
+
+### IID Binary
+| Metric | Value | vs Exp18 |
+|:-------|:-----:|:--------:|
+| Test Macro-F1 | **0.9903** | `-0.0003` |
+| Test Weighted-F1 | 0.9903 | `-0.0003` |
+| Best Val F1 | **0.9902** | `+0.0005` |
+
+| Language | Macro-F1 | Source | Macro-F1 |
+|:---------|:---------:|:-------|:---------:|
+| C++ | 0.9896 | CF | 0.9819 |
+| Java | **0.9949** | GH | 0.9838 |
+| Python | 0.9864 | LC | 0.9867 |
+
+### IID Author (6-class)
+| Metric | Value | vs Exp18 | Delta |
+|:-------|:-----:|:--------:|:-----:|
+| Test Macro-F1 | **0.6780** | `-0.0275` | `-2.75%` |
+| Test Weighted-F1 | 0.7890 | `-0.0243` | `-2.43%` |
+| Best Val F1 | **0.6870** | `-0.0318` | `-3.18%` |
+
+| Class | F1 (Exp24) | F1 (Exp18) | Δ |
+|:------|:----------:|:----------:|:--:|
+| Human | 0.9673 | **0.9820** | `-0.0147` ↓ |
+| CodeLlama | 0.7060 | **0.7429** | `-0.0369` ↓ |
+| **GPT** | **0.7485** | 0.7481 | `+0.0004` ↑ |
+| **Llama3.1** | **0.8215** | 0.8153 | `+0.0062` ↑ |
+| Nxcode | 0.4643 | **0.5015** | `-0.0372` ↓ |
+| Qwen1.5 | 0.3603 | **0.4431** | `-0.0828` ↓↓ |
+
+#### Per-source breakdown (Author)
+| Source | Exp24 | Exp18 | Δ |
+|:-------|:-----:|:-----:|:--:|
+| CF | 0.7164 | **0.7717** | `-0.0553` |
+| GH | 0.5419 | **0.5618** | `-0.0199` |
+| LC | 0.5599 | **0.6035** | `-0.0436` |
+
+#### Confusion matrix focus (Author)
+- `true=nxcode -> pred=qwen1.5` = `3120/5537`
+- `true=qwen1.5 -> pred=nxcode` = `1475/5254`
+
+### Training notes
+- Prototype auxiliary drops steadily (binary: `0.712 -> 0.190`, author: `0.739 -> 0.473`) showing prototype objective converges.
+- Despite convergence, author generalization remains weak relative to top Batch-2 runs.
+
+### Key Insights
+- **Binary remains strong (99.03)** but not above current best binary tier (99.09).
+- **Author drops to 67.80**, clearly below Exp21/22/25/26 cluster (~70.0-70.2).
+- **Major collapse on Nxcode/Qwen separation**: very high `nxcode -> qwen` confusion (`3120` samples), worse than prior methods.
+- Overall this variant helps neither the hardest source (GH) nor hardest generator pair at this budget.
+
+**Checkpoint:** `./codet_m4_checkpoints/codet_author/cosineprot_CoDET_author_best.pt`
+
+---
+
 ## 📊 Exp22 — TTACode (TENT-style LayerNorm TTA)
 
 **Run:** 2026-03-31 | ModernBERT-base + spectral/neural fusion (same family as Exp11)  
@@ -827,10 +950,10 @@ After the main test pass, the harness ran **TTAAdapter** while computing subgrou
 
 ## 🚀 Performance vs Paper (Head-to-Head)
 
-| Evaluation Mode (IID) | Paper (UniXcoder) | Exp11 SpectralCode | Exp14 ProtoCon | Exp15 GroupDRO | Exp16 HyperNet | Exp19 EAGLE | Exp20 BiScope | Exp22 TTACode | Exp23 GraphStyle | Exp25 MultiGran | Exp26 SelfDistill | **Exp18 HierTreeCode** | Best Delta |
+| Evaluation Mode (IID) | Paper (UniXcoder) | Exp11 SpectralCode | Exp14 ProtoCon | Exp15 GroupDRO | Exp16 HyperNet | Exp19 EAGLE | Exp20 BiScope | **Exp21 MoECode** | **Exp24 CosineProto** | Exp22 TTACode | Exp23 GraphStyle | Exp25 MultiGran | Exp26 SelfDistill | **Exp18 HierTreeCode** | Best Delta |
 |:----------------------|:-----------------:|:------------------:|:--------------:|:--------------:|:--------------:|:-----------:|:-------------:|:-------------:|:----------------:|:---------------:|:----------------:|:----------------------:|:----------:|
-| Binary F1 (Table 2) | 98.65 | 99.06 | 99.06 | 98.98 | **99.07** | 98.73 | **99.06** | **99.06** | 99.00 | 99.03 | 99.04 | **99.06** | `+0.44%` (Exp17 99.09 best) |
-| Author F1 (Table 7) | 66.33 | 69.82 | 70.13 | 70.17 | — (failed) | 62.89 ↓↓ | 70.20 | 70.20 | 69.71 | 70.19 | 70.14 | **70.55** | `+4.22%` |
+| Binary F1 (Table 2) | 98.65 | 99.06 | 99.06 | 98.98 | **99.07** | 98.73 | **99.06** | **99.09** | 99.03 | **99.06** | 99.00 | 99.03 | 99.04 | **99.06** | `+0.44%` (Exp17/Exp21 99.09 best) |
+| Author F1 (Table 7) | 66.33 | 69.82 | 70.13 | 70.17 | — (failed) | 62.89 ↓↓ | 70.20 | 70.04 | 67.80 | 70.20 | 69.71 | 70.19 | 70.14 | **70.55** | `+4.22%` |
 
 ---
 
@@ -901,10 +1024,42 @@ These evaluations were not included in the latest `iid_only` run but are mapped 
 
 ---
 
+## 🧪 Cross-Benchmark Stress Test (2026-04-01) — Exp18 HierTreeCode
+
+> Added from full suite log (`AICD T1/T2/T3` + `DROID T3/T4`, H100 BF16, batch=64, workers=8).  
+> This block is **diagnostic** and not merged into CoDET leaderboard ranks.
+
+### Preflight snapshot
+- Bootstrapped missing deps: `tree-sitter`, `tree-sitter-languages`
+- All 5 planned runs passed preflight with subsampled train=100k, val=20k, test=50k
+- Class counts: `AICD-T1=2`, `AICD-T2=12`, `AICD-T3=4`, `DROID-T3=3`, `DROID-T4=4`
+
+### Full suite results (from `SUITE_RESULTS_JSON`)
+| Run | Best Val F1 | Test Macro-F1 | Test Weighted-F1 | Notes |
+|:----|:-----------:|:-------------:|:----------------:|:------|
+| AICD-T1 | **0.9949** | **0.2572** | 0.2235 | Severe val→test collapse |
+| AICD-T2 | **0.2543** | **0.2071** | 0.1802 | Extremely hard / imbalanced multi-class |
+| AICD-T3 | **0.7783** | **0.5502** | 0.6407 | Moderate domain shift |
+| DROID-T3 | **0.8560** | **0.8531** | 0.8917 | Stable generalization |
+| DROID-T4 | **0.8474** | **0.8453** | 0.8793 | Stable generalization |
+
+### Key observations
+- **DROID transfer is strong** (T3/T4 test macro ~0.85), indicating hierarchical losses stay effective on DroidCollection.
+- **AICD has major distribution gap**, especially T1/T2 (very high val but weak test), suggesting split mismatch or hidden distribution shift.
+- AICD-T2 train labels are highly skewed (class `0` dominates in preflight counts), likely contributing to unstable minority behavior.
+- Parameter counts remain in the same regime as prior Exp18 runs (~151.74M, task-dependent head size).
+
+### Action items (next run)
+1. Audit AICD split construction + leakage risk (val/test provenance and dedup checks).
+2. Re-run AICD with stricter balancing (`WeightedRandomSampler` / class-aware batching) and calibration.
+3. Keep DROID-T3/T4 as sanity baseline for any Exp21/Exp24 modifications.
+
+---
+
 ## 🧪 Next Experiments (Targeting A* Paper — NeurIPS/ICLR 2026)
 
 Current bottlenecks to attack:
-1. **Author F1 plateau near ~70%** (best: Exp18=70.55, Exp17=70.46, **Exp20/Exp22≈70.20** tie cluster, Exp25=70.19, Exp26=70.14; Exp23 GAT=69.71 slightly below Exp11=69.82) — Nxcode/Qwen confusion persists; generated-class separation still the main failure mode
+1. **Author F1 plateau near ~70%** (best: Exp18=70.55, Exp17=70.46, **Exp20/Exp22≈70.20** tie cluster, Exp25=70.19, Exp26=70.14, Exp21=70.04; Exp23=69.71) — **Exp24 underperforms (67.80)** and confirms Nxcode/Qwen separation is still the main failure mode
 2. **OOD evaluation pending** — ood_generator / ood_language / ood_source all untested
 3. **GitHub source is hardest** (macro 0.5540 vs CF 0.7685) — domain shift problem
 
@@ -957,10 +1112,10 @@ Designed 2026-03-31 | Based on ICML 2025, NeurIPS 2024, CVPR/ICCV/AAAI survey
 | Exp | Method | Binary F1 | Author F1 | Val F1 | Status |
 |:----|:-------|:---------:|:---------:|:------:|:------:|
 | Exp18 | HierTreeCode | 99.06 | **70.55** | **71.88** | ✅ SOTA |
-| Exp21 | MoECode | — | — | — | 🔲 Pending |
+| Exp21 | MoECode | **99.09** | 70.04 | 71.20 | ✅ Completed |
 | Exp22 | TTACode | 99.06 | 70.20 | 71.32 | ✅ Completed |
 | Exp23 | GraphStyleCode | 99.00 | 69.71 | 70.89 | ✅ Completed |
-| Exp24 | CosineProtoCode | — | — | — | 🔲 Pending |
+| Exp24 | CosineProtoCode | 99.03 | 67.80 | 68.70 | ✅ Completed |
 | Exp25 | MultiGranCode | 99.03 | 70.19 | 71.22 | ✅ Completed |
 | Exp26 | SelfDistillCode | 99.04 | 70.14 | 71.22 | ✅ Completed |
 

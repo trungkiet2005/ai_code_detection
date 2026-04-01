@@ -91,7 +91,12 @@ from transformers import (
     AutoModel,
     get_cosine_schedule_with_warmup,
 )
-from sklearn.metrics import f1_score, classification_report
+from sklearn.metrics import (
+    f1_score,
+    classification_report,
+    precision_recall_fscore_support,
+    accuracy_score,
+)
 
 warnings.filterwarnings("ignore")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
@@ -230,6 +235,17 @@ class Config:
     save_dir: str = "./hiertree_code_checkpoints"
     log_every: int = 100
     eval_every: int = 1000
+    # Paper-aligned metric selection:
+    # - AICD: Macro-F1 primary
+    # - Droid: Weighted-F1 primary
+    primary_metric: str = "auto"  # "auto" | "macro_f1" | "weighted_f1"
+
+
+def resolve_primary_metric(config: "Config") -> str:
+    metric = str(getattr(config, "primary_metric", "auto")).strip().lower()
+    if metric in {"macro_f1", "weighted_f1"}:
+        return metric
+    return "weighted_f1" if config.benchmark == "droid" else "macro_f1"
 
 
 def set_seed(seed: int):
@@ -1480,6 +1496,10 @@ class Trainer:
         self.best_f1 = 0.0
         self.global_step = 0
         self.last_eval_metrics: Dict[str, Dict[str, float]] = {}
+        self.primary_metric = resolve_primary_metric(config)
+
+    def _select_primary_score(self, macro_f1: float, weighted_f1: float) -> float:
+        return weighted_f1 if self.primary_metric == "weighted_f1" else macro_f1
 
     def train_epoch(self, epoch: int):
         self.model.train()
@@ -1531,11 +1551,11 @@ class Trainer:
 
             # Mid-epoch eval
             if self.global_step > 0 and self.global_step % self.config.eval_every == 0:
-                val_f1 = self.evaluate(self.val_loader, "Val")
-                if val_f1 > self.best_f1:
-                    self.best_f1 = val_f1
+                val_primary = self.evaluate(self.val_loader, "Val")
+                if val_primary > self.best_f1:
+                    self.best_f1 = val_primary
                     self.save_checkpoint("best")
-                    logger.info(f"New best Val F1: {val_f1:.4f}")
+                    logger.info(f"New best Val {self.primary_metric}: {val_primary:.4f}")
                 self.model.train()
 
         # Return average losses
@@ -1568,27 +1588,46 @@ class Trainer:
             total_loss += loss.item()
             num_batches += 1
 
-        # Macro F1
+        # Full metric pack (paper-ready export)
         macro_f1 = f1_score(all_labels, all_preds, average="macro")
         weighted_f1 = f1_score(all_labels, all_preds, average="weighted")
+        macro_precision, macro_recall, _, _ = precision_recall_fscore_support(
+            all_labels, all_preds, average="macro", zero_division=0
+        )
+        weighted_precision, weighted_recall, _, _ = precision_recall_fscore_support(
+            all_labels, all_preds, average="weighted", zero_division=0
+        )
+        accuracy = accuracy_score(all_labels, all_preds)
+        primary_score = self._select_primary_score(macro_f1, weighted_f1)
         avg_loss = total_loss / max(num_batches, 1)
 
         logger.info(
             f"{split_name} | Loss: {avg_loss:.4f} | Macro-F1: {macro_f1:.4f} | "
-            f"Weighted-F1: {weighted_f1:.4f}"
+            f"Weighted-F1: {weighted_f1:.4f} | Macro-R: {macro_recall:.4f} | "
+            f"Weighted-R: {weighted_recall:.4f} | Acc: {accuracy:.4f} | "
+            f"Primary({self.primary_metric}): {primary_score:.4f}"
         )
         self.last_eval_metrics[split_name] = {
             "loss": float(avg_loss),
             "macro_f1": float(macro_f1),
             "weighted_f1": float(weighted_f1),
+            "macro_precision": float(macro_precision),
+            "macro_recall": float(macro_recall),
+            "weighted_precision": float(weighted_precision),
+            "weighted_recall": float(weighted_recall),
+            "accuracy": float(accuracy),
+            "primary_score": float(primary_score),
+            "primary_metric": self.primary_metric,
         }
 
         # Per-class report
         if split_name == "Test":
             report = classification_report(all_labels, all_preds, digits=4)
             logger.info(f"\n{split_name} Classification Report:\n{report}")
+            report_dict = classification_report(all_labels, all_preds, digits=4, output_dict=True)
+            self.last_eval_metrics[split_name]["classification_report"] = report_dict
 
-        return macro_f1
+        return primary_score
 
     def save_checkpoint(self, tag: str = "latest"):
         os.makedirs(self.config.save_dir, exist_ok=True)
@@ -1629,13 +1668,13 @@ class Trainer:
             )
 
             # Validate
-            val_f1 = self.evaluate(self.val_loader, "Val")
+            val_primary = self.evaluate(self.val_loader, "Val")
 
             # Save best
-            if val_f1 > self.best_f1:
-                self.best_f1 = val_f1
+            if val_primary > self.best_f1:
+                self.best_f1 = val_primary
                 self.save_checkpoint("best")
-                logger.info(f"*** New Best Val Macro-F1: {val_f1:.4f} ***")
+                logger.info(f"*** New Best Val {self.primary_metric}: {val_primary:.4f} ***")
 
             # Save latest
             self.save_checkpoint("latest")
@@ -1646,17 +1685,34 @@ class Trainer:
         logger.info("=" * 60)
 
         if self.load_checkpoint("best"):
-            test_f1 = self.evaluate(self.test_loader, "Test")
+            test_primary = self.evaluate(self.test_loader, "Test")
         else:
             logger.warning("No best checkpoint found, evaluating current model")
-            test_f1 = self.evaluate(self.test_loader, "Test")
+            test_primary = self.evaluate(self.test_loader, "Test")
 
-        test_weighted = self.last_eval_metrics.get("Test", {}).get("weighted_f1", test_f1)
-        logger.info(f"\n*** Final Test Macro-F1: {test_f1:.4f} | Weighted-F1: {test_weighted:.4f} ***")
+        test_metrics = self.last_eval_metrics.get("Test", {})
+        test_macro = test_metrics.get("macro_f1", 0.0)
+        test_weighted = test_metrics.get("weighted_f1", 0.0)
+        test_macro_recall = test_metrics.get("macro_recall", 0.0)
+        test_weighted_recall = test_metrics.get("weighted_recall", 0.0)
+        test_acc = test_metrics.get("accuracy", 0.0)
+        logger.info(
+            f"\n*** Final Test Primary({self.primary_metric}): {test_primary:.4f} | "
+            f"Macro-F1: {test_macro:.4f} | Weighted-F1: {test_weighted:.4f} | "
+            f"Macro-R: {test_macro_recall:.4f} | Weighted-R: {test_weighted_recall:.4f} | "
+            f"Acc: {test_acc:.4f} ***"
+        )
         return {
-            "test_f1": float(test_f1),
+            "test_f1": float(test_primary),  # backward-compatible alias
+            "test_macro_f1": float(test_macro),
             "test_weighted_f1": float(test_weighted),
+            "test_macro_recall": float(test_macro_recall),
+            "test_weighted_recall": float(test_weighted_recall),
+            "test_accuracy": float(test_acc),
             "best_val_f1": float(self.best_f1),
+            "best_val_macro_f1": float(self.last_eval_metrics.get("Val", {}).get("macro_f1", self.best_f1)),
+            "best_val_weighted_f1": float(self.last_eval_metrics.get("Val", {}).get("weighted_f1", self.best_f1)),
+            "paper_primary_metric": self.primary_metric,
         }
 
 
@@ -1684,6 +1740,7 @@ def main(task: str = "T1", config: Optional[Config] = None):
     logger.info(f"[EXP18] HierTreeCode - AI-Generated Code Detection")
     logger.info(f"Task: {config.task}")
     logger.info(f"Benchmark: {config.benchmark}")
+    logger.info(f"Paper primary metric: {resolve_primary_metric(config)}")
     logger.info(f"GPU: {_get_gpu_name()}")
     logger.info(f"{'='*60}")
     if not _supports_task_for_benchmark(config.benchmark, config.task):
@@ -1806,22 +1863,31 @@ def run_benchmark_suite(run_plan: List[Tuple[str, str]], base_config: Optional[C
     logger.info("=" * 70)
     for run_key, stats in results.items():
         logger.info(
-            f"{run_key.upper()} -> best_val_f1={stats['best_val_f1']:.4f}, "
-            f"test_f1={stats['test_f1']:.4f}, "
-            f"weighted_f1={stats.get('test_weighted_f1', 0):.4f}"
+            f"{run_key.upper()} -> primary={stats.get('paper_primary_metric', 'macro_f1')} | "
+            f"best_val_primary={stats['best_val_f1']:.4f}, "
+            f"test_primary={stats['test_f1']:.4f}, "
+            f"test_macro_f1={stats.get('test_macro_f1', 0):.4f}, "
+            f"test_weighted_f1={stats.get('test_weighted_f1', 0):.4f}, "
+            f"test_macro_recall={stats.get('test_macro_recall', 0):.4f}, "
+            f"test_weighted_recall={stats.get('test_weighted_recall', 0):.4f}"
         )
 
     # Machine-readable block
     ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     logger.info("\n=== SUITE_RESULTS_START ===")
     logger.info(f"timestamp={ts} | method=EXP18_HierTreeCode | runs={len(run_plan)}")
-    logger.info("| run_key | best_val_f1 | test_f1 | test_weighted_f1 |")
-    logger.info("|---|---:|---:|---:|")
+    logger.info("| run_key | primary_metric | best_val_primary | test_primary | test_macro_f1 | test_weighted_f1 | test_macro_recall | test_weighted_recall | test_accuracy |")
+    logger.info("|---|---|---:|---:|---:|---:|---:|---:|---:|")
     for run_key, stats in results.items():
         logger.info(
             f"| {run_key.upper()} | "
+            f"{stats.get('paper_primary_metric', 'macro_f1')} | "
             f"{stats['best_val_f1']:.4f} | {stats['test_f1']:.4f} | "
-            f"{stats.get('test_weighted_f1', 0):.4f} |"
+            f"{stats.get('test_macro_f1', 0):.4f} | "
+            f"{stats.get('test_weighted_f1', 0):.4f} | "
+            f"{stats.get('test_macro_recall', 0):.4f} | "
+            f"{stats.get('test_weighted_recall', 0):.4f} | "
+            f"{stats.get('test_accuracy', 0):.4f} |"
         )
     logger.info("=== SUITE_RESULTS_END ===")
 

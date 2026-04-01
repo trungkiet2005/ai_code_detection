@@ -90,7 +90,7 @@ except ImportError:
     _NEW_AMP = False
 
 from datasets import Dataset, load_dataset
-from sklearn.metrics import f1_score, classification_report, confusion_matrix
+from sklearn.metrics import f1_score, classification_report, confusion_matrix, accuracy_score
 from transformers import (
     AutoTokenizer,
     AutoModel,
@@ -216,6 +216,7 @@ class SpectralConfig:
     save_dir: str = "./codet_m4_checkpoints"
     log_every: int = 100
     eval_every: int = 1000
+    primary_metric: str = "macro_f1"  # "macro_f1" | "weighted_f1"
 
 
 # ============================================================================
@@ -726,6 +727,10 @@ class Trainer:
         self.global_step = 0
         self.last_eval_metrics: Dict[str, Dict[str, float]] = {}
 
+    def _select_primary_score(self, macro_f1: float, weighted_f1: float) -> float:
+        metric = str(getattr(self.config, "primary_metric", "macro_f1")).strip().lower()
+        return weighted_f1 if metric == "weighted_f1" else macro_f1
+
     def train_epoch(self, epoch: int):
         self.model.train()
         total_losses = defaultdict(float)
@@ -801,17 +806,35 @@ class Trainer:
             total_loss += F.cross_entropy(outputs["logits"], labels).item()
             num_batches += 1
 
+        # Paper-aligned metric protocol:
+        # - AICD/CoDET: Macro-F1 primary
+        # - Droid: Weighted-F1 primary
         macro_f1 = f1_score(all_labels, all_preds, average="macro")
         weighted_f1 = f1_score(all_labels, all_preds, average="weighted")
+        accuracy = accuracy_score(all_labels, all_preds)
+        primary_score = self._select_primary_score(macro_f1, weighted_f1)
         avg_loss = total_loss / max(num_batches, 1)
 
-        logger.info(f"{split_name} | Loss: {avg_loss:.4f} | Macro-F1: {macro_f1:.4f} | Weighted-F1: {weighted_f1:.4f}")
-        self.last_eval_metrics[split_name] = {"loss": float(avg_loss), "macro_f1": float(macro_f1), "weighted_f1": float(weighted_f1)}
+        logger.info(
+            f"{split_name} | Loss: {avg_loss:.4f} | "
+            f"Macro-F1: {macro_f1:.4f} | Weighted-F1: {weighted_f1:.4f} | Acc: {accuracy:.4f} | "
+            f"Primary({self.config.primary_metric}): {primary_score:.4f}"
+        )
+        self.last_eval_metrics[split_name] = {
+            "loss": float(avg_loss),
+            "macro_f1": float(macro_f1),
+            "weighted_f1": float(weighted_f1),
+            "accuracy": float(accuracy),
+            "primary_score": float(primary_score),
+            "primary_metric": self.config.primary_metric,
+        }
 
         if split_name == "Test":
             report = classification_report(all_labels, all_preds, digits=4)
+            report_dict = classification_report(all_labels, all_preds, digits=4, output_dict=True)
             logger.info(f"\n{split_name} Classification Report:\n{report}")
-        return macro_f1
+            self.last_eval_metrics[split_name]["classification_report"] = report_dict
+        return primary_score
 
     def save_checkpoint(self, tag: str = "latest"):
         os.makedirs(self.config.save_dir, exist_ok=True)
@@ -844,7 +867,7 @@ class Trainer:
             if val_f1 > self.best_f1:
                 self.best_f1 = val_f1
                 self.save_checkpoint("best")
-                logger.info(f"*** New Best Val Macro-F1: {val_f1:.4f} ***")
+                logger.info(f"*** New Best Val {self.config.primary_metric}: {val_f1:.4f} ***")
             self.save_checkpoint("latest")
 
         logger.info("\n" + "=" * 60)
@@ -855,9 +878,23 @@ class Trainer:
         else:
             test_f1 = self.evaluate(self.test_loader, "Test")
 
-        test_weighted = self.last_eval_metrics.get("Test", {}).get("weighted_f1", test_f1)
-        logger.info(f"*** Final Test Macro-F1: {test_f1:.4f} | Weighted-F1: {test_weighted:.4f} ***")
-        return {"test_f1": float(test_f1), "test_weighted_f1": float(test_weighted), "best_val_f1": float(self.best_f1)}
+        test_metrics = self.last_eval_metrics.get("Test", {})
+        test_weighted = test_metrics.get("weighted_f1", test_f1)
+        test_acc = test_metrics.get("accuracy", 0.0)
+        test_macro = test_metrics.get("macro_f1", test_f1)
+        logger.info(
+            f"*** Final Test Primary({self.config.primary_metric}): {test_f1:.4f} | "
+            f"Macro-F1: {test_macro:.4f} | Weighted-F1: {test_weighted:.4f} | Acc: {test_acc:.4f} ***"
+        )
+        return {
+            "test_f1": float(test_f1),                     # backward-compatible alias (primary score)
+            "test_macro_f1": float(test_macro),
+            "test_weighted_f1": float(test_weighted),
+            "test_accuracy": float(test_acc),
+            "best_val_f1": float(self.best_f1),
+            "best_val_macro_f1": float(self.last_eval_metrics.get("Val", {}).get("macro_f1", self.best_f1)),
+            "primary_metric": self.config.primary_metric,
+        }
 
 
 # ============================================================================
