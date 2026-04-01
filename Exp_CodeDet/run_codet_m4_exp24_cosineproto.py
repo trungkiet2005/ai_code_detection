@@ -663,12 +663,6 @@ def compute_all_losses(model, outputs, labels, config, focal_loss_fn=None):
     task_loss = focal_loss_fn(outputs["logits"], labels)
     neural_loss = focal_loss_fn(outputs["neural_logits"], labels)
     spectral_loss = focal_loss_fn(outputs["spectral_logits"], labels)
-    # EMA prototype update (in-place, no gradient)
-    if hasattr(model, "neural_head") and isinstance(model.neural_head, CosineProtoHead):
-        model.neural_head.ema_update(
-            outputs["embeddings"], labels,
-            momentum=getattr(config, "proto_momentum", 0.9)
-        )
     # Hyperspherical uniformity: push prototypes apart on unit sphere
     if hasattr(model, "neural_head") and isinstance(model.neural_head, CosineProtoHead):
         unif_loss = hyperspherical_uniformity_loss(model.neural_head.prototypes)
@@ -745,6 +739,13 @@ class Trainer:
                 loss = losses["total"] / self.config.grad_accum_steps
 
             self.scaler.scale(loss).backward()
+
+            # EMA prototype update after backward (in-place, no gradient needed)
+            if hasattr(self.model, "neural_head") and isinstance(self.model.neural_head, CosineProtoHead):
+                self.model.neural_head.ema_update(
+                    outputs["embeddings"].detach(), labels,
+                    momentum=getattr(self.config, "proto_momentum", 0.9)
+                )
 
             if (batch_idx + 1) % self.config.grad_accum_steps == 0:
                 self.scaler.unscale_(self.optimizer)

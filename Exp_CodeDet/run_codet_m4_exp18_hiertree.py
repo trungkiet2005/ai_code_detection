@@ -1507,7 +1507,7 @@ if __name__ == "__main__":
     # "iid_only"     → run only IID binary + author (Tables 2-4, 7)
     # "ood_only"     → run only OOD leave-one-out (proxy Tables 8-10)
     # "single"       → run one specific task
-    RUN_MODE = "iid_only"
+    RUN_MODE = "full"
     RUN_PREFLIGHT_CHECK = True
 
     SINGLE_TASK = "binary"  # "binary" | "author"

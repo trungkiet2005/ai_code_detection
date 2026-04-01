@@ -31,6 +31,7 @@ import re
 import subprocess
 import sys
 import logging
+import time
 import warnings
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
@@ -587,7 +588,8 @@ class SpectralCode(nn.Module):
             for e_idx in range(self.config.num_experts):
                 sel = (top_k_i[:, k] == e_idx)
                 if sel.any():
-                    h_moe[sel] = h_moe[sel] + top_k_w[sel, k:k+1] * self.moe_experts[e_idx](h_neural[sel])
+                    expert_out = self.moe_experts[e_idx](h_neural[sel])
+                    h_moe[sel] = h_moe[sel] + (top_k_w[sel, k:k+1] * expert_out).to(h_moe.dtype)
         h_neural = h_neural + h_moe  # residual connection
         # ─────────────────────────────────────────────────────────────────────
 
@@ -961,7 +963,17 @@ def _quick_code_stats(dataset: Dataset, sample_size: int = 512) -> Dict[str, flo
 
 def _load_raw_splits(cfg: CoDETM4Config):
     logger.info(f"Loading dataset: {cfg.dataset_id}")
-    ds = load_dataset(cfg.dataset_id, split="train")
+    for attempt in range(5):
+        try:
+            ds = load_dataset(cfg.dataset_id, split="train")
+            break
+        except Exception as e:
+            if attempt < 4:
+                wait = 15 * (attempt + 1)
+                logger.warning(f"Dataset load attempt {attempt+1} failed ({type(e).__name__}), retrying in {wait}s...")
+                time.sleep(wait)
+            else:
+                raise
 
     has_split = cfg.split_field in ds.column_names
     if has_split:

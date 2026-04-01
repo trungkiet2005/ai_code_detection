@@ -15,13 +15,17 @@
 |:----:|:----|:-------|:---------:|:-------:|:---------:|:-------:|:------:|:------:|
 | 🥇 | **Exp18** | **HierTreeCode** | **99.06** | `+0.41` | **70.55** | **`+4.22`** | **71.88** | ✅ |
 | 🥈 | **Exp17** | RAGDetect | **99.09** | `+0.44` | 70.46 | `+4.13` | 70.99 | ✅ |
-| 🥉 | **Exp15** | GroupDRO | 98.98 | `+0.33` | 70.17 | `+3.84` | 70.59 | ✅ |
-| 4 | **Exp14** | ProtoCon | **99.06** | `+0.41` | 70.13 | `+3.80` | 71.26 | ✅ |
-| 5 | **Exp11** | SpectralCode | **99.06** | `+0.41` | 69.82 | `+3.49` | 70.80 | ✅ |
+| 🥉 | **Exp20** | BiScopeCode | **99.06** | `+0.41` | 70.20 | `+3.87` | 71.22 | ✅ |
+| 4 | **Exp22** | TTACode | **99.06** | `+0.41` | 70.20 | `+3.87` | 71.32 | ✅ |
+| 5 | **Exp25** | MultiGranCode | 99.03 | `+0.38` | 70.19 | `+3.86` | 71.22 | ✅ |
+| 6 | **Exp15** | GroupDRO | 98.98 | `+0.33` | 70.17 | `+3.84` | 70.59 | ✅ |
+| 7 | **Exp26** | SelfDistillCode | 99.04 | `+0.39` | 70.14 | `+3.81` | 71.22 | ✅ |
+| 8 | **Exp14** | ProtoCon | **99.06** | `+0.41` | 70.13 | `+3.80` | 71.26 | ✅ |
+| 9 | **Exp11** | SpectralCode | **99.06** | `+0.41` | 69.82 | `+3.49` | 70.80 | ✅ |
+| 10 | **Exp23** | GraphStyleCode | 99.00 | `+0.35` | 69.71 | `+3.38` | 70.89 | ✅ |
 | — | **Exp16** | HyperNetCode | **99.07** | `+0.42` | — ❌ bug | — | — | ✅ |
 | — | **Exp19** | EAGLECode (DANN) | 98.73 | `+0.08` | 62.89 ↓↓ | `-3.44` | 64.23 | ✅ |
-| — | Exp20 | BiScopeCode | — | — | — | — | — | 🔲 |
-| — | Exp21–26 | Batch 2 | — | — | — | — | — | 🔲 |
+| — | Exp21, Exp24 | Batch 2 (pending) | — | — | — | — | — | 🔲 |
 | **REF** | Paper | UniXcoder | 98.65 | — | 66.33 | — | — | reference |
 | REF | Paper | CodeT5 | 98.35 | `-0.30` | 62.45 | `-3.88` | — | reference |
 | REF | Paper | CodeBERT | 95.70 | `-2.95` | 64.80 | `-1.53` | — | reference |
@@ -466,14 +470,14 @@ Binary per-class breakdown:
 **Run:** 2026-03-31 | ModernBERT-base + GradientReversalLayer (DANN) for generator-invariant features  
 **Loss:** `L_focal + L_neural + L_spectral + λ_adv * L_adv`  
 **Key novelty:** λ_adv anneals 0→0.1 over epoch 1; GRL reverses gradient from generator discriminator → encoder learns generator-invariant binary features  
-**Infra:** H100 80GB BF16 | batch=64x1 | epochs=3 | 151.8M params
+**Infra:** H100 80GB BF16 | batch=64x1 | epochs=3 | **~151.806M** params (logs: 151,805,772 binary / 151,808,340 author)
 
 ### IID Binary
 | Metric | Value | vs Exp18 |
 |:-------|:-----:|:--------:|
-| Test Macro-F1 | 0.9873 | `-0.0033` |
+| Test Macro-F1 | **0.9873** | `-0.0033` |
 | Test Weighted-F1 | 0.9873 | `-0.0033` |
-| Best Val F1 | 0.9879 | `-0.0018` |
+| Best Val F1 | **0.9879** | `-0.0018` |
 
 | Language | Macro-F1 | Source | Macro-F1 |
 |:---------|:---------:|:-------|:---------:|
@@ -482,9 +486,9 @@ Binary per-class breakdown:
 | Python | 0.9819 | LC | 0.9777 |
 
 **Binary training dynamics:**
-- Epoch 1: λ_adv=0.000, Adv=0.000 → pure CE, val=0.9726
-- Epoch 2+: λ_adv=0.100, Adv≈3-4 (GRL active) → val improves to 0.9879 but lower than baselines
-- Adversarial signal (Adv loss ~2.7 final) indicates GRL is active but hurts overall accuracy
+- Epoch 1: λ_adv=0, Adv=0 → val **0.9726**
+- Epoch 2: GRL on (λ_adv=0.1, Adv≈3–4.8) → val **0.9815** mid-epoch, **0.9793** end-epoch
+- Epoch 3: Adv≈2.5–2.7 → val **0.9872** mid → **0.9879** best (loaded for test) — still **below** Spectral/TTACode tier (~0.990+)
 
 ### IID Author (6-class) ⚠️ CATASTROPHIC DEGRADATION
 | Metric | Value | vs Exp18 | Delta |
@@ -502,6 +506,13 @@ Per-class F1:
 | Llama3.1 | **0.7878** | 0.8153 | `-0.0275` ↓ |
 | Nxcode | 0.5052 | **0.5015** | `+0.0037` ↑ |
 | **Qwen1.5** | **0.1981** | 0.4431 | **`-0.2450` ↓↓↓ worst ever!** |
+
+#### Per-language (Author)
+| Language | Macro-F1 |
+|:---------|:---------:|
+| C++ | 0.6339 |
+| Java | **0.6832** |
+| Python | 0.5819 |
 
 #### Per-source (Author)
 | Source | Exp19 | Exp18 | Δ |
@@ -523,12 +534,12 @@ Qwen:   [   14,  695,  169,  356, 3293, 727]  ← 3293 Qwen pred as Nxcode
 > **Root failure**: DANN forces encoder to produce generator-invariant features. This is *exactly the opposite* of what author identification needs. Qwen1.5 (F1=0.198) collapses almost entirely into Nxcode — GRL successfully erases generator-style information, destroying fine-grained discrimination.
 
 ### Training dynamics (Author — DANN degradation)
-| Epoch | Val Macro-F1 | Adv Loss | λ_adv |
-|:------|:-----------:|:--------:|:------:|
-| 1 | **0.6423** (best) | 0.00 | 0.000 |
-| 2 | 0.4111 | 1.61 | 0.100 |
-| 3 | 0.5569 | 1.37 | 0.100 |
-> Best checkpoint from epoch 2 (before full GRL damage). Val F1 drops 23% when λ_adv activates.
+| Epoch | Val Macro-F1 | Adv Loss (train end) | λ_adv |
+|:------|:-------------:|:--------------------:|:------:|
+| 1 | 0.6403 | 0.00 | 0.000 |
+| 2 | **0.6423** (peak, mid-ep) → **0.4111** (end-ep) | 1.61 | 0.100 |
+| 3 | 0.6026 (mid) → **0.5569** (final) | 1.37 | 0.100 |
+> **Best checkpoint** = val peak **0.6423** early in **epoch 2**; later in the same epoch val falls to **0.4111** (GRL overwhelms useful generator signal). Test macro **0.6289** is below that val peak (train/val/test gap), but far above the collapsed end-of-epoch-2 state.
 
 ### OOD Generator / Source
 Not evaluated (log only shows iid_only run plan).
@@ -543,12 +554,283 @@ Not evaluated (log only shows iid_only run plan).
 
 ---
 
+## 📊 Exp20 — BiScopeCode (bidirectional MLM probe stream)
+
+**Run:** 2026-03-31 | ModernBERT-base + neural + spectral + **BiScope** (K=16 masked positions → 8-dim probe stats, gated fusion)  
+**Loss:** `L_task + 0.3*L_neural + 0.3*L_spectral + L_biscope` — BiScope aux plateaus ~**0.173** by epoch 3 (binary) / ~**0.53** (author)  
+**Key novelty:** Local LM likelihood / embedding-consistency signal as a third stream for stylometric “fingerprints”  
+**Infra:** H100 80GB BF16 | batch=64x1 | epochs=3 | **~151.75M** params (author) | **~5× wall time per step** vs non-BiScope runs (log spacing)
+
+### IID Binary
+| Metric | Value | vs Exp18 |
+|:-------|:-----:|:--------:|
+| Test Macro-F1 | **0.9906** | `=` |
+| Test Weighted-F1 | 0.9907 | `+0.0001` |
+| Best Val F1 | 0.9897 | `=` |
+
+| Language | Macro-F1 | Source | Macro-F1 |
+|:---------|:---------:|:-------|:---------:|
+| C++ | 0.9907 | CF | 0.9839 |
+| Java | **0.9951** | GH | 0.9844 |
+| Python | 0.9864 | LC | 0.9849 |
+
+### IID Author (6-class)
+| Metric | Value | vs Exp18 | Delta |
+|:-------|:-----:|:--------:|:-----:|
+| Test Macro-F1 | **0.7020** | `-0.0035` | `-0.35%` |
+| Test Weighted-F1 | 0.8086 | `-0.0047` | `-0.47%` |
+| Best Val F1 | **0.7122** | `-0.0066` | `-0.66%` |
+
+| Class | F1 (Exp20) | F1 (Exp18) | Δ |
+|:------|:----------:|:----------:|:--:|
+| Human | 0.9754 | **0.9820** | `-0.0066` ↓ |
+| CodeLlama | 0.7333 | **0.7429** | `-0.0096` ↓ |
+| GPT | 0.7463 | **0.7481** | `-0.0018` ↓ |
+| Llama3.1 | **0.8203** | 0.8153 | `+0.0050` ↑ |
+| **Nxcode** | **0.5148** | 0.5015 | `+0.0133` ↑ |
+| Qwen1.5 | 0.4220 | **0.4431** | `-0.0211` ↓ |
+
+#### Per-source breakdown (Author)
+| Source | Exp20 | Exp18 | Δ |
+|:-------|:-----:|:-----:|:--:|
+| CF | 0.7660 | **0.7717** | `-0.0057` |
+| GH | 0.5510 | **0.5618** | `-0.0108` |
+| LC | 0.6027 | **0.6035** | `-0.0008` |
+
+#### Confusion matrix focus (Author)
+- `true=nxcode -> pred=qwen1.5` = `1831/5537`
+- `true=qwen1.5 -> pred=nxcode` = `2009/5254`
+
+### Key Insights
+- **Ties Exp22 on headline Author (70.20%)** — raw macro **slightly above** Exp22 (0.70203 vs 0.70195); **below** Exp22 on val best (71.22 vs 71.32)
+- **Binary matches SOTA tier (99.06%)** despite slower training — BiScope does not buy extra IID binary at this budget
+- **Nxcode improves vs Exp18** (+1.33 pt F1) but **Qwen1.5** still weakest; same Nxcode↔Qwen diagonal mass
+
+**Checkpoint:** `./codet_m4_checkpoints/codet_author/biscopecode_CoDET_author_best.pt`
+
+---
+
+## 📊 Exp22 — TTACode (TENT-style LayerNorm TTA)
+
+**Run:** 2026-03-31 | ModernBERT-base + spectral/neural fusion (same family as Exp11)  
+**Training:** IID only — **TTA is not applied during train**; optional **TTAAdapter** runs at eval on LayerNorm (55 params, `tta_steps=1`, `lr=1e-4`)  
+**Infra:** H100 80GB BF16 | batch=64x1 | epochs=3 | **~151.7M** params (author run)
+
+### IID Binary (standard checkpoint eval — **no TTA**)
+| Metric | Value | vs Exp18 |
+|:-------|:-----:|:--------:|
+| Test Macro-F1 | **0.9906** | `=` |
+| Test Weighted-F1 | 0.9906 | `=` |
+| Best Val F1 | **0.9903** | `+0.0006` |
+
+> Per-language / per-source **binary** slices were only printed in this log **after** the TTA pass (see below), so they reflect adapted weights — **not** the 0.9906 headline metric. Use global test F1 above for IID binary.
+
+### IID Author (6-class) — standard test (**no TTA**)
+| Metric | Value | vs Exp18 | Delta |
+|:-------|:-----:|:--------:|:-----:|
+| Test Macro-F1 | **0.7020** | `-0.0035` | `-0.35%` |
+| Test Weighted-F1 | 0.8087 | `-0.0046` | `-0.46%` |
+| Best Val F1 | **0.7132** | `-0.0056` | `-0.56%` |
+
+| Class | F1 (Exp22) | F1 (Exp18) | Δ |
+|:------|:----------:|:----------:|:--:|
+| Human | 0.9764 | **0.9820** | `-0.0056` ↓ |
+| CodeLlama | 0.7400 | **0.7429** | `-0.0029` ↓ |
+| **GPT** | **0.7510** | 0.7481 | `+0.0029` ↑ |
+| Llama3.1 | **0.8211** | 0.8153 | `+0.0058` ↑ |
+| **Nxcode** | **0.5333** | 0.5015 | **`+0.0318` ↑↑** |
+| Qwen1.5 | 0.3899 | **0.4431** | `-0.0532` ↓↓ |
+
+### ⚠️ Post-hoc TTA on test breakdown (do **not** use for leaderboard)
+After the main test pass, the harness ran **TTAAdapter** while computing subgroup metrics. This **collapsed** behaviour:
+- **Binary** subgroup macro dropped to **~0.94** overall (e.g. CF **~0.78** macro vs ~0.98 without TTA) — LN adaptation overfitted batch statistics on the **test** pass
+- **Author** subgroup macro **~0.17** with near-total **human** collapse in the logged confusion matrix (`4879/5226` CodeLlama rows predicted Human, LeetCode bucket **~0.045** macro)
+
+**Takeaway:** report **only** the checkpoint metrics above for paper comparisons; fix eval to run breakdown **before** TTA, or disable TTA on IID suite until SAR gating / calibrated steps are validated.
+
+### Key Insights
+- **Strongest Batch-2 Author so far (70.20)** — ties Exp11-tier binary (**99.06**) while improving **Nxcode** vs Exp18 at the cost of **Qwen1.5**
+- **TTA hook is a footgun** on this pipeline: same run shows TTA can erase gains if applied incorrectly to test telemetry
+
+**Checkpoint:** `./codet_m4_checkpoints/codet_author/ttacode_CoDET_author_best.pt`
+
+---
+
+## 📊 Exp23 — GraphStyleCode (GAT replaces BiLSTM AST)
+
+**Run:** 2026-03-31 | ModernBERT-base + **Graph Attention Network** on AST (2-layer, attention-weighted pooling) in place of BiLSTM AST; same neural + spectral fusion as Exp11 family  
+**Loss:** `L_task + 0.3*L_neural + 0.3*L_spectral` — **Aux = 0** throughout (no extra graph auxiliary in this run)  
+**Key novelty:** Explicit relational structure over AST nodes vs sequential BiLSTM over flattened AST  
+**Infra:** H100 80GB BF16 | batch=64x1 | epochs=3 | workers=8 | **~151.7M** params (author run)
+
+### IID Binary
+| Metric | Value | vs Exp18 |
+|:-------|:-----:|:--------:|
+| Test Macro-F1 | **0.9900** | `-0.0006` |
+| Test Weighted-F1 | 0.9900 | `-0.0006` |
+| Best Val F1 | 0.9900 | `+0.0003` |
+
+| Language | Macro-F1 | Source | Macro-F1 |
+|:---------|:---------:|:-------|:---------:|
+| C++ | 0.9897 | CF | 0.9806 |
+| Java | **0.9947** | GH | 0.9840 |
+| Python | 0.9858 | LC | 0.9862 |
+
+### IID Author (6-class)
+| Metric | Value | vs Exp18 | Delta |
+|:-------|:-----:|:--------:|:-----:|
+| Test Macro-F1 | **0.6971** | `-0.0084` | `-0.84%` |
+| Test Weighted-F1 | 0.8060 | `-0.0073` | `-0.73%` |
+| Best Val F1 | **0.7089** | `-0.0099` | `-0.99%` |
+
+| Class | F1 (Exp23) | F1 (Exp18) | Δ |
+|:------|:----------:|:----------:|:--:|
+| Human | 0.9753 | **0.9820** | `-0.0067` ↓ |
+| CodeLlama | 0.7354 | **0.7429** | `-0.0075` ↓ |
+| GPT | 0.7350 | **0.7481** | `-0.0131` ↓ |
+| Llama3.1 | **0.8172** | 0.8153 | `+0.0019` ↑ |
+| Nxcode | 0.4970 | **0.5015** | `-0.0045` ↓ |
+| Qwen1.5 | 0.4227 | **0.4431** | `-0.0204` ↓ |
+
+#### Per-source breakdown (Author)
+| Source | Exp23 | Exp18 | Δ |
+|:-------|:-----:|:-----:|:--:|
+| CF | 0.7616 | **0.7717** | `-0.0101` |
+| GH | 0.5585 | **0.5618** | `-0.0033` |
+| LC | 0.5949 | **0.6035** | `-0.0086` |
+
+#### Confusion matrix focus (Author)
+- `true=nxcode -> pred=qwen1.5` = `1836/5537`
+- `true=qwen1.5 -> pred=nxcode` = `2097/5254`
+
+### Key Insights
+- **Author 69.71 < Exp11 SpectralCode 69.82** — GAT-on-AST under this recipe did not outperform the BiLSTM AST backbone; relational pooling may need richer graph (CFG/DFG) or longer tuning
+- **Binary 99.00** remains strong (near ceiling); slight **Java** strength (0.9947) mirrors other ModernBERT runs
+- **Same dominant failure mode**: heavy Nxcode↔Qwen off-diagonal mass
+
+**Checkpoint:** `./codet_m4_checkpoints/codet_author/graphstylecode_CoDET_author_best.pt`
+
+---
+
+## 📊 Exp25 — MultiGranCode (CharCNN + gated fusion)
+
+**Run:** 2026-03-31 | ModernBERT-base + neural + spectral + **CharCNN** (k=3,5,7) three-way gated fusion  
+**Loss:** `L_task + 0.3*L_neural + 0.3*L_spectral + L_aux(char/aux stream)` — Aux remains high early (CharCNN warm-up), decays by epoch 3  
+**Key novelty:** Micro-stylometry via character convolutions complements token-level ModernBERT for generator-specific surface patterns  
+**Infra:** H100 80GB BF16 | batch=64x1 | epochs=3 | workers=8 | **~151.8M** params (author run)
+
+### IID Binary
+| Metric | Value | vs Exp18 |
+|:-------|:-----:|:--------:|
+| Test Macro-F1 | **0.9903** | `-0.0003` |
+| Test Weighted-F1 | 0.9903 | `-0.0003` |
+| Best Val F1 | 0.9897 | `=` |
+
+| Language | Macro-F1 | Source | Macro-F1 |
+|:---------|:---------:|:-------|:---------:|
+| C++ | 0.9907 | CF | 0.9826 |
+| Java | **0.9949** | GH | 0.9841 |
+| Python | 0.9856 | LC | 0.9846 |
+
+### IID Author (6-class)
+| Metric | Value | vs Exp18 | Delta |
+|:-------|:-----:|:--------:|:-----:|
+| Test Macro-F1 | **0.7019** | `-0.0036` | `-0.36%` |
+| Test Weighted-F1 | 0.8104 | `-0.0029` | `-0.29%` |
+| Best Val F1 | **0.7122** | `-0.0066` | `-0.66%` |
+
+| Class | F1 (Exp25) | F1 (Exp18) | Δ |
+|:------|:----------:|:----------:|:--:|
+| Human | 0.9778 | **0.9820** | `-0.0042` ↓ |
+| CodeLlama | **0.7444** | 0.7429 | `+0.0015` ↑ |
+| GPT | 0.7325 | **0.7481** | `-0.0156` ↓ |
+| Llama3.1 | **0.8211** | 0.8153 | `+0.0058` ↑ |
+| **Nxcode** | **0.5124** | 0.5015 | `+0.0109` ↑ |
+| Qwen1.5 | 0.4230 | **0.4431** | `-0.0201` ↓ |
+
+#### Per-source breakdown (Author)
+| Source | Exp25 | Exp18 | Δ |
+|:-------|:-----:|:-----:|:--:|
+| CF | 0.7653 | **0.7717** | `-0.0064` |
+| GH | 0.5559 | **0.5618** | `-0.0059` |
+| LC | 0.6027 | **0.6035** | `-0.0008` |
+
+#### Confusion matrix focus (Author)
+- `true=nxcode -> pred=qwen1.5` = `1702/5537`
+- `true=qwen1.5 -> pred=nxcode` = `2149/5254`
+
+### Key Insights
+- **Best Batch-2 Author so far (70.19)**, slightly above SelfDistill Exp26 (+0.05 pt macro) — Char stream helps **Nxcode / CodeLlama** at the cost of weaker **Qwen1.5** vs Exp18
+- **Binary 99.03** — on par with Spectral family; large `aux` in epoch 1 is expected while CharCNN aligns with gated fusion
+- **Nxcode–Qwen mass off-diagonal** still dominates (`2149/5254` Qwen→Nxcode ≈41%) — same structural failure mode as Exp11–18
+
+**Checkpoint:** `./codet_m4_checkpoints/codet_author/multigrancode_CoDET_author_best.pt`
+
+---
+
+## 📊 Exp26 — SelfDistillCode (BYOL-style EMA Teacher)
+
+**Run:** 2026-03-31 | ModernBERT-base + EMA teacher self-distillation (`momentum=0.995`)  
+**Loss:** `L_task + 0.3*L_neural + 0.3*L_spectral + L_aux(distill)`  
+**Key novelty:** Student matches EMA teacher representation from its own historical parameters, improving feature stability without extra labels  
+**Infra:** H100 80GB BF16 | batch=64x1 | epochs=3 | workers=8 | 151.7M params
+
+### IID Binary
+| Metric | Value | vs Exp18 |
+|:-------|:-----:|:--------:|
+| Test Macro-F1 | **0.9904** | `-0.0002` |
+| Test Weighted-F1 | 0.9904 | `-0.0002` |
+| Best Val F1 | 0.9901 | `+0.0004` |
+
+| Language | Macro-F1 | Source | Macro-F1 |
+|:---------|:---------:|:-------|:---------:|
+| C++ | 0.9910 | CF | 0.9837 |
+| Java | **0.9949** | GH | 0.9835 |
+| Python | 0.9855 | LC | 0.9850 |
+
+### IID Author (6-class)
+| Metric | Value | vs Exp18 | Delta |
+|:-------|:-----:|:--------:|:-----:|
+| Test Macro-F1 | **0.7014** | `-0.0041` | `-0.41%` |
+| Test Weighted-F1 | 0.8091 | `-0.0042` | `-0.42%` |
+| Best Val F1 | **0.7122** | `-0.0066` | `-0.66%` |
+
+| Class | F1 (Exp26) | F1 (Exp18) | Δ |
+|:------|:----------:|:----------:|:--:|
+| Human | 0.9762 | **0.9820** | `-0.0058` ↓ |
+| CodeLlama | 0.7397 | **0.7429** | `-0.0032` ↓ |
+| GPT | 0.7375 | **0.7481** | `-0.0106` ↓ |
+| Llama3.1 | **0.8201** | 0.8153 | `+0.0048` ↑ |
+| **Nxcode** | **0.5053** | 0.5015 | `+0.0038` ↑ |
+| Qwen1.5 | 0.4300 | **0.4431** | `-0.0131` ↓ |
+
+#### Per-source breakdown (Author)
+| Source | Exp26 | Exp18 | Δ |
+|:-------|:-----:|:-----:|:--:|
+| CF | 0.7651 | **0.7717** | `-0.0066` |
+| GH | **0.5620** | 0.5618 | `+0.0002` |
+| LC | 0.6003 | **0.6035** | `-0.0032` |
+
+#### Confusion matrix focus (Author)
+- `true=nxcode -> pred=qwen1.5` = `1830/5537`
+- `true=qwen1.5 -> pred=nxcode` = `2077/5254`
+
+### Key Insights
+- **Strong, stable baseline for Batch-2:** Author 70.14, close to top cluster (Exp14/15/18) with minimal tuning
+- **EMA distillation improves stability** (val best 0.7122) but does not fully resolve Nxcode/Qwen separation
+- **Best class gains vs Exp18 are on Nxcode (+0.38%) and Llama3.1 (+0.48%)**, while Qwen1.5 still lags
+- **Still far better than DANN Exp19** (+7.25% weighted-F1 and +7.66% macro-F1 on author)
+
+**Checkpoint:** `./codet_m4_checkpoints/codet_author/selfdistillcode_CoDET_author_best.pt`
+
+---
+
 ## 🚀 Performance vs Paper (Head-to-Head)
 
-| Evaluation Mode (IID) | Paper (UniXcoder) | Exp11 SpectralCode | Exp14 ProtoCon | Exp15 GroupDRO | Exp16 HyperNet | Exp19 EAGLE | **Exp18 HierTreeCode** | Best Delta |
-|:----------------------|:-----------------:|:------------------:|:--------------:|:--------------:|:--------------:|:-----------:|:----------------------:|:----------:|
-| Binary F1 (Table 2) | 98.65 | 99.06 | 99.06 | 98.98 | **99.07** | 98.73 | **99.06** | `+0.44%` (Exp17 99.09 best) |
-| Author F1 (Table 7) | 66.33 | 69.82 | 70.13 | 70.17 | — (failed) | 62.89 ↓↓ | **70.55** | `+4.22%` |
+| Evaluation Mode (IID) | Paper (UniXcoder) | Exp11 SpectralCode | Exp14 ProtoCon | Exp15 GroupDRO | Exp16 HyperNet | Exp19 EAGLE | Exp20 BiScope | Exp22 TTACode | Exp23 GraphStyle | Exp25 MultiGran | Exp26 SelfDistill | **Exp18 HierTreeCode** | Best Delta |
+|:----------------------|:-----------------:|:------------------:|:--------------:|:--------------:|:--------------:|:-----------:|:-------------:|:-------------:|:----------------:|:---------------:|:----------------:|:----------------------:|:----------:|
+| Binary F1 (Table 2) | 98.65 | 99.06 | 99.06 | 98.98 | **99.07** | 98.73 | **99.06** | **99.06** | 99.00 | 99.03 | 99.04 | **99.06** | `+0.44%` (Exp17 99.09 best) |
+| Author F1 (Table 7) | 66.33 | 69.82 | 70.13 | 70.17 | — (failed) | 62.89 ↓↓ | 70.20 | 70.20 | 69.71 | 70.19 | 70.14 | **70.55** | `+4.22%` |
 
 ---
 
@@ -622,7 +904,7 @@ These evaluations were not included in the latest `iid_only` run but are mapped 
 ## 🧪 Next Experiments (Targeting A* Paper — NeurIPS/ICLR 2026)
 
 Current bottlenecks to attack:
-1. **Author F1 = 70.55% (best: Exp18) / 70.46% (Exp17)** — Nxcode/Qwen confusion persists; generated-class separation still the main failure mode
+1. **Author F1 plateau near ~70%** (best: Exp18=70.55, Exp17=70.46, **Exp20/Exp22≈70.20** tie cluster, Exp25=70.19, Exp26=70.14; Exp23 GAT=69.71 slightly below Exp11=69.82) — Nxcode/Qwen confusion persists; generated-class separation still the main failure mode
 2. **OOD evaluation pending** — ood_generator / ood_language / ood_source all untested
 3. **GitHub source is hardest** (macro 0.5540 vs CF 0.7685) — domain shift problem
 
@@ -634,7 +916,7 @@ Current bottlenecks to attack:
 | **Exp17** | `run_codet_m4_ragdetect.py` | **RAGDetect** | Frozen EmbeddingBank from train set post-training. Test-time: retrieve top-k neighbors (k=32, cosine) → blend with classifier logits (α=0.3). Training-free OOD boost | OOD generator F1 +5-8% | **A+** |
 | **Exp18** | `run_codet_m4_hiertree.py` | **HierTreeCode** | HierarchicalAffinityLoss over generator family tree: Nxcode/Qwen1.5 share family node → hard-negative triplet forces within-family < cross-family distance + margin | Author F1 ↑↑ (target 77%+), Nxcode/Qwen fix | **S** |
 | **Exp19** | `run_codet_m4_eagle.py` | **EAGLECode** | GradientReversalLayer (DANN) → encoder learns generator-invariant binary features. DANN α schedule 0→1, λ_adv annealed 0→0.1 over epoch 1. gen_label from dataset | OOD generator F1 95%+, domain-invariant features | **S** |
-| **Exp20** | `run_codet_m4_biscope.py` | **BiScopeCode** | Bidirectional MLM probe: mask K=16 positions/sequence, measure P(original\|context) via ModernBERT embedding cosine. 8-dim BiScope stats as 3rd gated stream | Binary 99.15%+, Author 72%+, novel signal | **S** |
+| **Exp20** | `run_codet_m4_biscope.py` | **BiScopeCode** | Bidirectional MLM probe: mask K=16 positions/sequence, measure P(original\|context) via ModernBERT embedding cosine. 8-dim BiScope stats as 3rd gated stream | ✅ IID: Bin **99.06**, Auth **70.20** (targets 99.15 / 72 not met) | **S** |
 
 ### Motivation from Recent Literature
 
@@ -670,17 +952,17 @@ Designed 2026-03-31 | Based on ICML 2025, NeurIPS 2024, CVPR/ICCV/AAAI survey
 | **Exp25** | `exp25_multigran.py` | **MultiGranCode** | Adds CharCNN (3 parallel Conv1D, k=3,5,7) as 3rd feature stream. 3-way gated fusion: neural+spectral+char. Char stream captures micro-stylometry | Binary 99.1%+, Author 71%+ | CharCNN (NIPS 2015), TextCNN (EMNLP 2014), Multi-granularity NLP (ACL 2020) |
 | **Exp26** | `exp26_selfdistill.py` | **SelfDistillCode** | BYOL-style EMA teacher self-distillation. Student matches teacher (its own past self) representation — no labels for distillation loss. Teacher updated as EMA after each step | OOD robustness 72%+, stable repr | BYOL (NeurIPS 2020), DINO (ICCV 2021), Mean Teacher (NeurIPS 2017), DinoSR (NeurIPS 2023) |
 
-### Leaderboard Update (Exp21-26 all Pending)
+### Leaderboard Update (Exp21-26 Progress)
 
 | Exp | Method | Binary F1 | Author F1 | Val F1 | Status |
 |:----|:-------|:---------:|:---------:|:------:|:------:|
 | Exp18 | HierTreeCode | 99.06 | **70.55** | **71.88** | ✅ SOTA |
 | Exp21 | MoECode | — | — | — | 🔲 Pending |
-| Exp22 | TTACode | — | — | — | 🔲 Pending |
-| Exp23 | GraphStyleCode | — | — | — | 🔲 Pending |
+| Exp22 | TTACode | 99.06 | 70.20 | 71.32 | ✅ Completed |
+| Exp23 | GraphStyleCode | 99.00 | 69.71 | 70.89 | ✅ Completed |
 | Exp24 | CosineProtoCode | — | — | — | 🔲 Pending |
-| Exp25 | MultiGranCode | — | — | — | 🔲 Pending |
-| Exp26 | SelfDistillCode | — | — | — | 🔲 Pending |
+| Exp25 | MultiGranCode | 99.03 | 70.19 | 71.22 | ✅ Completed |
+| Exp26 | SelfDistillCode | 99.04 | 70.14 | 71.22 | ✅ Completed |
 
 ### Research Agent Findings (2026-03-31)
 
