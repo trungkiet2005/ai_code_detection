@@ -33,8 +33,10 @@
   \textbf{Beyond Binary: Unified Detection and Attribution\\
   of AI-Generated Code via Hierarchical Family-Aware Learning}}
 \subtitle{Research Proposal --- NeurIPS 2026}
-\author{Student Name}
-\institute{University Name}
+\author{%
+  Dao Sy Duy Minh, Huynh Trung Kiet, Tran Chi Nguyen\\
+  and collaborators in \textbf{HCMUS\_TheFangs}}
+\institute{Ho Chi Minh City University of Science (HCMUS)\\VNUHCM}
 \date{\today}
 
 \begin{document}
@@ -52,47 +54,80 @@
 \section{Problem: Why Binary Detection is Not Enough}
 % ════════════════════════════════════════════════════════════════════════
 
-\begin{frame}{Binary Detection is Solved --- The Real Challenges Remain}
+\begin{frame}{Existing Benchmarks: Binary-Only and Limited Scale}
 \vspace{-0.2cm}
 \begin{columns}[T]
-\column{0.48\textwidth}
-\begin{block}{Binary: Human vs Machine (CoDET-M4)}
-\centering\footnotesize
-\begin{tabular}{lc}
+\column{0.55\textwidth}
+\begin{block}{Classic Benchmarks (Binary Detection Only)}
+\centering\scriptsize
+\begin{tabular}{lccccc}
 \toprule
-\textbf{Method} & \textbf{F1 (\%)} \\
+\textbf{Benchmark} & \textbf{Size} & \textbf{Lang} & \textbf{Models} & \textbf{Attrib?} & \textbf{Adv?} \\
 \midrule
-SVM & 72.19 \\
-CatBoost & 88.78 \\
-CodeBERT & 95.70 \\
-CodeT5 & 98.35 \\
-UniXcoder & 98.65 \\
+GPTSniffer {\tiny '24} & 7.4K & 1 & 1 & \ding{55} & \ding{55} \\
+Whodunit {\tiny '24} & 1.6K & 1 & 1 & \ding{55} & \ding{55} \\
+CodeGPTSensor {\tiny '25} & 1.1M & 2 & 1 & \ding{55} & \ding{55} \\
+CodeMirage {\tiny '25} & 210K & 10 & 10 & \ding{55} & \ding{55} \\
+\midrule
 \rowcolor{oursgreen}
-\textbf{SpectralCode (ours)} & \textbf{99.06} \\
+CoDET-M4 {\tiny ACL'25} & 500K & 3 & 5 & \ding{51} & \ding{55} \\
+\rowcolor{oursgreen}
+DROID {\tiny EMNLP'25} & 1.06M & 7 & 43 & \ding{55} & \ding{51} \\
+\rowcolor{oursgreen}
+AICD {\tiny EACL'26} & 2.05M & 9 & 77 & \ding{51} & \ding{51} \\
 \bottomrule
 \end{tabular}
 \end{block}
-\vspace{0.05cm}
-{\small \faExclamationTriangle\ $>$99\% F1 $\Rightarrow$ \alert{task is saturated}}
 
-\column{0.50\textwidth}
-\begin{alertblock}{Three Unsolved Challenges}
+\vspace{0.05cm}
+{\scriptsize Older benchmarks: 1 model, 1 language, \textbf{binary only}. Newer: multi-model, multi-task, multi-language.}
+
+\column{0.43\textwidth}
+\begin{alertblock}{Why Classic Benchmarks Are Obsolete}
 \small
-\begin{enumerate}\setlength\itemsep{4pt}
-    \item[\faUsers] \textbf{Authorship}: \emph{Which} LLM generated it? \\
-    {\scriptsize (6--12 classes, best SOTA only 66\% F1)}
-    \item[\faGlobeAmericas] \textbf{OOD}: Train Python $\to$ test Go? \\
-    {\scriptsize (99\% $\to$ 30\% F1 collapse on AICD)}
-    \item[\faShieldAlt] \textbf{Adversarial}: DPO-tuned mimicry? \\
-    {\scriptsize (Models fine-tuned to write like humans)}
-\end{enumerate}
+\begin{itemize}\setlength\itemsep{2pt}
+    \item[\ding{55}] \textbf{Single model}: GPTSniffer/Whodunit only test 1 LLM
+    \item[\ding{55}] \textbf{Binary only}: Cannot attribute to specific model
+    \item[\ding{55}] \textbf{No OOD}: Train/test on same language
+    \item[\ding{55}] \textbf{No adversarial}: No DPO-tuned evasion
+    \item[\ding{55}] \textbf{Saturated}: Fine-tuned models $>$98\% F1
+\end{itemize}
 \end{alertblock}
+
+\begin{exampleblock}{\scriptsize Binary is Solved (CoDET-M4)}
+\scriptsize
+UniXcoder: 98.65\% F1\\
+\textbf{SpectralCode (ours): 99.06\% F1}\\
+$\Rightarrow$ \alert{No room for improvement}
+\end{exampleblock}
 \end{columns}
+\end{frame}
+
+
+\begin{frame}{The Real Challenges Remain}
+\vspace{-0.15cm}
+
+\begin{block}{Beyond Binary: Three Open Problems}
+\small
+\begin{enumerate}\setlength\itemsep{6pt}
+    \item[\faUsers] \textbf{Authorship Attribution}: \emph{Which} LLM generated it? (6--12 classes)\\
+    {\footnotesize Best SOTA (UniXcoder on CoDET-M4): only \textbf{66.33\%} F1 --- a 32-point drop from binary.\\
+    Classic benchmarks \emph{cannot even evaluate this} --- they have no multi-class labels.}
+
+    \item[\faGlobeAmericas] \textbf{OOD Generalization}: Train on Python/Java/C++ $\to$ test on Go/Rust/PHP?\\
+    {\footnotesize AICD T1: validation 99.5\% $\to$ test \textbf{29.8\%} F1. Catastrophic collapse across \emph{all} methods.\\
+    Classic benchmarks test on the same language they train on --- OOD is invisible.}
+
+    \item[\faShield*] \textbf{Adversarial Robustness}: DPO-tuned models that mimic human style?\\
+    {\footnotesize DROID includes 157K adversarial samples. DroidDetect recall drops from 98\% $\to$ 92\% on adversarial code.\\
+    No classic benchmark has adversarial or machine-refined data.}
+\end{enumerate}
+\end{block}
 
 \vspace{0.1cm}
 \centering
-\fbox{\parbox{0.85\textwidth}{\centering\small
-\textbf{Our vision}: A unified method evaluated across \textbf{3 benchmarks}, \textbf{3.6M samples}, covering binary + attribution + OOD + adversarial}}
+\fbox{\parbox{0.88\textwidth}{\centering\small
+\textbf{Our vision}: A unified method evaluated across \textbf{3 modern benchmarks}, \textbf{3.6M samples}, covering binary + attribution + OOD + adversarial --- the problems that \emph{classic benchmarks cannot even measure}}}
 \end{frame}
 
 
@@ -261,44 +296,169 @@ Machine-refined (continue, gap-fill, rewrite). DPO evasion attacks. Varied decod
 \end{frame}
 
 
-\begin{frame}{SpectralCode --- What Makes Each Stream Novel?}
+\begin{frame}{Stream 1: Token Encoder --- ModernBERT-base}
 \vspace{-0.15cm}
 \begin{columns}[T]
-\column{0.32\textwidth}
-\begin{block}{\faCode\ Neural Path}
-\scriptsize
-\textbf{Token}: ModernBERT-base (SDPA) \\
-$\to$ CLS token, semantic+lexical \\[3pt]
-\textbf{AST}: tree-sitter $\to$ 67 node types $\to$ BiLSTM \\
-$\to$ syntactic structure \\[3pt]
-\textbf{Structural}: 22 features --- indent patterns, naming style (snake\_case/camelCase ratio), comment density, complexity counts \\[3pt]
-\textbf{Fusion}: 4-head cross-attention + gated projection $\to$ $h_{\text{neural}} \in \mathbb{R}^{512}$
+\column{0.55\textwidth}
+\begin{block}{What is ModernBERT?}
+\small
+\begin{itemize}\setlength\itemsep{3pt}
+    \item Pre-trained transformer encoder (149M params, \textbf{base} variant)
+    \item Trained on massive code + text corpora
+    \item Uses \textbf{SDPA} (Scaled Dot-Product Attention) = Flash Attention for speed
+    \item Input: tokenized source code (max 512 tokens)
+    \item Output: \texttt{[CLS]} token $\to$ $h_{\text{tok}} \in \mathbb{R}^{768}$
+\end{itemize}
 \end{block}
 
-\column{0.32\textwidth}
-\begin{block}{\faWaveSquare\ Spectral Path (Novel)}
-\scriptsize
-\textbf{Key insight}: LLM decoding creates \emph{frequency artifacts} --- periodic patterns from autoregressive sampling (top-$k$, top-$p$, temperature). \\[3pt]
-\textbf{Process}: \\
-Token IDs $\to$ 1D signal $\to$ FFT at 4 windows (32, 64, 128, 256) \\[3pt]
-\textbf{Per window} (16 features): \\
-$\bullet$ 8 band energies \\
-$\bullet$ Spectral centroid \\
-$\bullet$ Rolloff, flatness, peak freq \\[3pt]
-$\to$ 64-dim $\to$ MLP $\to$ $h_{\text{spec}} \in \mathbb{R}^{128}$\\[3pt]
-{\tiny Inspired by deepfake spectral forensics (Frank et al., ICML 2020)}
+\begin{exampleblock}{Why ModernBERT?}
+\small
+\begin{itemize}\setlength\itemsep{2pt}
+    \item Outperforms CodeBERT, RoBERTa on code tasks
+    \item SDPA attention = 2x faster than standard attention
+    \item \textbf{Base} model (149M) --- paper DROID uses \textbf{Large} (395M), we match with smaller model!
+\end{itemize}
+\end{exampleblock}
+
+\column{0.43\textwidth}
+\begin{block}{How It Captures Authorship}
+\small
+The \texttt{[CLS]} token aggregates:
+\begin{itemize}\setlength\itemsep{2pt}
+    \item \textbf{Lexical patterns}: variable naming, keyword choices
+    \item \textbf{Semantic patterns}: how logic is expressed
+    \item \textbf{Code idioms}: common patterns per LLM (e.g., GPT tends to use list comprehensions, Llama prefers explicit loops)
+\end{itemize}
 \end{block}
 
-\column{0.32\textwidth}
-\begin{block}{\faBalanceScale\ Learned Gate}
+\begin{alertblock}{\scriptsize Limitation}
 \scriptsize
-\textbf{Why?} Not all code benefits equally from spectral vs neural analysis. \\[3pt]
-\textbf{Gate}: MLP([neural; spec]) $\to$ softmax weights $(w_n, w_s)$ \\[3pt]
-$\text{logits} = w_n \cdot f_n(h_{\text{neural}}) + w_s \cdot f_s(h_{\text{spec}})$ \\[3pt]
-\textbf{Auxiliary losses} on each head individually ensure both paths learn useful representations. \\[3pt]
-\textbf{Total}: \\
-$\mathcal{L}_{\text{focal}} + 0.3\,\mathcal{L}_{\text{neural}} + 0.3\,\mathcal{L}_{\text{spec}}$
+Token-level only --- misses structural patterns (nesting depth, control flow) that are visible in the AST.
+\end{alertblock}
+\end{columns}
+\end{frame}
+
+
+\begin{frame}{Stream 2: AST Encoder --- tree-sitter + BiLSTM}
+\vspace{-0.15cm}
+\begin{columns}[T]
+\column{0.50\textwidth}
+\begin{block}{What is an AST (Abstract Syntax Tree)?}
+\small
+A \textbf{tree representation} of code structure. Each node = a syntactic element.\\[4pt]
+Example: \texttt{if x > 0: return x}\\[2pt]
+\begin{tikzpicture}[scale=0.7, transform shape,
+    every node/.style={draw, rounded corners, font=\scriptsize, minimum height=0.5cm}]
+    \node[fill=mainblue!15] (if) at (0,0) {if\_statement};
+    \node[fill=softgreen!15] (cmp) at (-1.5,-0.9) {binary\_expr};
+    \node[fill=accentred!10] (ret) at (1.5,-0.9) {return\_stmt};
+    \node[fill=gray!10] (x) at (-2.5,-1.8) {identifier: x};
+    \node[fill=gray!10] (z) at (-0.5,-1.8) {number: 0};
+    \node[fill=gray!10] (rx) at (1.5,-1.8) {identifier: x};
+    \draw[-{Stealth}] (if) -- (cmp);
+    \draw[-{Stealth}] (if) -- (ret);
+    \draw[-{Stealth}] (cmp) -- (x);
+    \draw[-{Stealth}] (cmp) -- (z);
+    \draw[-{Stealth}] (ret) -- (rx);
+\end{tikzpicture}
 \end{block}
+
+\column{0.48\textwidth}
+\begin{block}{What is tree-sitter?}
+\small
+A fast, incremental \textbf{parser} that builds ASTs for 40+ programming languages. We support: Python, Java, C++, C, Go, PHP, C\#, JS, Rust.\\[4pt]
+\textbf{Process}:
+\begin{enumerate}\setlength\itemsep{1pt}
+    \item[\faCode] Code $\xrightarrow{\text{tree-sitter}}$ AST tree
+    \item[\faList] DFS traversal $\to$ node type sequence\\
+    {\scriptsize [if\_stmt, binary\_expr, identifier, number, return\_stmt, ...]}
+    \item[\faCogs] 67 node types in vocabulary
+    \item[\faArrowRight] BiLSTM encodes sequence $\to$ $h_{\text{ast}} \in \mathbb{R}^{128}$
+\end{enumerate}
+\end{block}
+
+\begin{exampleblock}{\scriptsize Why AST for authorship?}
+\scriptsize
+LLMs have distinct \textbf{syntactic preferences}: GPT uses more nested ternary expressions, Llama prefers explicit if-else chains. AST captures these structural ``fingerprints.''
+\end{exampleblock}
+\end{columns}
+\end{frame}
+
+
+\begin{frame}{Stream 3: Structural Features + Stream 4: Spectral FFT Path}
+\vspace{-0.15cm}
+\begin{columns}[T]
+\column{0.45\textwidth}
+\begin{block}{\faRuler\ 22 Structural Features}
+\small
+Handcrafted coding style metrics:
+\begin{itemize}\setlength\itemsep{1pt}
+    \item \textbf{Layout}: avg/max line length, indent mean/variance/max
+    \item \textbf{Complexity}: \#functions, \#loops, \#conditionals, \#try-catch
+    \item \textbf{Naming}: snake\_case vs camelCase ratio, avg identifier length, single-char var ratio
+    \item \textbf{Style}: comment density, empty line ratio, whitespace ratio
+\end{itemize}
+\vspace{2pt}
+$\xrightarrow{\text{2-layer MLP}}$ $h_{\text{struct}} \in \mathbb{R}^{128}$
+\end{block}
+
+\column{0.53\textwidth}
+\begin{alertblock}{\faWaveSquare\ Spectral FFT Path (Key Novelty)}
+\small
+\textbf{Core insight}: Token ID sequences = 1D discrete signals.\\
+LLM decoding (top-$k$, temperature) creates \textbf{periodic frequency patterns} invisible in token space.\\[3pt]
+\textbf{FFT} (Fast Fourier Transform) decomposes signal into frequency components:
+$$X[k] = \sum_{n=0}^{N-1} x[n] \cdot e^{-2\pi i \cdot kn / N}$$
+\textbf{Multi-window}: 4 scales (32, 64, 128, 256 tokens)\\
+\textbf{Per window} (16 features):
+\begin{itemize}\setlength\itemsep{0pt}
+    \item 8 frequency band energies (low $\to$ high freq)
+    \item Spectral centroid (``center of mass'' of spectrum)
+    \item Rolloff (freq below which 85\% energy)
+    \item Flatness (noise-like vs tonal)
+    \item Peak frequency
+\end{itemize}
+$\to$ 64-dim $\xrightarrow{\text{MLP}}$ $h_{\text{spec}} \in \mathbb{R}^{128}$
+\end{alertblock}
+\end{columns}
+\end{frame}
+
+
+\begin{frame}{Fusion: Cross-Attention + Learned Gating}
+\vspace{-0.15cm}
+\begin{columns}[T]
+\column{0.48\textwidth}
+\begin{block}{\faCogs\ Cross-Attention Fusion (Neural Path)}
+\small
+Three representations enter:
+\begin{itemize}\setlength\itemsep{2pt}
+    \item $h_{\text{tok}} \in \mathbb{R}^{768}$ (token semantics)
+    \item $h_{\text{ast}} \in \mathbb{R}^{128}$ (syntax structure)
+    \item $h_{\text{struct}} \in \mathbb{R}^{128}$ (coding style)
+\end{itemize}
+\vspace{3pt}
+\textbf{Step 1}: Project all to $\mathbb{R}^{512}$\\
+\textbf{Step 2}: Stack as 3-token sequence\\
+\textbf{Step 3}: 4-head self-attention --- each view ``attends'' to others\\
+\textbf{Step 4}: Gated projection $\to$ $h_{\text{neural}} \in \mathbb{R}^{512}$\\[4pt]
+{\scriptsize \textbf{Why cross-attention?} Allows token features to be \emph{modulated} by AST structure --- e.g., ``this token pattern is more suspicious given this AST structure.''}
+\end{block}
+
+\column{0.48\textwidth}
+\begin{block}{\faBalanceScale\ Learned Soft Gate (Final)}
+\small
+Not all code benefits equally from spectral vs neural analysis.\\[4pt]
+\textbf{Gate}: $\text{MLP}([h_{\text{neural}}; h_{\text{spec}}]) \to (w_n, w_s)$\\[2pt]
+$\text{logits} = w_n \cdot f_n(h_{\text{neural}}) + w_s \cdot f_s(h_{\text{spec}})$\\[6pt]
+Each path has its \textbf{own classification head}. Gate learns per-sample weights.
+\end{block}
+
+\begin{exampleblock}{\scriptsize Training Loss}
+\small
+$\mathcal{L} = \underbrace{\mathcal{L}_{\text{focal}}^{\text{gate}}}_{\text{main}} + \underbrace{0.3\,\mathcal{L}_{\text{focal}}^{\text{neural}}}_{\text{aux}} + \underbrace{0.3\,\mathcal{L}_{\text{focal}}^{\text{spec}}}_{\text{aux}}$\\[4pt]
+\scriptsize
+\textbf{Focal loss} ($\gamma\!=\!2$): down-weights easy samples, focuses on hard ones. Auxiliary losses force each path to be independently useful.
+\end{exampleblock}
 \end{columns}
 \end{frame}
 
