@@ -27,6 +27,14 @@
 | 12 | **Exp24** | CosineProtoCode | 99.03 | `+0.38` | 67.80 | `+1.47` | 68.70 | ✅ |
 | — | **Exp16** | HyperNetCode | **99.07** | `+0.42` | — ❌ bug | — | — | ✅ |
 | — | **Exp19** | EAGLECode (DANN) | 98.73 | `+0.08` | 62.89 ↓↓ | `-3.44` | 64.23 | ✅ |
+| — | **Exp31** | KANCode | — | — | — | — | — | ⏳ pending |
+| — | **Exp32** | HyperCode | — | — | — | — | — | ⏳ pending |
+| — | **Exp33** | IBCode | — | — | — | — | — | ⏳ pending |
+| — | **Exp34** | TTLCode | — | — | — | — | — | ⏳ pending |
+| — | **Exp35** | TopoCode | — | — | — | — | — | ⏳ pending |
+| — | **Exp36** | MambaCode | — | — | — | — | — | ⏳ pending |
+| — | **Exp37** | EnergyCode | — | — | — | — | — | ⏳ pending |
+| — | **Exp38** | WaveCLCode | — | — | — | — | — | ⏳ pending |
 | **REF** | Paper | UniXcoder | 98.65 | — | 66.33 | — | — | reference |
 | REF | Paper | CodeT5 | 98.35 | `-0.30` | 62.45 | `-3.88` | — | reference |
 | REF | Paper | CodeBERT | 95.70 | `-2.95` | 64.80 | `-1.53` | — | reference |
@@ -1134,6 +1142,27 @@ Top-rated paper ideas from NeurIPS/ICML/CVPR survey for NeurIPS 2026 ORAL:
 | **B-tier** | DiffPath: Diffusion score curvature for OOD | NeurIPS | 2024 | Novel signal, no retraining |
 | **B-tier** | Span-level CRF segmentation | arXiv | 2025 | GH mixed-authorship, T3 |
 
-> **Next priority after Exp21-26:** Implement DeTeCtive multi-level contrastive (Exp27) and
-> LoRA-TTA upgrade of Exp22 (replaces norm-layer TTA with full LoRA adaptation → Exp27 or v2).
+> **Next priority after Exp21-26:** ~~DeTeCtive multi-level contrastive (Exp27)~~ **implemented** (`run_codet_m4_exp27_detective.py`).
+> LoRA-TTA upgrade of Exp22 (full LoRA adaptation vs norm-layer TTA) remains optional.
 > **Ensemble of Exp18×5 seeds** (zero training cost) estimated +1-2% from mutual-info reranking.
+
+### Exp27 — DeTeCtiveCode (implemented 2026-04-02)
+
+| Field | Value |
+|:------|:------|
+| **File** | `Exp_CodeDet/run_codet_m4_exp27_detective.py` |
+| **Base** | Exp18 HierTreeCode (best Author IID) + Exp17-style kNN blend |
+| **Novelty** | Multi-level **SupCon** on neural + spectral projections (DeTeCtive / SupCon line); same **HierTree** as Exp18; test-time **kNN** over embedding bank (`rag_k=32`, `rag_alpha=0.25`) |
+| **Loss** | `L_task + 0.3 L_neural + 0.3 L_spectral + λ_hier L_hier + λ_supcon (SupCon_n+SupCon_s)/2` |
+| **Cross-bench** | Run with `Exp_DM/exp27_detective_code.py` (AICD T1/T2/T3 + Droid T3/T4) for 3-way benchmark alignment |
+| **Status** | Pending GPU run — add results to leaderboard when available |
+
+### Exp28–Exp30 — New batch (implemented 2026-04-02)
+
+| Exp | File | Method | Key idea | Status |
+|:----|:-----|:-------|:---------|:-------|
+| **Exp28** | `Exp_CodeDet/run_codet_m4_exp28_hardneg.py` | **HardNegCode** | Stronger SupCon (`lambda_supcon=0.20`, `tau=0.05`, larger contrast head), **no kNN** to isolate representation gains | Pending run |
+| **Exp29** | `Exp_CodeDet/run_codet_m4_exp29_retrievalcalib.py` | **RetrievalCalibCode** | Lighter SupCon + stronger test-time kNN calibration (`k=48`, `alpha=0.35`, larger bank) | Pending run |
+| **Exp30** | `Exp_CodeDet/run_codet_m4_exp30_hierfocus.py` | **HierFocusCode** | Stronger HierTree pressure (`lambda_hier=0.55`, `margin=0.40`) + balanced SupCon + standard kNN | Pending run |
+
+> DM counterparts for same method family: `Exp_DM/exp28_hardneg_code.py`, `Exp_DM/exp29_retrievalcalib_code.py`, `Exp_DM/exp30_hierfocus_code.py`.

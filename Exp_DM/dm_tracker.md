@@ -34,6 +34,22 @@ All methods build on `exp00_codeorigin.py` (CodeOrigin baseline) with novel comp
 | exp12 | **WatermarkStat** | Watermark-detection-inspired: green-list proxy, n-gram entropy, Zipf deviation, chi-sq | `L_focal (gated) + 0.3·L_neural + 0.3·L_wmark` | S (Cross-domain transfer) | Pending |
 | exp13 | **SlotCode** | Slot Attention decomposes code into K structural slots. Slot consistency = detection signal | `L_task + 0.3·L_agg + 0.2·L_consist` | S (Object-centric) | Done (suite 5 runs) |
 | exp18 | **HierTreeCode** | Hierarchical affinity constraint on latent groups (task-dependent; inactive on binary) with spectral-neural backbone | `L_task + 0.3·L_neural + 0.3·L_spectral (+ L_hier)` | S (Cross-domain stress-test) | Done (suite 5 runs) |
+| exp19 | **KANCode** | KAN (B-spline learnable activations) replaces MLP heads. Captures nonlinear boundaries between human/AI code | `L_focal + 0.3·L_neural_kan + 0.3·L_spectral_kan` | S+ (ICLR 2025 Oral arch) | Pending |
+| exp20 | **HyperCode** | Poincaré ball embeddings for hierarchy-aware classification. Centering loss organizes Human→AI family tree | `L_focal + 0.3·L_hyper_dist + 0.2·L_centering + 0.3·L_spectral` | S (NeurIPS 2024 geometry) | Pending |
+| exp21 | **IBCode** | Variational Information Bottleneck compresses away domain shortcuts. Anti-OOD collapse | `L_focal + β·L_ib_kl + 0.3·L_neural + 0.3·L_spectral` | A+ (Anti-shortcut) | Pending |
+| exp22 | **TTLCode** | Test-Time LoRA: adapts backbone at test time via MLM on unlabeled batches. OOD fix | `L_focal + 0.3·L_neural + 0.3·L_spectral (+ L_mlm@test)` | A+ (ICML 2025 OOD) | Pending |
+| exp23 | **TopoCode** | Topological persistence (Betti numbers, H0/H1) from AST filtration graphs | `L_focal + 0.3·L_neural + 0.3·L_topo` | S (NeurIPS 2025 TDA) | Pending |
+| exp24 | **MambaCode** | Selective SSM (Mamba) + MoE routing replaces cross-attention fusion. O(n) complexity | `L_focal + λ_balance·L_load + 0.2·L_ssm_aux + 0.3·L_spectral` | S+ (ICLR 2025 SSM) | Pending |
+| exp25 | **EnergyCode** | Energy-based OOD detection. Energy margin training with pseudo-OOD noise injection | `L_focal + λ_energy·L_energy_margin + 0.3·L_neural + 0.3·L_spectral` | A+ (ICLR 2020/2025 OOD) | Pending |
+| exp26 | **WaveCLCode** | Discrete Wavelet Transform (Haar) + class-aware frequency band selection | `L_focal + 0.3·L_neural + 0.3·L_wavelet` | S (NeurIPS 2024 freq) | Pending |
+| exp27 | **DeTeCtiveCode** | Exp18 backbone + **multi-level SupCon** (neural + spectral heads) + optional **kNN blend** at test (same recipe as CoDET `run_codet_m4_exp27_detective.py`) | `L_task + 0.3L_n + 0.3L_s + λ_hier L_hier + λ_sup SupCon` | S (3-bench unified method) | Pending run |
+| exp28 | **HardNegCode** | Exp27 variant: stronger supervised contrastive pressure and larger contrast head, no retrieval blend | `L_task + 0.3L_n + 0.3L_s + λ_hier L_hier + 0.20·SupCon` | S (representation-focused) | Pending run |
+| exp29 | **RetrievalCalibCode** | Exp27 variant: lighter SupCon + stronger kNN blending (`k=48`, `alpha=0.35`, larger bank) | `L_task + 0.3L_n + 0.3L_s + λ_hier L_hier + 0.08·SupCon + kNN blend` | S (retrieval-calibration) | Pending run |
+| exp30 | **HierFocusCode** | Exp27 variant: stronger family-tree constraints (`lambda_hier=0.55`, `margin=0.40`) | `L_task + 0.3L_n + 0.3L_s + 0.55·L_hier + λ_sup SupCon` | S (hierarchy-focused) | Pending run |
+
+**3-bench unified protocol (CoDET-M4 + AICD + Droid):** train `run_codet_m4_exp27_detective.py` (IID binary + author; optional full suite) and `exp27_detective_code.py` with `RUN_MODE=full` so one method family is evaluated on all three benchmarks.
+
+**Additional 3-bench variants ready:** `run_codet_m4_exp28_hardneg.py` + `exp28_hardneg_code.py`, `run_codet_m4_exp29_retrievalcalib.py` + `exp29_retrievalcalib_code.py`, `run_codet_m4_exp30_hierfocus.py` + `exp30_hierfocus_code.py`.
 
 ---
 
