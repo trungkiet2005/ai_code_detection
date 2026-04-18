@@ -204,7 +204,7 @@ def load_codet_m4_loo(cfg: CoDETM4Config, hold_out_field: str, hold_out_value: s
     test_ood = test_raw.filter(_matches)
     if len(train_in) == 0 or len(val_in) == 0 or len(test_ood) == 0:
         raise RuntimeError(
-            f"LOO split empty: hold_out={hold_out_field}={hold_out_value} | "
+            f"LOO split empty (raw filter): hold_out={hold_out_field}={hold_out_value} | "
             f"train_in={len(train_in)} val_in={len(val_in)} test_ood={len(test_ood)}"
         )
     author_vocab = _build_author_vocab(train_in) if cfg.task == "author" else {}
@@ -214,10 +214,22 @@ def load_codet_m4_loo(cfg: CoDETM4Config, hold_out_field: str, hold_out_value: s
     train_data = _sample_dataset(train_data, cfg.max_train_samples, cfg.seed)
     val_data = _sample_dataset(val_data, cfg.max_val_samples, cfg.seed + 1)
     # Test NOT subsampled (LOO already small relative to full test)
+
+    # Defence-in-depth: if _convert_split dropped everything (e.g. task=author
+    # with a held-out generator that isn't in author_vocab), fail loudly rather
+    # than silently training on empty test.
+    if len(test_data) == 0:
+        raise RuntimeError(
+            f"LOO test_data empty AFTER _convert_split: hold_out={hold_out_field}={hold_out_value} | "
+            f"task={cfg.task} | raw test_ood={len(test_ood)}. "
+            f"Likely cause: task={cfg.task!r} built an author_vocab that excludes the held-out "
+            f"generator, mapping all held-out test rows to label=-1. For OOD LOO use task='binary'."
+        )
     num_classes = len(set(train_data["label"]))
     logger.info(
-        "LOO[%s!=%s] | train=%d val=%d test_ood=%d | classes=%d",
-        hold_out_field, hold_out_value, len(train_data), len(val_data), len(test_data), num_classes,
+        "LOO[%s!=%s] | task=%s | train=%d val=%d test_ood=%d | classes=%d",
+        hold_out_field, hold_out_value, cfg.task,
+        len(train_data), len(val_data), len(test_data), num_classes,
     )
     return train_data, val_data, test_data, num_classes
 
@@ -365,7 +377,10 @@ def run_iid(
 ) -> Dict[str, Any]:
     if codet_cfg is None:
         codet_cfg = CoDETM4Config()
-    codet_cfg.task = task
+    # Use a local copy so we don't mutate the caller's config (bug source:
+    # OOD runners inherit task="author" if IID runs before them).
+    import dataclasses
+    codet_cfg = dataclasses.replace(codet_cfg, task=task)
 
     exp_cfg = build_codet_config(f"iid_{task}", codet_cfg.save_root)
     exp_cfg.task = task
@@ -410,9 +425,17 @@ def _run_single_loo(
     loss_fn: Optional[Any] = None,
     checkpoint_tag_prefix: str = "model",
 ) -> Dict[str, Any]:
-    train_data, val_data, test_data, num_classes = load_codet_m4_loo(codet_cfg, hold_out_field, hold_out_value)
-    exp_cfg = build_codet_config(f"ood_{hold_out_field}_{hold_out_value}", codet_cfg.save_root)
-    exp_cfg.task = codet_cfg.task
+    # Paper protocol for CoDET-M4 OOD LOO is BINARY detection (Tables 8/9/10).
+    # If the caller's cfg has task="author" (e.g. after an IID author run),
+    # the held-out generator won't appear in author_vocab -> every test row
+    # maps to label=-1 and gets filtered out -> test_ood=0 bug.
+    # Force a local binary cfg here.
+    import dataclasses
+    loo_cfg = dataclasses.replace(codet_cfg, task="binary")
+
+    train_data, val_data, test_data, num_classes = load_codet_m4_loo(loo_cfg, hold_out_field, hold_out_value)
+    exp_cfg = build_codet_config(f"ood_{hold_out_field}_{hold_out_value}", loo_cfg.save_root)
+    exp_cfg.task = "binary"
     tokenizer = AutoTokenizer.from_pretrained(exp_cfg.encoder_name)
     train_loader, val_loader, test_loader = make_loaders(train_data, val_data, test_data, tokenizer, exp_cfg)
     class_weights = compute_class_weights(train_data["label"], num_classes)
@@ -424,7 +447,7 @@ def _run_single_loo(
     )
     result = trainer.train()
     preds, labels = collect_predictions(model, test_loader, exp_cfg.device)
-    result["breakdown"] = run_breakdown_eval(preds, labels, test_data, codet_cfg.task)
+    result["breakdown"] = run_breakdown_eval(preds, labels, test_data, "binary")
     result["hold_out_field"] = hold_out_field
     result["hold_out_value"] = hold_out_value
 
