@@ -16,6 +16,10 @@ import warnings
 from dataclasses import dataclass, field
 from typing import Dict
 
+# Reduce CUDA memory fragmentation (critical for large-batch / long-seq runs).
+# Must be set BEFORE torch imports.
+os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
+
 # ---------------------------------------------------------------------------
 # Bootstrap – auto-install missing packages (Kaggle-friendly)
 # ---------------------------------------------------------------------------
@@ -189,14 +193,17 @@ def apply_hardware_profile(config: SpectralConfig) -> SpectralConfig:
     if "H100" not in gpu_name:
         return config
 
-    # H100 80GB profile: aggressively utilize VRAM since batch 64 / seq 512
-    # only used ~18 GB out of 80. New profile targets ~45-55 GB utilization:
-    #   - batch 128 (2x): directly doubles VRAM activations
-    #   - seq 1024 (2x):  captures long code samples (ModernBERT native 8192)
-    #   - LR scaled sqrt(2) = ~1.4x to match larger batch
+    # H100 80GB profile: target ~40 GB utilization. Empirically safe under
+    # ModernBERT-base + bidirectional attention + RoPE buffers:
+    #   - batch 128 (2x vs old 64): ~40 GB forward + backward fits
+    #   - seq 512 (same as paper baseline): keeps direct comparability
+    #   - seq 1024 OOMs at batch 128 -- attention + RoPE blow 80 GB
+    #   - LR scaled sqrt(2) = 1.4x to match 2x batch
+    # If user wants seq 1024, they must drop batch to 64 (set explicitly).
     config.precision = "bf16" if config.precision == "auto" else config.precision
     config.batch_size = max(config.batch_size, 128)
-    config.max_length = max(config.max_length, 1024)
+    # Note: max_length is NOT auto-bumped. Keeping 512 as safe default under
+    # batch 128. Override manually in your Config if you want seq 1024+batch 64.
     config.grad_accum_steps = 1
     config.num_workers = max(config.num_workers, 8)
     config.prefetch_factor = max(config.prefetch_factor, 4)

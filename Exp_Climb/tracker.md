@@ -35,8 +35,8 @@ Triggers when `torch.cuda.get_device_name()` contains "H100":
 | Setting | H100 value | Base default | Why |
 |---|---|---|---|
 | `precision` | `bf16` | `auto` | Hopper native bf16, no loss scaling needed |
-| `batch_size` | **`128`** | 32 | 2× activations → actually utilize 80 GB VRAM |
-| `max_length` | **`1024`** | 512 | Capture long code (ModernBERT native 8192) |
+| `batch_size` | **`128`** | 32 | 2× activations → utilize 80 GB VRAM (~40 GB used) |
+| `max_length` | **`512`** | 512 | Kept at paper-baseline for direct comparability. *Seq 1024 OOMs at batch 128 in bf16 — attention + RoPE buffers blow past 80 GB. Use seq 1024 only with batch 64.* |
 | `lr_encoder` | **`2.8e-5`** | 2e-5 | sqrt(2) LR scaling for 2× batch |
 | `lr_heads` | **`1.4e-4`** | 1e-4 | same |
 | `grad_accum_steps` | `1` | 2 | Batch 128 fits directly |
@@ -44,26 +44,28 @@ Triggers when `torch.cuda.get_device_name()` contains "H100":
 | `prefetch_factor` | `4` | 2 | Keep dataloader hot |
 | `log_every` | `200` | 100 | Less log spam at high throughput |
 | `eval_every` | `2000` | 1000 | Eval less often (H100 goes fast) |
+| `PYTORCH_CUDA_ALLOC_CONF` | `expandable_segments:True` | — | Auto-set in `_common.py`; reduces fragmentation for long-lived runs |
 
-**VRAM budget (80 GB):**
+**VRAM budget (80 GB) — empirically measured, batch 128 × seq 512:**
 
 | Component | Size (bf16) |
 |:----------|:-----------:|
-| ModernBERT-base params | ~0.3 GB |
-| Gradients | ~0.3 GB |
-| AdamW optimizer state (fp32) | ~1.2 GB |
-| Activations (batch 128 × seq 1024 × 768 hidden × 22 layers) | **~40-45 GB** |
-| PyTorch/CUDA overhead | ~2 GB |
-| **Total used** | **~45-50 GB (60%)** |
-| Headroom | ~30 GB |
+| ModernBERT-base params + grads + Adam state | ~5 GB |
+| Activations (forward, batch 128 × seq 512 × 768 × 22 layers) | **~20 GB** |
+| Backward-pass activations + RoPE buffers | ~15 GB |
+| PyTorch/CUDA overhead + fragmentation | ~5 GB |
+| **Total used** | **~40-45 GB (50-55%)** |
+| Headroom | ~35-40 GB |
 
-Previously batch 64 × seq 512 used only ~18 GB (22%) — wasteful on 80 GB H100.
-The new profile targets proper utilization without overrunning runtime.
+Previously batch 64 × seq 512 used only ~18 GB (22%) — wasteful.
+**Attempted:** batch 128 × seq 1024 (~79 GB forward alone → OOM on backward). Dropped to seq 512 for safety.
 
 **Why not batch 192+ or ModernBERT-large?**
-- Batch 192-256 would use ~60-70 GB but hurts generalization at low data (100K train)
-- ModernBERT-large (~395M) + seq 1024 would need ~70 GB + **2-3× runtime** → risks 12h Kaggle timeout
-- Current profile is the Pareto optimum for H100 80GB + 12h budget
+- Batch 192: ~60 GB forward + ~30 GB backward = 90 GB total → OOM
+- Batch 256: same issue, worse
+- ModernBERT-large (~395M) + batch 128: ~70 GB forward → OOM on backward, plus 2× runtime risks 12h timeout
+- If user wants **seq 1024**: must explicitly drop batch to 64 (override `CoDETM4Config(max_train_samples=...)` isn't enough — need to set `SpectralConfig.max_length=1024` + `batch_size=64` manually)
+- **Current config (batch 128 × seq 512) is the Pareto optimum for H100 80GB + 12h Kaggle limit.**
 
 ### Disk budget (`/kaggle/working` = 20 GB quota)
 
@@ -81,25 +83,25 @@ The new profile targets proper utilization without overrunning runtime.
 | Persistence | Disable (each run is fresh; we re-clone repo) |
 | Secrets | `HF_TOKEN` optional (public datasets work without, just rate-limit warnings in log) |
 
-### Kaggle runtime estimates (per climb file, batch 128 × seq 1024)
+### Kaggle runtime estimates (per climb file, batch 128 × seq 512)
 
-Based on measured Exp18 runs (~5-10 min/run at batch 64 × seq 512). New profile
-has **4× more FLOPs per batch** (2× batch × 2× seq) but **~2× throughput**
-(twice the tokens per GPU cycle), so net ~2× slower per epoch.
+Based on measured Exp18 runs (~5-10 min/run at batch 64 × seq 512). Batch 128
+processes ~2× tokens per step with minimal kernel overhead, so steps/epoch
+halve → net ~10% faster per epoch.
 
 | Phase | Runs | ~Time/run | Total |
 |---|---:|---:|---:|
-| CoDET-M4 IID binary | 1 | ~15 min | 15 min |
-| CoDET-M4 IID author | 1 | ~15 min | 15 min |
-| CoDET-M4 OOD Generator LOO | 5 | ~13 min | 1h 05 min |
-| CoDET-M4 OOD Language LOO | 3 | ~13 min | 39 min |
-| CoDET-M4 OOD Source LOO | 3 | ~13 min | 39 min |
-| Droid T1 | 1 | ~15 min | 15 min |
-| Droid T3 | 1 | ~15 min | 15 min |
-| Droid T4 | 1 | ~15 min | 15 min |
-| **Total** | **16** | — | **~3 h 38 min** |
+| CoDET-M4 IID binary | 1 | ~7 min | 7 min |
+| CoDET-M4 IID author | 1 | ~7 min | 7 min |
+| CoDET-M4 OOD Generator LOO | 5 | ~6 min | 30 min |
+| CoDET-M4 OOD Language LOO | 3 | ~6 min | 18 min |
+| CoDET-M4 OOD Source LOO | 3 | ~6 min | 18 min |
+| Droid T1 | 1 | ~7 min | 7 min |
+| Droid T3 | 1 | ~7 min | 7 min |
+| Droid T4 | 1 | ~7 min | 7 min |
+| **Total** | **16** | — | **~1 h 41 min** |
 
-Kaggle H100 kernel limit: 12h → huge buffer. P100/T4 fallback: ~3-4× longer (~12-14h) → may time out; set smaller config manually on those GPUs.
+Kaggle H100 kernel limit: 12h → **massive buffer** (~7× runtime). P100/T4 fallback: ~3-4× longer (~6-8h) — drop batch to 64 manually on those GPUs.
 
 ### If H100 unavailable
 
