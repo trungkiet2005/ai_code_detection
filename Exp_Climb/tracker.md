@@ -26,6 +26,74 @@ Exp_Climb/
 
 ---
 
+## 🖥️ Kaggle / H100 80GB setup
+
+### Auto-applied H100 profile (`_common.apply_hardware_profile`)
+
+Triggers when `torch.cuda.get_device_name()` contains "H100":
+
+| Setting | Value (H100) | Default | Why |
+|---|---|---|---|
+| `precision` | `bf16` | `auto` | Hopper native bf16, no scaling needed |
+| `batch_size` | `64` | 32 | Matches proven Exp18 setup (70.55 F1) |
+| `grad_accum_steps` | `1` | 2 | Batch 64 fits directly |
+| `num_workers` | `8` | 2 | H100 Kaggle has 8 vCPU |
+| `prefetch_factor` | `4` | 2 | Keep dataloader hot |
+| `log_every` | `200` | 100 | Less log spam at high throughput |
+| `eval_every` | `2000` | 1000 | Eval less often (H100 goes fast) |
+
+**VRAM budget (80 GB):** ModernBERT-base (~150M, bf16) + AdamW state + activations at batch 64 × 512 seq ≈ **~18 GB used, ~62 GB headroom**. Batch 64 is held constant to match the paper-table baseline; you *can* push to 96-128 for faster throughput but that may perturb convergence.
+
+### Disk budget (`/kaggle/working` = 20 GB quota)
+
+- 16 runs × `best` ckpt × ~600 MB ≈ **9.6 GB** → fits (with `save_latest_ckpt=False`, default)
+- If you enable `save_latest_ckpt=True`, budget doubles to ~19 GB → tight
+- If you run multiple climb files back-to-back in one session, **delete** `./codet_m4_checkpoints` + `./droid_checkpoints` between runs
+
+### Kaggle notebook config (recommended settings)
+
+| Kaggle setting | Value |
+|---|---|
+| Accelerator | **GPU T4×2** or **GPU P100** during dev — **GPU H100** via "Notebook Run" for final climb |
+| Internet | **ON** (needed to clone GitHub repo + load HF datasets) |
+| Language | Python |
+| Persistence | Disable (each run is fresh; we re-clone repo) |
+| Secrets | `HF_TOKEN` optional (public datasets work without, just rate-limit warnings in log) |
+
+### Kaggle runtime estimates (per climb file)
+
+| Phase | Runs | ~Time/run | Total |
+|---|---:|---:|---:|
+| CoDET-M4 IID binary | 1 | 25 min | 25 min |
+| CoDET-M4 IID author | 1 | 25 min | 25 min |
+| CoDET-M4 OOD Generator LOO | 5 | 22 min | 1h 50 min |
+| CoDET-M4 OOD Language LOO | 3 | 22 min | 1h 06 min |
+| CoDET-M4 OOD Source LOO | 3 | 22 min | 1h 06 min |
+| Droid T1 | 1 | 25 min | 25 min |
+| Droid T3 | 1 | 25 min | 25 min |
+| Droid T4 | 1 | 25 min | 25 min |
+| **Total** | **16** | — | **~6 h 27 min** |
+
+Kaggle H100 kernel limit is 12h → fits comfortably. P100/T4 would need 2-3× longer → may time out.
+
+### If H100 unavailable
+
+Fallback hierarchy for config auto-detect:
+1. **H100** → profile applied (bf16, batch 64)
+2. **A100 80GB** → same profile works (bf16)
+3. **A100 40GB / V100 / T4** → drop to `precision="fp16"`, `batch_size=32`, `grad_accum_steps=2`
+
+The auto-detect only triggers on H100 by name match. For other GPUs, set explicitly:
+
+```python
+codet_cfg = CoDETM4Config(...)
+# Override config defaults if non-H100
+from _common import SpectralConfig
+# (Trainer picks these up through build_codet_config / build_droid_config)
+```
+
+---
+
 ## Kaggle workflow (per exp file)
 
 Each `exp_NN_*.py` is **fully standalone** — upload it alone to Kaggle, it auto-clones the repo and imports the shared `_*.py` helpers:

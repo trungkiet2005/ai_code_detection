@@ -165,6 +165,10 @@ class SpectralConfig:
     save_dir: str = "./codet_m4_checkpoints"
     log_every: int = 100
     eval_every: int = 1000
+    # Kaggle has ~20 GB /kaggle/working quota. Saving a "latest" checkpoint
+    # every epoch (in addition to "best") can bust the quota across 16 climb
+    # runs (16 * 2 * 600MB ≈ 19 GB). Default False = save only "best".
+    save_latest_ckpt: bool = False
 
 
 def apply_hardware_profile(config: SpectralConfig) -> SpectralConfig:

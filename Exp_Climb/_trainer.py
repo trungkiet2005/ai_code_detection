@@ -268,7 +268,9 @@ class Trainer:
                 self.best_f1 = val_f1
                 self.save_checkpoint("best")
                 logger.info(f"*** New Best Val Macro-F1: {val_f1:.4f} ***")
-            self.save_checkpoint("latest")
+            # Kaggle disk-quota friendly: skip "latest" unless user opts in
+            if getattr(self.config, "save_latest_ckpt", False):
+                self.save_checkpoint("latest")
 
         logger.info("\n" + "=" * 60)
         logger.info("FINAL TEST EVALUATION")
