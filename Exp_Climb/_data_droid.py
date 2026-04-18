@@ -1,0 +1,232 @@
+"""
+DroidCollection data loading + T1/T3/T4 suite.
+
+Covers DroidCollection evaluation protocols (Orel et al. EMNLP 2025):
+  - T1 (binary, 2-class): human vs AI (all non-human merged)
+  - T3 (multi-class, 3-class): human / machine_generated / machine_refined
+        (paper's main table -- Table 3/4 weighted-F1)
+  - T4 (4-class, adversarial-aware): human / generated / refined / adversarial
+
+CLIMB protocol: 100K train subsample, FULL test (paper-comparable).
+"""
+from __future__ import annotations
+
+import random
+from dataclasses import dataclass, field
+from typing import Any, Dict, List, Optional
+
+import torch
+from datasets import Dataset, load_dataset
+from transformers import AutoTokenizer
+
+from _common import SpectralConfig, apply_hardware_profile, logger, set_seed
+from _model import SpectralCode
+from _trainer import Trainer, compute_class_weights
+
+
+# ===========================================================================
+# Config
+# ===========================================================================
+
+@dataclass
+class DroidConfig:
+    dataset_id: str = "project-droid/DroidCollection"
+    config_name: str = "default"
+    split_map: Dict[str, str] = field(default_factory=lambda: {
+        "train": "train",
+        "validation": "dev",
+        "test": "test",
+    })
+    # CLIMB: small train, FULL test
+    max_train_samples: int = 100_000
+    max_val_samples: int = 20_000
+    max_test_samples: int = -1
+
+    seed: int = 42
+    save_root: str = "./droid_checkpoints"
+
+
+# ===========================================================================
+# Label mapping
+# ===========================================================================
+
+def _map_droid_label_to_task(row: Dict[str, object], task: str) -> int:
+    """Droid Labels: HUMAN_GENERATED, MACHINE_GENERATED, MACHINE_REFINED,
+    MACHINE_GENERATED_ADVERSARIAL."""
+    normalized = str(row.get("Label", "")).upper()
+
+    if task == "T1":
+        return 0 if normalized == "HUMAN_GENERATED" else 1
+
+    if task == "T3":
+        if normalized == "HUMAN_GENERATED":
+            return 0
+        if normalized in ("MACHINE_GENERATED", "MACHINE_GENERATED_ADVERSARIAL"):
+            return 1
+        if normalized == "MACHINE_REFINED":
+            return 2
+        return -1
+
+    if task == "T4":
+        mapping = {
+            "HUMAN_GENERATED": 0,
+            "MACHINE_GENERATED": 1,
+            "MACHINE_REFINED": 2,
+            "MACHINE_GENERATED_ADVERSARIAL": 3,
+        }
+        return mapping.get(normalized, -1)
+
+    return -1
+
+
+def _sample_dataset(dataset: Dataset, max_samples: int, seed: int) -> Dataset:
+    if max_samples <= 0 or len(dataset) <= max_samples:
+        return dataset
+    rng = random.Random(seed)
+    indices = rng.sample(range(len(dataset)), max_samples)
+    return dataset.select(indices)
+
+
+def load_droid_data(cfg: DroidConfig, task: str):
+    """Load Droid splits and convert to {code, label}."""
+    def _convert_split(split_name: str, max_samples: int) -> Dataset:
+        source_split = cfg.split_map[split_name]
+        logger.info(f"Loading Droid split '{source_split}' for {split_name}...")
+        ds = load_dataset(cfg.dataset_id, name=cfg.config_name, split=source_split)
+        ds = _sample_dataset(ds, max_samples, cfg.seed)
+
+        def _convert_row(row):
+            return {
+                "code": row.get("Code", "") or "",
+                "label": _map_droid_label_to_task(row, task),
+            }
+
+        converted = ds.map(_convert_row, remove_columns=ds.column_names)
+        return converted.filter(lambda x: x["label"] >= 0 and len(x["code"].strip()) > 0)
+
+    train_data = _convert_split("train", cfg.max_train_samples)
+    val_data = _convert_split("validation", cfg.max_val_samples)
+    test_data = _convert_split("test", cfg.max_test_samples)
+    num_classes = len(set(train_data["label"]))
+    logger.info(
+        f"Droid sizes - Train: {len(train_data)}, Val: {len(val_data)}, Test: {len(test_data)}"
+    )
+    logger.info(f"Droid {task} classes: {num_classes}, Labels: {sorted(set(train_data['label']))}")
+    return train_data, val_data, test_data, num_classes
+
+
+# ===========================================================================
+# Loader factory (thin wrapper to avoid importing from _data_codet)
+# ===========================================================================
+
+def _make_droid_loaders(train_data, val_data, test_data, tokenizer, exp_cfg: SpectralConfig):
+    from torch.utils.data import DataLoader
+    from _model import AICDDataset
+
+    train_ds = AICDDataset(train_data, tokenizer, exp_cfg.max_length, exp_cfg.ast_seq_len)
+    val_ds = AICDDataset(val_data, tokenizer, exp_cfg.max_length, exp_cfg.ast_seq_len)
+    test_ds = AICDDataset(test_data, tokenizer, exp_cfg.max_length, exp_cfg.ast_seq_len)
+    loader_kwargs = dict(
+        batch_size=exp_cfg.batch_size,
+        num_workers=exp_cfg.num_workers,
+        pin_memory=exp_cfg.pin_memory,
+        persistent_workers=exp_cfg.num_workers > 0,
+        prefetch_factor=exp_cfg.prefetch_factor if exp_cfg.num_workers > 0 else None,
+    )
+    return (
+        DataLoader(train_ds, shuffle=True, **loader_kwargs),
+        DataLoader(val_ds, shuffle=False, **loader_kwargs),
+        DataLoader(test_ds, shuffle=False, **loader_kwargs),
+    )
+
+
+def build_droid_config(task_tag: str, save_root: str) -> SpectralConfig:
+    cfg = SpectralConfig(
+        task=task_tag,
+        benchmark="droid",
+        save_dir=f"{save_root}/droid_{task_tag}",
+        precision="auto",
+        auto_h100_profile=True,
+        num_workers=4,
+        prefetch_factor=2,
+    )
+    return apply_hardware_profile(cfg)
+
+
+# ===========================================================================
+# Runners
+# ===========================================================================
+
+def run_droid_iid(
+    task: str,
+    droid_cfg: Optional[DroidConfig] = None,
+    loss_fn: Optional[Any] = None,
+    checkpoint_tag_prefix: str = "model",
+) -> Dict[str, Any]:
+    """Train + eval on one Droid task (T1/T3/T4) with FULL test set."""
+    if droid_cfg is None:
+        droid_cfg = DroidConfig()
+
+    logger.info("\n" + "=" * 70)
+    logger.info(f"[Droid] Running IID task={task}")
+    logger.info("=" * 70)
+
+    set_seed(droid_cfg.seed)
+    train_data, val_data, test_data, num_classes = load_droid_data(droid_cfg, task)
+    exp_cfg = build_droid_config(task, droid_cfg.save_root)
+    exp_cfg.task = task
+    tokenizer = AutoTokenizer.from_pretrained(exp_cfg.encoder_name)
+    train_loader, val_loader, test_loader = _make_droid_loaders(train_data, val_data, test_data, tokenizer, exp_cfg)
+
+    class_weights = compute_class_weights(train_data["label"], num_classes)
+    model = SpectralCode(exp_cfg, num_classes=num_classes)
+    trainer = Trainer(
+        exp_cfg, model, train_loader, val_loader, test_loader,
+        class_weights=class_weights, loss_fn=loss_fn,
+        checkpoint_tag_prefix=checkpoint_tag_prefix,
+    )
+    result = trainer.train()
+    result["task"] = task
+    result["num_classes"] = int(num_classes)
+    result["paper_primary_metric"] = "weighted_f1"  # Droid primary = Weighted-F1
+
+    del model, trainer, train_loader, val_loader, test_loader
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+    return result
+
+
+def run_droid_suite(
+    droid_cfg: Optional[DroidConfig] = None,
+    tasks: Optional[List[str]] = None,
+    loss_fn: Optional[Any] = None,
+    checkpoint_tag_prefix: str = "model",
+) -> Dict[str, Any]:
+    """Run T1 + T3 + T4 sequentially. Returns dict keyed by 'droid_<task>'."""
+    if droid_cfg is None:
+        droid_cfg = DroidConfig()
+    if tasks is None:
+        tasks = ["T1", "T3", "T4"]
+
+    results: Dict[str, Any] = {}
+    for task in tasks:
+        key = f"droid_{task}"
+        logger.info(f"\n{'#'*70}\nSUITE: {key}\n{'#'*70}")
+        try:
+            results[key] = run_droid_iid(task, droid_cfg, loss_fn=loss_fn, checkpoint_tag_prefix=checkpoint_tag_prefix)
+        except Exception as e:
+            logger.error(f"Droid {task} failed: {e}")
+            results[key] = {"error": str(e)}
+
+    logger.info(f"\n{'='*70}\nDROID SUITE SUMMARY\n{'='*70}")
+    logger.info("| Task | Macro-F1 | Weighted-F1 | Best Val |")
+    logger.info("|---|---:|---:|---:|")
+    for key, stats in results.items():
+        if "error" in stats:
+            logger.info(f"| {key} | ERROR | - | - |")
+            continue
+        logger.info(
+            f"| {key} | {stats.get('test_macro_f1', stats.get('test_f1', 0)):.4f} | "
+            f"{stats.get('test_weighted_f1', 0):.4f} | {stats.get('best_val_f1', 0):.4f} |"
+        )
+    return results
