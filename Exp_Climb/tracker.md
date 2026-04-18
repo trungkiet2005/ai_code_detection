@@ -32,17 +32,38 @@ Exp_Climb/
 
 Triggers when `torch.cuda.get_device_name()` contains "H100":
 
-| Setting | Value (H100) | Default | Why |
+| Setting | H100 value | Base default | Why |
 |---|---|---|---|
-| `precision` | `bf16` | `auto` | Hopper native bf16, no scaling needed |
-| `batch_size` | `64` | 32 | Matches proven Exp18 setup (70.55 F1) |
-| `grad_accum_steps` | `1` | 2 | Batch 64 fits directly |
-| `num_workers` | `8` | 2 | H100 Kaggle has 8 vCPU |
+| `precision` | `bf16` | `auto` | Hopper native bf16, no loss scaling needed |
+| `batch_size` | **`128`** | 32 | 2× activations → actually utilize 80 GB VRAM |
+| `max_length` | **`1024`** | 512 | Capture long code (ModernBERT native 8192) |
+| `lr_encoder` | **`2.8e-5`** | 2e-5 | sqrt(2) LR scaling for 2× batch |
+| `lr_heads` | **`1.4e-4`** | 1e-4 | same |
+| `grad_accum_steps` | `1` | 2 | Batch 128 fits directly |
+| `num_workers` | `8` | 2 | Kaggle H100 kernel has 8 vCPU |
 | `prefetch_factor` | `4` | 2 | Keep dataloader hot |
 | `log_every` | `200` | 100 | Less log spam at high throughput |
 | `eval_every` | `2000` | 1000 | Eval less often (H100 goes fast) |
 
-**VRAM budget (80 GB):** ModernBERT-base (~150M, bf16) + AdamW state + activations at batch 64 × 512 seq ≈ **~18 GB used, ~62 GB headroom**. Batch 64 is held constant to match the paper-table baseline; you *can* push to 96-128 for faster throughput but that may perturb convergence.
+**VRAM budget (80 GB):**
+
+| Component | Size (bf16) |
+|:----------|:-----------:|
+| ModernBERT-base params | ~0.3 GB |
+| Gradients | ~0.3 GB |
+| AdamW optimizer state (fp32) | ~1.2 GB |
+| Activations (batch 128 × seq 1024 × 768 hidden × 22 layers) | **~40-45 GB** |
+| PyTorch/CUDA overhead | ~2 GB |
+| **Total used** | **~45-50 GB (60%)** |
+| Headroom | ~30 GB |
+
+Previously batch 64 × seq 512 used only ~18 GB (22%) — wasteful on 80 GB H100.
+The new profile targets proper utilization without overrunning runtime.
+
+**Why not batch 192+ or ModernBERT-large?**
+- Batch 192-256 would use ~60-70 GB but hurts generalization at low data (100K train)
+- ModernBERT-large (~395M) + seq 1024 would need ~70 GB + **2-3× runtime** → risks 12h Kaggle timeout
+- Current profile is the Pareto optimum for H100 80GB + 12h budget
 
 ### Disk budget (`/kaggle/working` = 20 GB quota)
 
@@ -60,21 +81,25 @@ Triggers when `torch.cuda.get_device_name()` contains "H100":
 | Persistence | Disable (each run is fresh; we re-clone repo) |
 | Secrets | `HF_TOKEN` optional (public datasets work without, just rate-limit warnings in log) |
 
-### Kaggle runtime estimates (per climb file)
+### Kaggle runtime estimates (per climb file, batch 128 × seq 1024)
+
+Based on measured Exp18 runs (~5-10 min/run at batch 64 × seq 512). New profile
+has **4× more FLOPs per batch** (2× batch × 2× seq) but **~2× throughput**
+(twice the tokens per GPU cycle), so net ~2× slower per epoch.
 
 | Phase | Runs | ~Time/run | Total |
 |---|---:|---:|---:|
-| CoDET-M4 IID binary | 1 | 25 min | 25 min |
-| CoDET-M4 IID author | 1 | 25 min | 25 min |
-| CoDET-M4 OOD Generator LOO | 5 | 22 min | 1h 50 min |
-| CoDET-M4 OOD Language LOO | 3 | 22 min | 1h 06 min |
-| CoDET-M4 OOD Source LOO | 3 | 22 min | 1h 06 min |
-| Droid T1 | 1 | 25 min | 25 min |
-| Droid T3 | 1 | 25 min | 25 min |
-| Droid T4 | 1 | 25 min | 25 min |
-| **Total** | **16** | — | **~6 h 27 min** |
+| CoDET-M4 IID binary | 1 | ~15 min | 15 min |
+| CoDET-M4 IID author | 1 | ~15 min | 15 min |
+| CoDET-M4 OOD Generator LOO | 5 | ~13 min | 1h 05 min |
+| CoDET-M4 OOD Language LOO | 3 | ~13 min | 39 min |
+| CoDET-M4 OOD Source LOO | 3 | ~13 min | 39 min |
+| Droid T1 | 1 | ~15 min | 15 min |
+| Droid T3 | 1 | ~15 min | 15 min |
+| Droid T4 | 1 | ~15 min | 15 min |
+| **Total** | **16** | — | **~3 h 38 min** |
 
-Kaggle H100 kernel limit is 12h → fits comfortably. P100/T4 would need 2-3× longer → may time out.
+Kaggle H100 kernel limit: 12h → huge buffer. P100/T4 fallback: ~3-4× longer (~12-14h) → may time out; set smaller config manually on those GPUs.
 
 ### If H100 unavailable
 

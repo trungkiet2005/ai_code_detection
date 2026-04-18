@@ -189,15 +189,26 @@ def apply_hardware_profile(config: SpectralConfig) -> SpectralConfig:
     if "H100" not in gpu_name:
         return config
 
+    # H100 80GB profile: aggressively utilize VRAM since batch 64 / seq 512
+    # only used ~18 GB out of 80. New profile targets ~45-55 GB utilization:
+    #   - batch 128 (2x): directly doubles VRAM activations
+    #   - seq 1024 (2x):  captures long code samples (ModernBERT native 8192)
+    #   - LR scaled sqrt(2) = ~1.4x to match larger batch
     config.precision = "bf16" if config.precision == "auto" else config.precision
-    config.batch_size = max(config.batch_size, 64)
+    config.batch_size = max(config.batch_size, 128)
+    config.max_length = max(config.max_length, 1024)
     config.grad_accum_steps = 1
     config.num_workers = max(config.num_workers, 8)
     config.prefetch_factor = max(config.prefetch_factor, 4)
     config.log_every = max(config.log_every, 200)
     config.eval_every = max(config.eval_every, 2000)
+    # Scale learning rate for 2x batch (sqrt rule): 2e-5 -> ~2.8e-5
+    config.lr_encoder = max(config.lr_encoder, 2.8e-5)
+    config.lr_heads = max(config.lr_heads, 1.4e-4)
     logger.info(
-        "Applied H100 profile | precision=%s | batch=%d | accum=%d | workers=%d",
-        config.precision, config.batch_size, config.grad_accum_steps, config.num_workers,
+        "Applied H100 80GB profile | precision=%s | batch=%d | seq=%d | "
+        "lr_enc=%.2e | lr_heads=%.2e | workers=%d",
+        config.precision, config.batch_size, config.max_length,
+        config.lr_encoder, config.lr_heads, config.num_workers,
     )
     return config
