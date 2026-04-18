@@ -30,21 +30,45 @@ import sys
 
 REPO_URL = "https://github.com/trungkiet2005/ai_code_detection.git"
 
-_here = os.path.dirname(os.path.abspath(__file__))
-_climb_dir: str
-if os.path.basename(_here) == "Exp_Climb" and os.path.exists(os.path.join(_here, "_common.py")):
-    # Running inside the cloned repo already
-    _climb_dir = _here
-else:
-    # Running standalone (Kaggle upload) -> clone the repo for sibling modules
-    _repo_dir = os.path.join(os.getcwd(), "ai_code_detection")
-    if not os.path.exists(_repo_dir):
-        print(f"[bootstrap] Cloning {REPO_URL} -> {_repo_dir}")
-        subprocess.check_call(["git", "clone", "--depth=1", REPO_URL, _repo_dir])
-    _climb_dir = os.path.join(_repo_dir, "Exp_Climb")
 
+def _bootstrap_climb_path() -> str:
+    """Find or clone the Exp_Climb folder so sibling _*.py modules are importable.
+
+    Works in three contexts:
+      1. Local dev -- file lives inside Exp_Climb/ (uses __file__).
+      2. Kaggle notebook upload -- __file__ undefined; clone repo to cwd.
+      3. Repo already cloned in cwd -- reuse without re-clone.
+    """
+    cwd = os.getcwd()
+
+    # Case A: cwd already contains a sibling Exp_Climb/
+    for candidate in (
+        os.path.join(cwd, "Exp_Climb"),
+        os.path.join(cwd, "ai_code_detection", "Exp_Climb"),
+    ):
+        if os.path.exists(os.path.join(candidate, "_common.py")):
+            return candidate
+
+    # Case B: this script lives inside Exp_Climb/ (only when __file__ exists)
+    try:
+        here = os.path.dirname(os.path.abspath(__file__))  # noqa: F821
+        if os.path.exists(os.path.join(here, "_common.py")):
+            return here
+    except NameError:
+        pass  # running inside a notebook -- __file__ not defined
+
+    # Case C: nothing available -- clone repo
+    repo_dir = os.path.join(cwd, "ai_code_detection")
+    if not os.path.exists(repo_dir):
+        print(f"[bootstrap] Cloning {REPO_URL} -> {repo_dir}")
+        subprocess.check_call(["git", "clone", "--depth=1", REPO_URL, repo_dir])
+    return os.path.join(repo_dir, "Exp_Climb")
+
+
+_climb_dir = _bootstrap_climb_path()
 if _climb_dir not in sys.path:
     sys.path.insert(0, _climb_dir)
+print(f"[bootstrap] Exp_Climb path: {_climb_dir}")
 
 
 # ---------------------------------------------------------------------------
