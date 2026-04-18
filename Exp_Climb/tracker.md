@@ -101,6 +101,19 @@ halve → net ~10% faster per epoch.
 | Droid T4 | 1 | ~7 min | 7 min |
 | **Total** | **16** | — | **~1 h 41 min** |
 
+**Lean mode** (`run_mode="lean"`) — fast screening, 8 runs:
+
+| Phase | Runs | ~Time/run | Total |
+|---|---:|---:|---:|
+| CoDET-M4 IID binary + author | 2 | ~7 min | 14 min |
+| OOD-SRC held-out=gh (hardest) | 1 | ~6 min | 6 min |
+| OOD-LANG held-out=python | 1 | ~6 min | 6 min |
+| OOD-GEN held-out=qwen1.5 | 1 | ~6 min | 6 min |
+| Droid T1 + T3 + T4 | 3 | ~7 min | 21 min |
+| **Total** | **8** | — | **~53 min** |
+
+Use `lean` to screen ideas (3 ideas/session). Switch to `full` only for paper-final winner.
+
 Kaggle H100 kernel limit: 12h → **massive buffer** (~7× runtime). P100/T4 fallback: ~3-4× longer (~6-8h) — drop batch to 64 manually on those GPUs.
 
 ### If H100 unavailable
@@ -148,7 +161,8 @@ Run it → at bottom of log there's a `BEGIN_PAPER_TABLE ... END_PAPER_TABLE` bl
 | Batch | 64 × 1 |
 | Epochs | 3 |
 | Seed | 42 |
-| Flow per file | CoDET full suite (IID binary + IID author + OOD gen×5 + OOD lang×3 + OOD src×3 = **13 runs**) → cleanup (VRAM + gc) → Droid T1 + T3 + T4 = **3 runs** → combined paper table → **16 runs total** |
+| Flow per file (`full`) | CoDET full suite (IID binary + IID author + OOD gen×5 + OOD lang×3 + OOD src×3 = **13 runs**) → cleanup → Droid T1+T3+T4 = **3 runs** → paper table → **16 runs total** |
+| Flow per file (`lean`) | CoDET IID binary + author + OOD-SRC-gh + OOD-LANG-python + OOD-GEN-qwen1.5 = **5 runs** → cleanup → Droid T1+T3+T4 = **3 runs** → paper table → **8 runs total, ~53 min** |
 
 ---
 
@@ -221,9 +235,17 @@ Run it → at bottom of log there's a `BEGIN_PAPER_TABLE ... END_PAPER_TABLE` bl
 
 Fill in after each `exp_NN_*.py` run by pasting the `BEGIN_PAPER_TABLE` block. Bold = beats corresponding paper baseline.
 
-| # | Method | File | Train % | CoDET Bin F1 | CoDET Auth F1 | Droid T3 W-F1 | Droid T4 W-F1 | CoDET OOD-Src | Status |
-|:-:|:-------|:-----|:-------:|:------------:|:-------------:|:-------------:|:-------------:|:-------------:|:------:|
-| 0 | **HierTreeCode** | [exp_00_hiertree.py](exp_00_hiertree.py) | 20% | TBD | TBD | TBD | TBD | TBD | ⏳ run pending |
+| # | Method | File | Train % | Mode | CoDET Bin F1 | CoDET Auth F1 | Droid T3 W-F1 | Droid T4 W-F1 | OOD-SRC-gh | Status |
+|:-:|:-------|:-----|:-------:|:----:|:------------:|:-------------:|:-------------:|:-------------:|:----------:|:------:|
+| 0 | **HierTreeCode** | [exp_00_hiertree.py](exp_00_hiertree.py) | 20% | full | TBD | TBD | TBD | TBD | TBD | ⏳ running |
+| 1 | **GenealogyGraphCode** | [exp_01_genealogy_graph.py](exp_01_genealogy_graph.py) | 20% | lean | TBD | TBD | TBD | TBD | TBD | ⏳ pending |
+| 2 | **GHSourceInvariantCode** | [exp_02_gh_invariant.py](exp_02_gh_invariant.py) | 20% | lean | TBD | TBD | TBD | TBD | TBD | ⏳ pending |
+| 3 | **TokenStatRAGCode** | [exp_03_tokenstat_rag.py](exp_03_tokenstat_rag.py) | 20% | lean | TBD | TBD | TBD | TBD | TBD | ⏳ pending |
+| 4 | **PoincareGenealogy** | [exp_04_hyperbolic_poincare.py](exp_04_hyperbolic_poincare.py) | 20% | lean | TBD | TBD | TBD | TBD | TBD | ⏳ pending |
+| 5 | **SinkhornOTCode** | [exp_05_sinkhorn_ot.py](exp_05_sinkhorn_ot.py) | 20% | lean | TBD | TBD | TBD | TBD | TBD | ⏳ pending |
+| 6 | **FlowCodeDet** | [exp_06_flow_matching.py](exp_06_flow_matching.py) | 20% | lean | TBD | TBD | TBD | TBD | TBD | ⏳ pending |
+| 7 | **SAMFlatCode** | [exp_07_sam_flat.py](exp_07_sam_flat.py) | 20% | lean | TBD | TBD | TBD | TBD | TBD | ⏳ pending |
+| 8 | **POEMPolarizedCode** | [exp_08_polarized_code.py](exp_08_polarized_code.py) | 20% | lean | TBD | TBD | TBD | TBD | TBD | ⏳ pending |
 
 ---
 
@@ -256,6 +278,27 @@ Keep it to one paragraph per method. Per-class detail lives in the `BEGIN_PAPER_
 - **Expected strengths:** CoDET Author 6-class (family tree forces Qwen/Nxcode to cluster, matching the paper's known confusion).
 - **Expected weaknesses:** Droid adversarial class — hier loss may over-regularize when the "families" are shallow (3–4 class).
 - **Data-efficiency claim:** prior Exp18 runs at 20% train already beat UniXcoder (+4.22 Author, +0.41 Binary, and +0.41 OOD-Source) on CoDET. This climb file is the FULL-TEST re-run + first Droid pass under the same backbone.
+- **Result after run:** _(paste BEGIN_PAPER_TABLE block summary)_
+
+### exp_01 GenealogyGraphCode (pending, lean mode)
+- **Novelty:** replaces static family table (Exp18) with a LEARNABLE weighted graph over generator prototypes. EMA-updated prototypes + 1-layer GNN propagation + InfoNCE proto-contrast + graph-smoothness prior on the static tree.
+- **Targets insight #2 + #14:** breaks the plateau around the Nxcode↔Qwen1.5 pair by making the genealogy itself a learned parameter rather than hand-crafted.
+- **Success criteria (lean screening):** CoDET Author > 70.55 OR Qwen1.5 per-class F1 > 0.47 OR OOD-GEN held-out=qwen1.5 > 0.51.
+- **Risk:** prototypes may collapse if EMA too strong; graph-smooth term is a warm-start prior that tapers off.
+- **Result after run:** _(paste BEGIN_PAPER_TABLE block summary)_
+
+### exp_02 GHSourceInvariantCode (pending, lean mode)
+- **Novelty:** first method to attack the GH-source OOD bottleneck (insight #16). Couples SOURCE-IRM (per-source IRMv1 penalty, 3 envs cf/gh/lc) with a gradient-reversed STYLE-only adversary predicting source. HierTree preserved for genealogy signal.
+- **Targets insight #3 + #16:** surface-style shortcut on CF/LC templates is the root cause of GH-OOD catastrophic failure. Source-invariance on style subspace (not on content) should close gap without hurting author signal.
+- **Success criteria (lean screening):** OOD-SRC held-out=gh > 0.30 AND CoDET Author IID >= 70.3 (no regression).
+- **Risk:** IRM penalty may explode without annealing (Exp06 lesson) — mitigated by `irm_warmup_epochs=1`. Requires dataset to expose per-sample `source` field in outputs dict.
+- **Result after run:** _(paste BEGIN_PAPER_TABLE block summary)_
+
+### exp_03 TokenStatRAGCode (pending, lean mode)
+- **Novelty:** first method to use retrieval DURING TRAINING (not just test-time). In-batch kNN over token-statistics features (label-independent surface features → cannot trivially memorise). Same-label neighbours pull, different-label neighbours hinge-push.
+- **Targets insight #12 + #14:** combines cheap token-stat booster (Droid) with training-time retrieval signal (OOD + Author). Prior work (Exp17 RAGDetect 70.46) used embedding-space retrieval = circular.
+- **Success criteria (lean screening):** CoDET Author > 70.60 AND Droid T3 > 0.89 AND OOD-SRC-gh > 0.32.
+- **Risk:** token-stat features need to be surfaced by the backbone (`outputs["tokenstat"]` or `spectral_features`); fallback uses last-16-dim embedding slice.
 - **Result after run:** _(paste BEGIN_PAPER_TABLE block summary)_
 
 ---
@@ -343,6 +386,45 @@ Every Exp_DM / Exp_CodeDet method above ran on **100K train (~20%)** and still b
 - **"How does it fare on AICD-Bench?"** → "We explicitly treat AICD as open challenge; val-test gap is a benchmark property, not solvable by detector-side methods alone." (reference 23-method negative result)
 - **"What about calibration (ECE/Brier)?"** → emit in paper table too (current `_paper_table.py` doesn't, but trainer records val loss; ECE is one metric away).
 - **"Language coverage vs Droid's 7 langs?"** → note that CoDET-M4 is limited to cpp/java/python by design; Droid has full coverage and we run T1/T3/T4 there.
+
+### 11. Droid is stable across methods — don't use it to differentiate (NEW)
+
+From **14 DM methods** all running Droid T3/T4: scores cluster in **0.84–0.90 W-F1**, gap between best (exp09 TokenStat 0.8941) and worst (exp07 DomainMix 0.7930) is mostly explained by backbone strength, not method innovation. **The claim to beat is DroidDetectCLS-Large (0.8878)** — only exp09 TokenStat and exp18 HierTreeCode come close on T3 (0.8941/0.8917). Use Droid T3 as a sanity check (did we regress?), not as a discriminator between ideas.
+
+### 12. Token statistics are the best cheap Droid booster (NEW)
+
+`exp09 TokenStat` (entropy, burstiness, TTR, Yule-K token distribution features) consistently gives **+0.003–0.005 Droid T3 W-F1** over pure spectral backbone. It's also cheap (no extra model, just numpy stats per sample). **Recommend: include token stats in every climb method as a free Droid booster.**
+
+### 13. AICD T1 OOD collapse is structural — skip it entirely in climb (NEW)
+
+**23 methods tested across Exp_DM** (DomainMix, IRM, OSCP, VILW, SupCon, TripletLoss, etc.) — all show val 0.99 → test 0.25-0.31 on AICD T1. The val-test gap is a dataset property (AICD train/test have different domain distributions by design). **No method-level fix works.** Climb excludes AICD deliberately. Report it as "open challenge" if reviewers ask.
+
+### 14. HierTree + SupCon + kNN is the current best cocktail (NEW)
+
+From Exp_CodeDet: **HierTree loss alone = 70.55** (Exp18). Adding **kNN test-time blend = 70.46** (Exp17, slight different impl). Adding **SupCon = 70.33** (Exp32 HyperCode). The pattern that works:
+1. HierTree family loss (Qwen/Nxcode cluster) — non-negotiable, +1.5 F1 vs base
+2. Token stats features — free +0.3-0.5 Droid
+3. kNN blend at test time — +0.1-0.3 author F1, zero training cost
+
+Methods that don't add above this baseline (KAN head, Hypernetwork, IB compression, DANN) all converge to 70.0-70.3 range.
+
+### 15. Lean screening protocol — 3 ideas per H100 session (NEW)
+
+Use `run_mode="lean"` (8 runs, ~53 min) to screen. Promotion criteria:
+- **CoDET Author F1 > 70.55** (must beat current SOTA = Exp18) OR
+- **Droid T3 W-F1 > 0.8941** (must beat exp09 TokenStat) OR  
+- **OOD-SRC gh > 0.30** (any improvement on hardest subgroup is paper-worthy)
+
+If none of the 3 OOD representative runs (gh/python/qwen1.5) shows improvement, abort and try next idea. Only promote to `run_mode="full"` (16 runs, ~1h41m) when at least one criterion is met.
+
+### 16. GitHub source is the biggest untapped opportunity (NEW)
+
+From Exp_Climb insights + Exp_CodeDet OOD data:
+- **OOD-SRC held-out=gh Author macro F1 ≈ 0.2834** — catastrophic across all 14+ methods
+- Human recall on GH-held-out = **5.71%** (model never predicts human for GH code)
+- Root cause: CF+LC = competitive-programming templates (narrow style), GH = real-world diverse code. Model trained on cf+lc memorizes templates, fails completely on GH diversity.
+- **Any method that breaks 0.40 on OOD-SRC-gh is a NeurIPS-worthy result.** No method has come close yet.
+- Target for next architectural direction: explicitly train on source-diverse batches (GH-aware sampling) or use source as an environment variable in IRM-style training.
 
 ---
 

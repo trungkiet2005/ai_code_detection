@@ -15,26 +15,26 @@
 |:----:|:----|:-------|:---------:|:-------:|:---------:|:-------:|:------:|:------:|
 | 🥇 | **Exp18** | **HierTreeCode** | **99.06** | `+0.41` | **70.55** | **`+4.22`** | **71.88** | ✅ |
 | 🥈 | **Exp17** | RAGDetect | **99.09** | `+0.44` | 70.46 | `+4.13` | 70.99 | ✅ |
-| 🥉 | **Exp20** | BiScopeCode | **99.06** | `+0.41` | 70.20 | `+3.87` | 71.22 | ✅ |
-| 4 | **Exp22** | TTACode | **99.06** | `+0.41` | 70.20 | `+3.87` | 71.32 | ✅ |
-| 5 | **Exp25** | MultiGranCode | 99.03 | `+0.38` | 70.19 | `+3.86` | 71.22 | ✅ |
-| 6 | **Exp15** | GroupDRO | 98.98 | `+0.33` | 70.17 | `+3.84` | 70.59 | ✅ |
-| 7 | **Exp26** | SelfDistillCode | 99.04 | `+0.39` | 70.14 | `+3.81` | 71.22 | ✅ |
-| 8 | **Exp14** | ProtoCon | **99.06** | `+0.41` | 70.13 | `+3.80` | 71.26 | ✅ |
-| 9 | **Exp21** | MoECode | **99.09** | `+0.44` | 70.04 | `+3.71` | 71.20 | ✅ |
-| 10 | **Exp11** | SpectralCode | **99.06** | `+0.41` | 69.82 | `+3.49` | 70.80 | ✅ |
-| 11 | **Exp23** | GraphStyleCode | 99.00 | `+0.35` | 69.71 | `+3.38` | 70.89 | ✅ |
-| 12 | **Exp24** | CosineProtoCode | 99.03 | `+0.38` | 67.80 | `+1.47` | 68.70 | ✅ |
+| 🥉 | **Exp32** | **HyperCode** | 99.07 | `+0.42` | **70.33** | `+4.00` | **71.51** | ✅ |
+| 4 | **Exp31** | KANCode | **99.09** | `+0.44` | 70.30 | `+3.97` | 71.38 | ✅ |
+| 5 | **Exp37** | EnergyCode | 99.05 | `+0.40` | 70.26 | `+3.93` | 71.38 | ✅ |
+| 6 | **Exp20** | BiScopeCode | **99.06** | `+0.41` | 70.20 | `+3.87` | 71.22 | ✅ |
+| 7 | **Exp22** | TTACode | **99.06** | `+0.41` | 70.20 | `+3.87` | 71.32 | ✅ |
+| 8 | **Exp25** | MultiGranCode | 99.03 | `+0.38` | 70.19 | `+3.86` | 71.22 | ✅ |
+| 9 | **Exp15** | GroupDRO | 98.98 | `+0.33` | 70.17 | `+3.84` | 70.59 | ✅ |
+| 10 | **Exp38** | WaveCLCode | 99.02 | `+0.37` | 70.16 | `+3.83` | 71.44 | ✅ |
+| 11 | **Exp26** | SelfDistillCode | 99.04 | `+0.39` | 70.14 | `+3.81` | 71.22 | ✅ |
+| 12 | **Exp14** | ProtoCon | **99.06** | `+0.41` | 70.13 | `+3.80` | 71.26 | ✅ |
+| 13 | **Exp21** | MoECode | **99.09** | `+0.44` | 70.04 | `+3.71` | 71.20 | ✅ |
+| 14 | **Exp34** | TTLCode | 99.05 | `+0.40` | 70.04 | `+3.71` | 70.93 | ✅ |
+| 15 | **Exp33** | IBCode | 99.07 | `+0.42` | 70.02 | `+3.69` | 71.01 | ✅ |
+| 16 | **Exp36** | MambaCode | 99.05 | `+0.40` | 69.98 | `+3.65` | 70.68 | ✅ |
+| 17 | **Exp11** | SpectralCode | **99.06** | `+0.41` | 69.82 | `+3.49` | 70.80 | ✅ |
+| 18 | **Exp23** | GraphStyleCode | 99.00 | `+0.35` | 69.71 | `+3.38` | 70.89 | ✅ |
+| 19 | **Exp24** | CosineProtoCode | 99.03 | `+0.38` | 67.80 | `+1.47` | 68.70 | ✅ |
 | — | **Exp16** | HyperNetCode | **99.07** | `+0.42` | — ❌ bug | — | — | ✅ |
 | — | **Exp19** | EAGLECode (DANN) | 98.73 | `+0.08` | 62.89 ↓↓ | `-3.44` | 64.23 | ✅ |
-| — | **Exp31** | KANCode | — | — | — | — | — | ⏳ pending |
-| — | **Exp32** | HyperCode | — | — | — | — | — | ⏳ pending |
-| — | **Exp33** | IBCode | — | — | — | — | — | ⏳ pending |
-| — | **Exp34** | TTLCode | — | — | — | — | — | ⏳ pending |
 | — | **Exp35** | TopoCode | — | — | — | — | — | ⏳ pending |
-| — | **Exp36** | MambaCode | — | — | — | — | — | ⏳ pending |
-| — | **Exp37** | EnergyCode | — | — | — | — | — | ⏳ pending |
-| — | **Exp38** | WaveCLCode | — | — | — | — | — | ⏳ pending |
 | **REF** | Paper | UniXcoder | 98.65 | — | 66.33 | — | — | reference |
 | REF | Paper | CodeT5 | 98.35 | `-0.30` | 62.45 | `-3.88` | — | reference |
 | REF | Paper | CodeBERT | 95.70 | `-2.95` | 64.80 | `-1.53` | — | reference |
@@ -1261,3 +1261,112 @@ Top-rated paper ideas from NeurIPS/ICML/CVPR survey for NeurIPS 2026 ORAL:
 | **Exp30** | `Exp_CodeDet/run_codet_m4_exp30_hierfocus.py` | **HierFocusCode** | Stronger HierTree pressure (`lambda_hier=0.55`, `margin=0.40`) + balanced SupCon + standard kNN | Pending run |
 
 > DM counterparts for same method family: `Exp_DM/exp28_hardneg_code.py`, `Exp_DM/exp29_retrievalcalib_code.py`, `Exp_DM/exp30_hierfocus_code.py`.
+
+### Exp31 — KANCode (completed 2026-04-18)
+
+| | |
+|:--|:--|
+| **File** | `Exp_CodeDet/run_codet_m4_exp31_kancode.py` |
+| **Novelty** | Kolmogorov–Arnold Network classifier head on top of fused repr, with EMA teacher self-distillation (momentum=0.995) as auxiliary stability loss |
+| **Binary IID** | Test macro **99.09** / weighted **99.10** — ties Exp17/21 for best binary on the board |
+| **Author IID** | Test macro **70.30** / weighted **80.79** / val **71.38** — new **🥉 bronze**, third method to crack 70.30+ |
+| **Train loss** | `L_task + L_neural + L_spectral + aux (EMA-distill)` — spectral loss stays high (~0.51) even at epoch 3, suggesting room to tune spectral weight |
+| **Per-generator Author F1** | codellama **0.74** · gpt **0.76** · llama3.1 **0.82** · nxcode **0.49** · qwen1.5 **0.44** — the usual Nxcode↔Qwen1.5 confusion (CM: qwen→nxcode=1910, nxcode→qwen=2025) |
+| **Per-source Author F1** | cf **0.76** · gh **0.56** · lc **0.60** — GitHub subgroup still the bottleneck (matches universal pattern, Insight #3) |
+| **Per-language Author F1** | java **0.75** · cpp **0.70** · python **0.66** — python hardest, consistent with Exp18/17 |
+| **Runtime** | ~34 min binary + ~32 min author on H100 80GB (batch 64 × seq 512 × 3 epochs, `max_train=100K`) |
+| **Takeaway** | KAN head + EMA teacher gives a clean +0.11 over Exp21 MoECode's 70.04 and clears the 70.0–70.2 plateau, but **does NOT crack the Nxcode/Qwen family split** — so Exp18 HierTree's explicit genealogy prior is still what keeps it at 🥇. Natural next move: **stack KAN head on top of HierTree loss** (candidate Exp39). |
+
+**Re-run (2026-04-18, full suite)**
+- Binary: macro **99.09** / weighted **99.10** / val **98.98**
+- Author: macro **70.30** / weighted **80.79** / val **71.38**
+- Confusion remains centered on Nxcode↔Qwen (`nxcode->qwen=2025`, `qwen->nxcode=1910`), confirming the same failure mode as the first run.
+
+### Exp32 — HyperCode (completed 2026-04-18)
+
+| | |
+|:--|:--|
+| **File** | `Exp_CodeDet/run_codet_m4_exp32_hypercode.py` |
+| **Novelty** | Hypernetwork-generated classifier weights conditioned on embedding stats (token entropy / spectral features), EMA teacher auxiliary loss (momentum=0.995) |
+| **Binary IID** | Test macro **99.07** / weighted **99.07** / val **99.02** |
+| **Author IID** | Test macro **70.33** / weighted **80.97** / val **71.51** — new **🥉 bronze**, +0.03 over Exp31 KANCode |
+| **Per-class Author F1** | codellama **0.74** · gpt **0.74** · llama3.1 **0.82** · nxcode **0.50** · qwen1.5 **0.44** — virtually identical distribution to Exp31 |
+| **Per-source Author F1** | cf **0.76** · gh **0.57** · lc **0.60** — GH still hardest subgroup |
+| **Per-language Author F1** | java **0.76** · cpp **0.70** · python **0.66** — same ordering as all prior methods |
+| **Nxcode↔Qwen confusion** | CM: nxcode→qwen=1946, qwen→nxcode=1956 — essentially same magnitude as Exp31 (2025/1910) |
+| **Runtime** | ~30 min binary + ~31 min author on H100 80GB |
+| **Takeaway** | Hypernetwork head marginally outperforms KAN head (+0.03 author) but the gap is within noise. Both architectures hit the same Nxcode/Qwen wall and show identical per-class patterns. **The ceiling at ~70.3 is an architecture-neutral phenomenon** — it's the family split problem (Insight #2), not a head capacity problem. Confirms that the only escape is genealogy-aware loss (Exp18 HierTree) or stronger retrieval priors (Exp17 RAG). |
+
+### Exp33 — IBCode (completed 2026-04-18)
+
+| | |
+|:--|:--|
+| **File** | `Exp_CodeDet/run_codet_m4_exp33_ibcode.py` |
+| **Novelty** | Information Bottleneck regularisation on the embedding space (β-VAE style) — compresses task-irrelevant style and retains discriminative features — with EMA teacher auxiliary loss (momentum=0.995) |
+| **Binary IID** | Test macro **99.07** / weighted **99.07** / val **99.04** |
+| **Author IID** | Test macro **70.02** / weighted **80.60** / val **71.01** — rank **#12**, just below Exp21 MoECode (70.04) |
+| **Per-class Author F1** | codellama **0.73** · gpt **0.75** · llama3.1 **0.82** · nxcode **0.51** · qwen1.5 **0.42** |
+| **Per-source Author F1** | cf **0.76** · gh **0.55** · lc **0.60** — GH bottom again |
+| **Nxcode↔Qwen confusion** | CM: nxcode→qwen=1870, qwen→nxcode=2064 — slightly worse than Exp31/32 in Qwen→Nxcode direction |
+| **Takeaway** | IB regularisation does not help author attribution — compressing style features is exactly the wrong inductive bias here, since style IS the discriminative signal for generator attribution. Ranks below MoECode (70.04) and equal to Exp21 within noise. Adds to the **negative result pattern**: representation-compression / bottleneck methods hurt attribution. |
+
+### Exp34 — TTLCode (completed 2026-04-18)
+
+| | |
+|:--|:--|
+| **File** | `Exp_CodeDet/run_codet_m4_exp34_ttlcode.py` |
+| **Novelty** | Test-time-learning flavored objective with EMA teacher and auxiliary consistency branch (Exp34 TTLCode formulation) |
+| **Binary IID** | Test macro **99.05** / weighted **99.05** / val **99.00** |
+| **Author IID** | Test macro **70.04** / weighted **80.72** / val **70.93** — rank **#13**, tied with Exp21 on macro but lower weighted-F1 |
+| **Per-language Author F1** | java **0.75** · cpp **0.70** · python **0.66** |
+| **Per-source Author F1** | cf **0.75** · gh **0.55** · lc **0.60** — GH remains hardest subgroup |
+| **Per-class Author F1** | human **0.97** · codellama **0.74** · gpt **0.75** · llama3.1 **0.82** · nxcode **0.53** · qwen1.5 **0.39** |
+| **Nxcode↔Qwen confusion** | CM: nxcode→qwen=1532, qwen→nxcode=2396 — Qwen collapse into Nxcode is still dominant failure mode |
+| **Runtime** | ~31 min binary + ~32 min author on H100 80GB (batch 64, epochs 3) |
+| **Takeaway** | TTLCode is a stable 70.0-tier run with strong binary, but it does not beat the Exp18/17 top cluster. It slightly improves Nxcode recall but hurts Qwen1.5 sharply, so the family-separation bottleneck remains unsolved. |
+
+### Exp36 — MambaCode (completed 2026-04-18)
+
+| | |
+|:--|:--|
+| **File** | `Exp_CodeDet/run_codet_m4_exp36_mambacode.py` |
+| **Novelty** | Mamba-style sequence modeling branch integrated with Exp34-like EMA teacher auxiliary consistency objective |
+| **Binary IID** | Test macro **99.05** / weighted **99.05** / val **99.02** |
+| **Author IID** | Test macro **69.98** / weighted **80.69** / val **70.68** — rank **#15**, just below Exp11 SpectralCode |
+| **Per-language Author F1** | java **0.75** · cpp **0.70** · python **0.66** |
+| **Per-source Author F1** | cf **0.76** · gh **0.56** · lc **0.60** — GH remains hardest subgroup |
+| **Per-class Author F1** | human **0.97** · codellama **0.74** · gpt **0.74** · llama3.1 **0.82** · nxcode **0.49** · qwen1.5 **0.44** |
+| **Nxcode↔Qwen confusion** | CM: nxcode→qwen=2013, qwen→nxcode=1884 — severe bidirectional confusion remains the dominant error mass |
+| **Runtime** | ~31 min binary + ~32 min author on H100 80GB (batch 64, epochs 3) |
+| **Takeaway** | MambaCode lands in the same ~70 macro band as Exp11/21/33 but does not improve the Nxcode/Qwen bottleneck; gains are incremental and below the Exp18/17/32 frontier. |
+
+### Exp37 — EnergyCode (completed 2026-04-18)
+
+| | |
+|:--|:--|
+| **File** | `Exp_CodeDet/run_codet_m4_exp37_energycode.py` |
+| **Novelty** | Energy-based objective on top of the ModernBERT + neural/spectral backbone, with EMA teacher auxiliary consistency |
+| **Binary IID** | Test macro **99.05** / weighted **99.05** / val **98.99** |
+| **Author IID** | Test macro **70.26** / weighted **80.80** / val **71.38** — rank **#5**, below Exp31/32 and above the 70.20 cluster |
+| **Per-language Author F1** | java **0.75** · cpp **0.70** · python **0.66** |
+| **Per-source Author F1** | cf **0.77** · gh **0.56** · lc **0.60** — GH remains hardest subgroup |
+| **Per-class Author F1** | human **0.98** · codellama **0.74** · gpt **0.75** · llama3.1 **0.82** · nxcode **0.48** · qwen1.5 **0.46** |
+| **Nxcode↔Qwen confusion** | CM: nxcode→qwen=2164, qwen→nxcode=1776 — still the dominant failure mode despite overall macro gain |
+| **Runtime** | ~31 min binary + ~32 min author on H100 80GB (batch 64, epochs 3) |
+| **Takeaway** | EnergyCode gives a meaningful bump over the 70.0-tier baselines and reaches the lower edge of the top cluster, but the Nxcode/Qwen family split remains unresolved, so it still trails HierTree/RAG/HyperCode. |
+
+### Exp38 — WaveCLCode (completed 2026-04-18)
+
+| | |
+|:--|:--|
+| **File** | `Exp_CodeDet/run_codet_m4_exp38_waveclcode.py` |
+| **Novelty** | Wavelet/contrastive-inspired objective (WaveCL) layered on the ModernBERT + neural/spectral backbone with EMA teacher consistency |
+| **Binary IID** | Test macro **99.02** / weighted **99.02** / val **98.99** |
+| **Author IID** | Test macro **70.16** / weighted **80.81** / val **71.44** — rank **#10**, between Exp15 and Exp26 |
+| **Per-language Author F1** | java **0.75** · cpp **0.70** · python **0.66** |
+| **Per-source Author F1** | cf **0.76** · gh **0.56** · lc **0.60** — GH remains hardest subgroup |
+| **Per-class Author F1** | human **0.97** · codellama **0.74** · gpt **0.74** · llama3.1 **0.81** · nxcode **0.49** · qwen1.5 **0.45** |
+| **Nxcode↔Qwen confusion** | CM: nxcode→qwen=1995, qwen→nxcode=1934 — confusion remains severe and still dominates residual error |
+| **Runtime** | ~31 min binary + ~32 min author on H100 80GB (batch 64, epochs 3) |
+| **Takeaway** | WaveCLCode sits in the strong 70.1-tier band and shows stable gains over older baselines, but still cannot break the Nxcode/Qwen bottleneck and remains below Exp18/17/32. |
+

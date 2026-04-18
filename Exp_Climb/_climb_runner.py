@@ -30,6 +30,7 @@ from _data_codet import (
     preflight as preflight_codet,
     run_codet_suite,
     run_iid as run_codet_iid,
+    _run_single_loo,
 )
 from _data_droid import DroidConfig, preflight_droid, run_droid_suite
 from _features import ast_parser_available
@@ -184,8 +185,8 @@ def preflight_full_climb(
 
     report: Dict[str, Any] = {"env": preflight_env()}
 
-    need_codet = run_mode in ("full", "codet_only", "codet_iid", "single")
-    need_droid = run_mode in ("full", "droid_only")
+    need_codet = run_mode in ("full", "codet_only", "codet_iid", "single", "lean")
+    need_droid = run_mode in ("full", "droid_only", "lean")
 
     _print_full_run_plan(
         run_mode=run_mode,
@@ -219,7 +220,16 @@ def preflight_full_climb(
 # Full climb orchestrator
 # ---------------------------------------------------------------------------
 
-RUN_MODES = ("full", "codet_only", "droid_only", "codet_iid", "single")
+RUN_MODES = ("full", "codet_only", "droid_only", "codet_iid", "single", "lean")
+
+# OOD representatives for lean mode: one hardest held-out per OOD type.
+# gh = hardest OOD-SRC (GH macro ~0.28 universally); python = largest OOD-LANG
+# test set (17K); qwen1.5 = hardest OOD-GEN (fine-tuned Nxcode confusion).
+_LEAN_OOD_PLAN = [
+    ("ood", "source",    "gh"),
+    ("ood", "language",  "python"),
+    ("ood", "generator", "qwen1.5"),
+]
 
 
 def run_full_climb(
@@ -244,6 +254,9 @@ def run_full_climb(
     """
     if run_mode not in RUN_MODES:
         raise ValueError(f"Unknown run_mode: {run_mode}. Pick from {RUN_MODES}.")
+
+    # lean: IID binary + IID author + 3 OOD representatives + Droid T1/T3/T4 = 8 runs (~53 min H100)
+    # Use for fast screening. Full OOD suite only needed for paper-final run.
 
     if codet_cfg is None:
         codet_cfg = CoDETM4Config()
@@ -306,6 +319,40 @@ def run_full_climb(
             codet_results = run_codet_suite(
                 iid_plan, codet_cfg, loss_fn=loss_fn,
                 run_preflight=inner_preflight, checkpoint_tag_prefix=checkpoint_tag_prefix,
+            )
+
+        elif run_mode == "lean":
+            # 8 runs: IID binary + IID author + 3 OOD representatives + Droid T1/T3/T4
+            # ~53 min on H100. Use for fast screening; run_mode="full" for paper-final.
+            iid_plan = [e for e in FULL_RUN_PLAN if e[0] == "iid"]
+            codet_results = run_codet_suite(
+                iid_plan, codet_cfg, loss_fn=loss_fn,
+                run_preflight=inner_preflight, checkpoint_tag_prefix=checkpoint_tag_prefix,
+            )
+            # Run 3 OOD representative held-outs (hardest of each type)
+            ood_results: Dict[str, Any] = {}
+            for ood_mode, ood_type, held_out in _LEAN_OOD_PLAN:
+                key = f"ood_{ood_type}"
+                if key not in ood_results:
+                    ood_results[key] = {}
+                logger.info(f"\n{'='*70}\n[LEAN-OOD] {ood_type}={held_out}\n{'='*70}")
+                try:
+                    ood_results[key][held_out] = _run_single_loo(
+                        ood_type, held_out, codet_cfg, loss_fn=loss_fn,
+                    )
+                except RuntimeError as e:
+                    logger.error(f"LEAN OOD {ood_type}={held_out} failed: {e}")
+                    ood_results[key][held_out] = {"error": str(e)}
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+            codet_results = {**codet_results, **ood_results}
+
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+            gc.collect()
+
+            droid_results = run_droid_suite(
+                droid_cfg, loss_fn=loss_fn, checkpoint_tag_prefix=checkpoint_tag_prefix,
             )
 
         elif run_mode == "single":
