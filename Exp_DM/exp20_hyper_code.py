@@ -1703,6 +1703,8 @@ class Trainer:
             "best_val_macro_f1": float(self.last_eval_metrics.get("Val", {}).get("macro_f1", self.best_f1)),
             "best_val_weighted_f1": float(self.last_eval_metrics.get("Val", {}).get("weighted_f1", self.best_f1)),
             "paper_primary_metric": self.primary_metric,
+            "num_classes": int(self.model.num_classes),
+            "test_per_class": self.last_eval_metrics.get("Test", {}).get("classification_report", {}),
         }
 
 
@@ -1888,6 +1890,20 @@ def run_benchmark_suite(run_plan: List[Tuple[str, str]], base_config: Optional[C
         "results": results,
     }
     logger.info("SUITE_RESULTS_JSON=" + json.dumps(machine_block, ensure_ascii=True))
+
+    # Paper-ready copy-paste block (headline + per-class + tracker rows)
+    try:
+        from _paper_table import emit_paper_table
+        emit_paper_table(
+            method_name="HyperCode",
+            exp_id="exp20",
+            run_plan=run_plan,
+            results=results,
+            timestamp=ts,
+            logger=logger,
+        )
+    except ImportError:
+        logger.warning("[_paper_table] helper not found; skipping paper-ready table emission")
     return results
 
 

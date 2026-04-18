@@ -1,27 +1,21 @@
 """
-[CoDET-M4] MultiGranCode Runner – Full Benchmark Evaluation  (Kaggle standalone)
-      Exp25: MultiGranCode (Multi-Granularity Feature Fusion: Char + Token + Structural)
+[CoDET-M4] HierTreeCode Runner – Full Benchmark Evaluation  (Kaggle standalone)
+      Exp18: HierTreeCode (Hierarchical Generator Affinity Tree Loss)
 
-Core novelty: Adds a character-level CNN stream as the 3rd feature modality.
-  - Char-level stylometry captures sub-token patterns: spacing, punctuation, naming micro-habits
-  - 3 parallel Conv1D kernels (k=3,5,7) → adaptive max-pool → concat → char style vector
-  - Input: byte-level representation of code (first 512 chars → 512-dim char_ids)
-  - 3-way gated fusion: gate over [neural || spectral || char] → weighted combination
-  - Each stream keeps independent classification head; final gate combines all 3
+Core novelty: Models the 6 author classes as a Hierarchical Affinity Tree:
+  Root → Human (leaf)
+       → AI-generated
+             → GPT (leaf)
+             → Llama family: Llama3.1 (leaf), CodeLlama (leaf)
+             → Qwen family: Qwen1.5 (leaf), Nxcode (leaf)  ← KEY: Nxcode IS fine-tuned Qwen
 
-Architecture:
-  token BERT → h_neural ─┐
-  FFT spectral → h_spec  ─┼→ 3-way gate → logits
-  char CNN → h_char ──────┘
+HierarchicalAffinityLoss enforces:
+  - within-family samples must be closer than cross-family samples
+  - Qwen↔Nxcode distances constrained at BOTH feature and prediction level
+  - loss = L_focal + 0.3*L_neural + 0.3*L_spectral + 0.4*L_hier
 
-Inspired by:
-  - CharCNN (NIPS 2015, Zhang et al.): character-level text classification
-  - Multi-granularity text models (ACL 2020, EMNLP 2022)
-  - Code stylometry: char-level features for authorship attribution (AAAI 2023)
-  - Multi-scale representation learning (ICML 2024)
-  - CharFormer (ICLR 2022): gradient-based subword tokenization
-
-Target: Binary F1 99.1%+ | Author IID 71%+ | char stream captures micro-style
+Inspired by: DETree (arXiv:2510.17489, Oct 2025, NeurIPS), ProtoNets, DML
+Target: Author IID Macro-F1 77%+ (from 69.82% SpectralCode baseline)
 Target venue: NeurIPS 2026 ORAL
 """
 
@@ -90,7 +84,7 @@ except ImportError:
     _NEW_AMP = False
 
 from datasets import Dataset, load_dataset
-from sklearn.metrics import f1_score, classification_report, confusion_matrix, accuracy_score
+from sklearn.metrics import f1_score, classification_report, confusion_matrix
 from transformers import (
     AutoTokenizer,
     AutoModel,
@@ -195,13 +189,12 @@ class SpectralConfig:
     max_grad_norm: float = 1.0
 
     temperature: float = 0.07
-    # MultiGran hyperparams
-    char_embed_dim: int = 32            # char embedding dimension
-    char_out_dim: int = 64              # output dim of CharCNN (per kernel)
-    char_kernels: tuple = (3, 5, 7)     # CNN kernel sizes for multi-scale char features
-    max_train_samples: int = 100_000
+    lambda_hier: float = 0.4
+    hier_margin: float = 0.3
+    # CLIMB strategy: small train (~20% of CoDET-M4), full test (claim data-efficient SOTA)
+    max_train_samples: int = 100_000   # ~20% of the ~500K CoDET-M4 train split
     max_val_samples: int = 20_000
-    max_test_samples: int = 50_000
+    max_test_samples: int = -1          # -1 means FULL test set (no subsampling)
 
     num_workers: int = 2
     prefetch_factor: int = 2
@@ -216,7 +209,6 @@ class SpectralConfig:
     save_dir: str = "./codet_m4_checkpoints"
     log_every: int = 100
     eval_every: int = 1000
-    primary_metric: str = "macro_f1"  # "macro_f1" | "weighted_f1"
 
 
 # ============================================================================
@@ -532,41 +524,6 @@ class CrossAttentionFusion(nn.Module):
 
 
 # ============================================================================
-# ============================================================================
-# CharCNN: Character-level CNN encoder (Exp25 novelty)
-# ============================================================================
-
-class CharCNN(nn.Module):
-    """
-    Character-level CNN for stylometric feature extraction.
-    3 parallel Conv1D with different kernel sizes (multi-scale n-gram features).
-    Inspired by CharCNN (Zhang et al., NIPS 2015) and TextCNN (Kim, EMNLP 2014).
-    Captures sub-token style: spacing habits, punctuation, identifier naming micro-patterns.
-    """
-    def __init__(self, vocab_size: int = 256, embed_dim: int = 32,
-                 out_per_kernel: int = 64, kernels: tuple = (3, 5, 7)):
-        super().__init__()
-        self.char_emb = nn.Embedding(vocab_size, embed_dim, padding_idx=0)
-        self.convs = nn.ModuleList([
-            nn.Sequential(
-                nn.Conv1d(embed_dim, out_per_kernel, k, padding=k // 2),
-                nn.GELU(),
-            )
-            for k in kernels
-        ])
-        self.out_dim = out_per_kernel * len(kernels)
-
-    def forward(self, char_ids: torch.Tensor) -> torch.Tensor:
-        # char_ids: (B, seq_len) byte-level token ids
-        x = self.char_emb(char_ids).transpose(1, 2)          # (B, embed_dim, seq)
-        pooled = [
-            F.adaptive_max_pool1d(conv(x), 1).squeeze(-1)    # (B, out_per_kernel)
-            for conv in self.convs
-        ]
-        return torch.cat(pooled, dim=-1)                      # (B, out_per_kernel * len(kernels))
-
-
-# ============================================================================
 # Full Model: SpectralCode
 # ============================================================================
 
@@ -594,21 +551,8 @@ class SpectralCode(nn.Module):
         self.neural_head = nn.Linear(fusion_dim, num_classes)
         self.spectral_head = nn.Linear(spectral_dim, num_classes)
 
-        # CharCNN: 3rd granularity stream (char-level stylometry)
-        char_kernels = getattr(config, "char_kernels", (3, 5, 7))
-        char_embed_dim = getattr(config, "char_embed_dim", 32)
-        char_out_per_kernel = getattr(config, "char_out_dim", 64)
-        self.char_cnn = CharCNN(
-            vocab_size=256, embed_dim=char_embed_dim,
-            out_per_kernel=char_out_per_kernel, kernels=char_kernels,
-        )
-        char_total_dim = char_out_per_kernel * len(char_kernels)
-        self.char_head = nn.Linear(char_total_dim, num_classes)
-
-        # 3-way gate over [neural || spectral || char]
         self.gate = nn.Sequential(
-            nn.Linear(fusion_dim + spectral_dim + char_total_dim, 64),
-            nn.GELU(), nn.Linear(64, 3),
+            nn.Linear(fusion_dim + spectral_dim, 64), nn.GELU(), nn.Linear(64, 2),
         )
         self.focal_gamma = 2.0
 
@@ -622,27 +566,19 @@ class SpectralCode(nn.Module):
         spectral_feats = extract_spectral_features(input_ids, attention_mask)
         h_spectral = self.spectral_encoder(spectral_feats)
 
-        # Char-level features: use lower 8 bits of input_ids as byte proxy
-        char_ids = (input_ids % 256).long()
-        h_char = self.char_cnn(char_ids)
-
         neural_logits = self.neural_head(h_neural)
         spectral_logits = self.spectral_head(h_spectral)
-        char_logits = self.char_head(h_char)
 
-        gate_input = torch.cat([h_neural, h_spectral, h_char], dim=-1)
-        gate_weights = F.softmax(self.gate(gate_input), dim=-1)           # (B, 3)
-        logits = (gate_weights[:, 0:1] * neural_logits +
-                  gate_weights[:, 1:2] * spectral_logits +
-                  gate_weights[:, 2:3] * char_logits)
+        gate_input = torch.cat([h_neural, h_spectral], dim=-1)
+        gate_weights = F.softmax(self.gate(gate_input), dim=-1)
+        logits = gate_weights[:, 0:1] * neural_logits + gate_weights[:, 1:2] * spectral_logits
 
         return {
             "logits": logits,
             "neural_logits": neural_logits,
             "spectral_logits": spectral_logits,
-            "char_logits": char_logits,
             "gate_weights": gate_weights,
-            "embeddings": h_neural,
+            "embeddings": h_neural,  # for HierTree loss
         }
 
 
@@ -663,21 +599,110 @@ class FocalLoss(nn.Module):
 
 
 # ============================================================================
-# MultiGranCode loss (Exp25: novelty is the 3-stream architecture)
+# Hierarchical Affinity Tree Loss (Exp18 novelty)
 # ============================================================================
 
+# Tree structure: defines parent groups for the 6 author classes
+# class indices in author task: 0=human, 1=codellama, 2=gpt, 3=llama3.1, 4=nxcode, 5=qwen1.5
+AUTHOR_TREE = {
+    "human":    {"family": 0},  # family 0 = human
+    "codellama":{"family": 1},  # family 1 = llama-family
+    "gpt":      {"family": 2},  # family 2 = gpt-family (singleton)
+    "llama3.1": {"family": 1},  # family 1 = llama-family
+    "nxcode":   {"family": 3},  # family 3 = qwen-family (KEY: nxcode IS fine-tuned qwen)
+    "qwen1.5":  {"family": 3},  # family 3 = qwen-family
+}
+# Maps class index → family index (used at train time)
+AUTHOR_FAMILY = [0, 1, 2, 1, 3, 3]  # indexed by class 0..5
+
+class HierarchicalAffinityLoss(nn.Module):
+    """
+    Hierarchical Affinity Tree Loss.
+
+    For each anchor sample, enforces:
+      dist(anchor, same_family_sample) + margin < dist(anchor, diff_family_sample)
+
+    This directly forces the Qwen-family (nxcode, qwen1.5) to cluster together
+    while being pushed away from the Llama-family and GPT.
+
+    Only active for the author (6-class) task; returns 0 for binary task.
+    """
+    def __init__(self, margin: float = 0.3, num_classes: int = 6):
+        super().__init__()
+        self.margin = margin
+        self.num_classes = num_classes
+        self.active = (num_classes == 6)
+
+    def forward(self, embeddings: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
+        """
+        Args:
+            embeddings: (B, D) L2-normalized feature vectors
+            labels: (B,) class indices 0..5
+        """
+        if not self.active or embeddings.shape[0] < 4:
+            return embeddings.new_zeros(1).squeeze()
+
+        # Build family labels for this batch
+        family_labels = torch.tensor(
+            [AUTHOR_FAMILY[l.item()] if l.item() < len(AUTHOR_FAMILY) else -1 for l in labels],
+            device=labels.device
+        )
+
+        # Pairwise cosine distances (1 - cos_sim), shape (B, B)
+        emb_norm = F.normalize(embeddings, p=2, dim=-1)
+        cos_sim = torch.mm(emb_norm, emb_norm.t())  # (B, B)
+        dist = 1.0 - cos_sim  # distance in [0, 2]
+
+        loss = embeddings.new_zeros(1).squeeze()
+        count = 0
+
+        B = embeddings.shape[0]
+        for i in range(B):
+            fi = family_labels[i].item()
+            if fi == -1:
+                continue
+            # same-family positives (excluding self)
+            same_mask = (family_labels == fi)
+            same_mask[i] = False
+            # different-family negatives
+            diff_mask = (family_labels != fi) & (family_labels != -1)
+
+            if same_mask.sum() == 0 or diff_mask.sum() == 0:
+                continue
+
+            # Hardest positive (farthest same-family)
+            d_pos = dist[i][same_mask].max()
+            # Hardest negative (closest diff-family)
+            d_neg = dist[i][diff_mask].min()
+
+            triplet = F.relu(d_pos - d_neg + self.margin)
+            loss = loss + triplet
+            count += 1
+
+        return loss / max(count, 1)
+
+
+_hier_loss_fn = None  # module-level singleton
+
+def _get_hier_loss(num_classes: int, margin: float) -> "HierarchicalAffinityLoss":
+    global _hier_loss_fn
+    if _hier_loss_fn is None or _hier_loss_fn.num_classes != num_classes:
+        _hier_loss_fn = HierarchicalAffinityLoss(margin=margin, num_classes=num_classes)
+    return _hier_loss_fn
+
 def compute_all_losses(model, outputs, labels, config, focal_loss_fn=None):
-    """3-stream loss: task (gated) + neural + spectral + char auxiliary heads."""
     if focal_loss_fn is None:
         focal_loss_fn = FocalLoss(gamma=2.0)
     task_loss = focal_loss_fn(outputs["logits"], labels)
     neural_loss = focal_loss_fn(outputs["neural_logits"], labels)
     spectral_loss = focal_loss_fn(outputs["spectral_logits"], labels)
-    char_loss = focal_loss_fn(outputs["char_logits"], labels)
-    # All 3 auxiliary streams supervised; char stream slightly down-weighted
-    total_loss = task_loss + 0.3 * neural_loss + 0.3 * spectral_loss + 0.2 * char_loss
-    return {"total": total_loss, "task": task_loss, "neural": neural_loss,
-            "spectral": spectral_loss, "aux": char_loss}
+    # Hierarchical affinity tree loss
+    hier_fn = _get_hier_loss(model.num_classes, getattr(config, "hier_margin", 0.3))
+    hier_fn = hier_fn.to(outputs["embeddings"].device)
+    hier_loss = hier_fn(outputs["embeddings"], labels)
+    lambda_hier = getattr(config, "lambda_hier", 0.4)
+    total_loss = task_loss + 0.3 * neural_loss + 0.3 * spectral_loss + lambda_hier * hier_loss
+    return {"total": total_loss, "task": task_loss, "neural": neural_loss, "spectral": spectral_loss, "hier": hier_loss}
 
 
 def compute_class_weights(labels: List[int], num_classes: int) -> torch.Tensor:
@@ -727,10 +752,6 @@ class Trainer:
         self.global_step = 0
         self.last_eval_metrics: Dict[str, Dict[str, float]] = {}
 
-    def _select_primary_score(self, macro_f1: float, weighted_f1: float) -> float:
-        metric = str(getattr(self.config, "primary_metric", "macro_f1")).strip().lower()
-        return weighted_f1 if metric == "weighted_f1" else macro_f1
-
     def train_epoch(self, epoch: int):
         self.model.train()
         total_losses = defaultdict(float)
@@ -767,10 +788,10 @@ class Trainer:
             if (batch_idx + 1) % self.config.log_every == 0:
                 avg_loss = total_losses["total"] / num_batches
                 lr = self.scheduler.get_last_lr()[0]
-                avg_aux = total_losses.get("aux", 0.0) / num_batches
+                avg_hier = total_losses.get("hier", 0.0) / num_batches
                 logger.info(
                     f"Epoch {epoch+1} | Step {batch_idx+1}/{len(self.train_loader)} | "
-                    f"[Exp25] Loss: {avg_loss:.4f} | Aux: {avg_aux:.4f} | LR: {lr:.2e}"
+                    f"Loss: {avg_loss:.4f} | Hier: {avg_hier:.4f} | LR: {lr:.2e}"
                 )
 
             if self.global_step > 0 and self.global_step % self.config.eval_every == 0:
@@ -806,44 +827,39 @@ class Trainer:
             total_loss += F.cross_entropy(outputs["logits"], labels).item()
             num_batches += 1
 
-        # Paper-aligned metric protocol:
-        # - AICD/CoDET: Macro-F1 primary
-        # - Droid: Weighted-F1 primary
+        from sklearn.metrics import recall_score, accuracy_score
         macro_f1 = f1_score(all_labels, all_preds, average="macro")
         weighted_f1 = f1_score(all_labels, all_preds, average="weighted")
+        macro_recall = recall_score(all_labels, all_preds, average="macro", zero_division=0)
+        weighted_recall = recall_score(all_labels, all_preds, average="weighted", zero_division=0)
         accuracy = accuracy_score(all_labels, all_preds)
-        primary_score = self._select_primary_score(macro_f1, weighted_f1)
         avg_loss = total_loss / max(num_batches, 1)
 
-        logger.info(
-            f"{split_name} | Loss: {avg_loss:.4f} | "
-            f"Macro-F1: {macro_f1:.4f} | Weighted-F1: {weighted_f1:.4f} | Acc: {accuracy:.4f} | "
-            f"Primary({self.config.primary_metric}): {primary_score:.4f}"
-        )
+        logger.info(f"{split_name} | Loss: {avg_loss:.4f} | Macro-F1: {macro_f1:.4f} | Weighted-F1: {weighted_f1:.4f}")
         self.last_eval_metrics[split_name] = {
             "loss": float(avg_loss),
             "macro_f1": float(macro_f1),
             "weighted_f1": float(weighted_f1),
+            "macro_recall": float(macro_recall),
+            "weighted_recall": float(weighted_recall),
             "accuracy": float(accuracy),
-            "primary_score": float(primary_score),
-            "primary_metric": self.config.primary_metric,
         }
 
         if split_name == "Test":
             report = classification_report(all_labels, all_preds, digits=4)
-            report_dict = classification_report(all_labels, all_preds, digits=4, output_dict=True)
             logger.info(f"\n{split_name} Classification Report:\n{report}")
+            report_dict = classification_report(all_labels, all_preds, digits=4, output_dict=True, zero_division=0)
             self.last_eval_metrics[split_name]["classification_report"] = report_dict
-        return primary_score
+        return macro_f1
 
     def save_checkpoint(self, tag: str = "latest"):
         os.makedirs(self.config.save_dir, exist_ok=True)
-        path = os.path.join(self.config.save_dir, f"multigrancode_{self.config.task}_{tag}.pt")
+        path = os.path.join(self.config.save_dir, f"hiertreecode_{self.config.task}_{tag}.pt")
         torch.save({"model_state_dict": self.model.state_dict(), "best_f1": self.best_f1, "global_step": self.global_step}, path)
         logger.info(f"Saved checkpoint to {path}")
 
     def load_checkpoint(self, tag: str = "best"):
-        path = os.path.join(self.config.save_dir, f"multigrancode_{self.config.task}_{tag}.pt")
+        path = os.path.join(self.config.save_dir, f"hiertreecode_{self.config.task}_{tag}.pt")
         if os.path.exists(path):
             ckpt = torch.load(path, map_location=self.config.device, weights_only=True)
             self.model.load_state_dict(ckpt["model_state_dict"])
@@ -853,7 +869,7 @@ class Trainer:
 
     def train(self):
         logger.info("=" * 60)
-        logger.info(f"[Exp25] Starting MultiGranCode Training - {self.config.task}")
+        logger.info(f"[Exp18] Starting HierTreeCode Training - {self.config.task}")
         logger.info(f"Classes: {self.model.num_classes} | Device: {self.config.device} | Precision: {self.precision}")
         logger.info(f"Batch: {self.config.batch_size}x{self.config.grad_accum_steps} = {self.config.batch_size * self.config.grad_accum_steps}")
         logger.info("=" * 60)
@@ -867,7 +883,7 @@ class Trainer:
             if val_f1 > self.best_f1:
                 self.best_f1 = val_f1
                 self.save_checkpoint("best")
-                logger.info(f"*** New Best Val {self.config.primary_metric}: {val_f1:.4f} ***")
+                logger.info(f"*** New Best Val Macro-F1: {val_f1:.4f} ***")
             self.save_checkpoint("latest")
 
         logger.info("\n" + "=" * 60)
@@ -880,22 +896,21 @@ class Trainer:
 
         test_metrics = self.last_eval_metrics.get("Test", {})
         test_weighted = test_metrics.get("weighted_f1", test_f1)
+        test_macro_recall = test_metrics.get("macro_recall", 0.0)
+        test_weighted_recall = test_metrics.get("weighted_recall", 0.0)
         test_acc = test_metrics.get("accuracy", 0.0)
-        test_macro = test_metrics.get("macro_f1", test_f1)
-        logger.info(
-            f"*** Final Test Primary({self.config.primary_metric}): {test_f1:.4f} | "
-            f"Macro-F1: {test_macro:.4f} | Weighted-F1: {test_weighted:.4f} | Acc: {test_acc:.4f} ***"
-        )
+        logger.info(f"*** Final Test Macro-F1: {test_f1:.4f} | Weighted-F1: {test_weighted:.4f} ***")
         return {
-            "test_f1": float(test_f1),                     # backward-compatible alias (primary score)
-            "test_macro_f1": float(test_macro),
+            "test_f1": float(test_f1),
+            "test_macro_f1": float(test_f1),
             "test_weighted_f1": float(test_weighted),
+            "test_macro_recall": float(test_macro_recall),
+            "test_weighted_recall": float(test_weighted_recall),
             "test_accuracy": float(test_acc),
             "best_val_f1": float(self.best_f1),
-            "best_val_macro_f1": float(self.last_eval_metrics.get("Val", {}).get("macro_f1", self.best_f1)),
-            "primary_metric": self.config.primary_metric,
+            "paper_primary_metric": "macro_f1",
             "num_classes": int(self.model.num_classes),
-            "test_per_class": self.last_eval_metrics.get("Test", {}).get("classification_report", {}),
+            "test_per_class": test_metrics.get("classification_report", {}),
         }
 
 
@@ -911,9 +926,10 @@ class CoDETM4Config:
 
     task: str = "binary"  # "binary" | "author"
 
-    max_train_samples: int = 100_000
+    # CLIMB strategy: small train, full test
+    max_train_samples: int = 100_000   # ~20% of CoDET-M4 train
     max_val_samples: int = 20_000
-    max_test_samples: int = 50_000
+    max_test_samples: int = -1          # -1 = FULL test (paper-comparable)
 
     eval_breakdown: bool = True
 
@@ -1214,7 +1230,7 @@ def preflight(cfg: CoDETM4Config, exp_cfg: SpectralConfig) -> Dict[str, object]:
 # BUILD CONFIG
 # ============================================================================
 
-def build_multigran_config(task_tag: str, save_root: str) -> SpectralConfig:
+def build_hiertree_config(task_tag: str, save_root: str) -> SpectralConfig:
     strict_ts = importlib.util.find_spec("tree_sitter_languages") is not None
     cfg = SpectralConfig(
         epochs=3,
@@ -1264,10 +1280,10 @@ def run_iid(task: str = "binary", codet_cfg: Optional[CoDETM4Config] = None, run
         codet_cfg.task = task
     set_seed(codet_cfg.seed)
 
-    exp_cfg = build_multigran_config(f"CoDET_{task}", codet_cfg.save_root)
+    exp_cfg = build_hiertree_config(f"CoDET_{task}", codet_cfg.save_root)
 
     logger.info("=" * 70)
-    logger.info(f"[Exp25][IID] MultiGranCode | task={task}")
+    logger.info(f"[Exp18][IID] HierTreeCode | task={task}")
     logger.info(f"GPU={_get_gpu_name()} | precision={exp_cfg.precision} | batch={exp_cfg.batch_size}x{exp_cfg.grad_accum_steps} | epochs={exp_cfg.epochs}")
     logger.info("=" * 70)
 
@@ -1316,7 +1332,7 @@ def _run_single_loo(hold_out_field: str, hold_out_value: str, codet_cfg: CoDETM4
     set_seed(cfg.seed)
 
     tag = f"CoDET_ood_{hold_out_field}_{hold_out_value}"
-    exp_cfg = build_multigran_config(tag, cfg.save_root)
+    exp_cfg = build_hiertree_config(tag, cfg.save_root)
 
     logger.info("=" * 70)
     logger.info(f"[OOD] LOO {hold_out_field}={hold_out_value}")
@@ -1411,6 +1427,166 @@ def _log_ood_summary(title: str, results: Dict[str, Dict]):
 
 
 # ============================================================================
+# DROID CONFIG + DATA LOADER
+# ============================================================================
+
+@dataclass
+class DroidConfig:
+    dataset_id: str = "project-droid/DroidCollection"
+    config_name: str = "default"
+    split_map: Dict[str, str] = field(default_factory=lambda: {
+        "train": "train",
+        "validation": "dev",
+        "test": "test",
+    })
+    # CLIMB strategy: small train, full test
+    max_train_samples: int = 100_000
+    max_val_samples: int = 20_000
+    max_test_samples: int = -1   # -1 = FULL test set
+    seed: int = 42
+    save_root: str = "./droid_checkpoints"
+
+
+def _map_droid_label_to_task(row: Dict[str, object], task: str) -> int:
+    """Map Droid rows to task labels.
+
+    Droid Labels: HUMAN_GENERATED, MACHINE_GENERATED, MACHINE_REFINED, MACHINE_GENERATED_ADVERSARIAL
+
+    T1 (2-class): 0=human, 1=machine (all non-human merged)
+    T3 (3-class): 0=human, 1=machine_generated (+ adversarial), 2=machine_refined
+    T4 (4-class): 0=human, 1=machine_generated, 2=machine_refined, 3=adversarial
+    """
+    normalized = str(row.get("Label", "")).upper()
+    if task == "T1":
+        return 0 if normalized == "HUMAN_GENERATED" else 1
+    if task == "T3":
+        if normalized == "HUMAN_GENERATED":
+            return 0
+        if normalized in ("MACHINE_GENERATED", "MACHINE_GENERATED_ADVERSARIAL"):
+            return 1
+        if normalized == "MACHINE_REFINED":
+            return 2
+        return -1
+    if task == "T4":
+        mapping = {
+            "HUMAN_GENERATED": 0,
+            "MACHINE_GENERATED": 1,
+            "MACHINE_REFINED": 2,
+            "MACHINE_GENERATED_ADVERSARIAL": 3,
+        }
+        return mapping.get(normalized, -1)
+    return -1
+
+
+def load_droid_data(cfg: DroidConfig, task: str):
+    """Load Droid + convert to {code, label}. Returns (train, val, test, num_classes)."""
+    def _convert_split(split_name: str, max_samples: int):
+        source_split = cfg.split_map[split_name]
+        logger.info(f"Loading Droid split '{source_split}' for {split_name}...")
+        ds = load_dataset(cfg.dataset_id, name=cfg.config_name, split=source_split)
+        ds = _sample_dataset(ds, max_samples, cfg.seed)
+
+        def _convert_row(row):
+            return {
+                "code": row.get("Code", "") or "",
+                "label": _map_droid_label_to_task(row, task),
+            }
+
+        converted = ds.map(_convert_row, remove_columns=ds.column_names)
+        converted = converted.filter(lambda x: x["label"] >= 0 and len(x["code"].strip()) > 0)
+        return converted
+
+    train_data = _convert_split("train", cfg.max_train_samples)
+    val_data = _convert_split("validation", cfg.max_val_samples)
+    test_data = _convert_split("test", cfg.max_test_samples)
+    labels = set(train_data["label"])
+    num_classes = len(labels)
+    logger.info(f"Droid sizes - Train: {len(train_data)}, Val: {len(val_data)}, Test: {len(test_data)}")
+    logger.info(f"Droid {task} classes: {num_classes}, Labels: {sorted(labels)}")
+    return train_data, val_data, test_data, num_classes
+
+
+# ============================================================================
+# DROID IID RUNNER
+# ============================================================================
+
+def run_droid_iid(task: str, droid_cfg: Optional[DroidConfig] = None) -> Dict[str, Any]:
+    """Train + eval HierTreeCode on Droid task (T1/T3/T4). Full test set."""
+    if droid_cfg is None:
+        droid_cfg = DroidConfig()
+
+    logger.info("\n" + "=" * 70)
+    logger.info(f"[Droid] Running IID task={task}")
+    logger.info("=" * 70)
+
+    train_data, val_data, test_data, num_classes = load_droid_data(droid_cfg, task)
+
+    # Build HierTreeCode config for Droid
+    exp_cfg = build_hiertree_config(f"droid_{task}", droid_cfg.save_root)
+    exp_cfg.task = task
+    tokenizer = AutoTokenizer.from_pretrained(exp_cfg.encoder_name)
+
+    train_loader, val_loader, test_loader = _make_loaders(
+        train_data, val_data, test_data, tokenizer, exp_cfg
+    )
+
+    # Class weights (handles class imbalance on Droid)
+    train_labels = train_data["label"]
+    class_weights = compute_class_weights(train_labels, num_classes)
+
+    model = SpectralCode(exp_cfg, num_classes=num_classes)
+    trainer = Trainer(exp_cfg, model, train_loader, val_loader, test_loader, class_weights=class_weights)
+    results = trainer.train()
+
+    # Add breakdown stats if possible (Droid has less metadata than CoDET)
+    results["task"] = task
+    results["num_classes"] = int(num_classes)
+
+    # Cleanup between runs
+    del model, trainer, train_loader, val_loader, test_loader
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+
+    return results
+
+
+def run_droid_suite(
+    droid_cfg: Optional[DroidConfig] = None,
+    tasks: Optional[List[str]] = None,
+) -> Dict[str, Any]:
+    """Run Droid T1 + T3 + T4 sequentially. Returns dict keyed by 'droid_<task>'."""
+    if droid_cfg is None:
+        droid_cfg = DroidConfig()
+    if tasks is None:
+        tasks = ["T1", "T3", "T4"]
+
+    results: Dict[str, Any] = {}
+    for task in tasks:
+        key = f"droid_{task}"
+        logger.info(f"\n{'#'*70}\nSUITE: {key}\n{'#'*70}")
+        try:
+            results[key] = run_droid_iid(task, droid_cfg)
+        except Exception as e:
+            logger.error(f"Droid {task} failed: {e}")
+            results[key] = {"error": str(e)}
+
+    # Log summary
+    logger.info(f"\n{'='*70}\nDROID SUITE SUMMARY\n{'='*70}")
+    logger.info("| Task | Macro-F1 | Weighted-F1 | Best Val |")
+    logger.info("|---|---:|---:|---:|")
+    for key, stats in results.items():
+        if "error" in stats:
+            logger.info(f"| {key} | ERROR | - | - |")
+            continue
+        logger.info(
+            f"| {key} | {stats.get('test_macro_f1', stats.get('test_f1', 0)):.4f} | "
+            f"{stats.get('test_weighted_f1', 0):.4f} | "
+            f"{stats.get('best_val_f1', 0):.4f} |"
+        )
+    return results
+
+
+# ============================================================================
 # FULL SUITE
 # ============================================================================
 
@@ -1436,7 +1612,7 @@ def run_suite(
     all_results: Dict[str, Any] = {}
 
     logger.info("\n" + "=" * 70)
-    logger.info(f"[Exp25] CoDET-M4 FULL BENCHMARK SUITE: {len(run_plan)} evaluation modes")
+    logger.info(f"[Exp18] CoDET-M4 FULL BENCHMARK SUITE: {len(run_plan)} evaluation modes")
     for i, (mode, task) in enumerate(run_plan):
         logger.info(f"  [{i+1}] {mode}/{task}")
     logger.info("=" * 70)
@@ -1504,75 +1680,152 @@ def _log_final_summary(all_results: Dict[str, Any], run_plan: List[Tuple[str, st
             safe[k] = {sk: sv for sk, sv in v.items() if not isinstance(sv, (np.ndarray, torch.Tensor))}
     try:
         logger.info("\nSUITE_RESULTS_JSON=" + json.dumps(
-            {"timestamp": ts, "method": "Exp25_MultiGranCode_CoDET_M4", "results": safe},
+            {"timestamp": ts, "method": "Exp18_HierTreeCode_CoDET_M4", "results": safe},
             ensure_ascii=True, default=str,
         ))
     except (TypeError, ValueError):
         logger.info("(JSON serialization of full results skipped)")
 
-    # Paper-ready copy-paste block (headline + per-class + tracker rows)
-    try:
-        from _paper_table import emit_paper_table
-        paper_run_plan = []
-        paper_results = {}
-        for mode, task in run_plan:
-            key = f"{mode}_{task}"
-            r = all_results.get(key, {})
-            if mode == "iid" and isinstance(r, dict) and "test_f1" in r:
-                paper_run_plan.append(("codet_m4", task))
-                paper_results[key] = r
-        if paper_run_plan:
-            emit_paper_table(
-                method_name="MultiGranCode",
-                exp_id="exp25",
-                run_plan=paper_run_plan,
-                results=paper_results,
-                timestamp=ts,
-                logger=logger,
-            )
-    except ImportError:
-        logger.warning("[_paper_table] helper not found; skipping paper-ready table emission")
+    # Paper-ready table emission is handled by the combined aggregator in __main__
+    # (so CoDET + Droid results appear in ONE table, not two separate ones).
 
 
 # ============================================================================
-# ENTRY POINT
+# COMBINED PAPER-TABLE AGGREGATOR (CoDET-M4 + Droid)
+# ============================================================================
+
+def emit_combined_paper_table(
+    codet_results: Optional[Dict[str, Any]],
+    droid_results: Optional[Dict[str, Any]],
+    method_name: str = "HierTreeCode",
+    exp_id: str = "climb_hiertree",
+):
+    """Flatten CoDET + Droid results into a single run_plan and emit one paper table."""
+    try:
+        from _paper_table import emit_paper_table
+    except ImportError:
+        logger.warning("[_paper_table] helper not found; skipping paper-ready table emission")
+        return
+
+    ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    flat_run_plan: List[Tuple[str, str]] = []
+    flat_results: Dict[str, Dict] = {}
+
+    # CoDET runs
+    if codet_results:
+        for key, stats in codet_results.items():
+            if not isinstance(stats, dict):
+                continue
+            # IID (iid_binary, iid_author) — stats is flat dict with test_f1 etc.
+            if key.startswith("iid_") and "test_f1" in stats:
+                task_id = key  # iid_binary | iid_author
+                flat_run_plan.append(("codet_m4", task_id))
+                flat_results[f"codet_m4_{task_id}"] = stats
+            # OOD (ood_generator, ood_language, ood_source) — stats is nested dict of held-out
+            elif key.startswith("ood_"):
+                mode = key.split("_", 1)[1]
+                for held, h_stats in stats.items():
+                    if isinstance(h_stats, dict) and "test_f1" in h_stats:
+                        task_id = f"ood_{mode}_{held}"
+                        flat_run_plan.append(("codet_m4", task_id))
+                        flat_results[f"codet_m4_{task_id}"] = h_stats
+
+    # Droid runs
+    if droid_results:
+        for key, stats in droid_results.items():
+            if not isinstance(stats, dict) or "error" in stats:
+                continue
+            # key format: droid_T1 / droid_T3 / droid_T4
+            task = key.replace("droid_", "")
+            flat_run_plan.append(("droid", task))
+            flat_results[f"droid_{task}"] = stats
+
+    if not flat_run_plan:
+        logger.warning("No results to emit in paper table")
+        return
+
+    emit_paper_table(
+        method_name=method_name,
+        exp_id=exp_id,
+        run_plan=flat_run_plan,
+        results=flat_results,
+        timestamp=ts,
+        logger=logger,
+    )
+
+
+# ============================================================================
+# ENTRY POINT — chains CoDET-M4 full suite → Droid T1/T3/T4 → combined table
 # ============================================================================
 
 if __name__ == "__main__":
     # ── Run mode ──────────────────────────────────────────────────────
-    # "full"         → run ALL evaluations (IID + OOD) = full paper benchmark
-    # "iid_only"     → run only IID binary + author (Tables 2-4, 7)
-    # "ood_only"     → run only OOD leave-one-out (proxy Tables 8-10)
-    # "single"       → run one specific task
-    RUN_MODE = "iid_only"
+    # "full"         → BOTH benches (CoDET full suite + Droid T1/T3/T4) + combined paper table
+    # "codet_only"   → CoDET full suite (IID + OOD) only
+    # "droid_only"   → Droid T1/T3/T4 only
+    # "codet_iid"    → CoDET IID binary + author only
+    # "single"       → single CoDET task
+    RUN_MODE = "full"
     RUN_PREFLIGHT_CHECK = True
-
     SINGLE_TASK = "binary"  # "binary" | "author"
 
+    # CLIMB: train on ~20% of each dataset, test on FULL test split
     codet_cfg = CoDETM4Config(
-        max_train_samples=100_000,
+        max_train_samples=100_000,   # ~20% of ~500K CoDET-M4 train
         max_val_samples=20_000,
-        max_test_samples=50_000,
+        max_test_samples=-1,          # FULL test (paper-comparable)
         eval_breakdown=True,
     )
+    droid_cfg = DroidConfig(
+        max_train_samples=100_000,   # subsample train for data-efficiency claim
+        max_val_samples=20_000,
+        max_test_samples=-1,          # FULL test
+    )
+
+    codet_results: Optional[Dict[str, Any]] = None
+    droid_results: Optional[Dict[str, Any]] = None
 
     try:
         if RUN_MODE == "full":
-            run_suite(FULL_RUN_PLAN, codet_cfg, run_preflight=RUN_PREFLIGHT_CHECK)
+            logger.info("\n" + "#" * 72)
+            logger.info("# PHASE 1/2: CoDET-M4 full suite (IID + OOD)")
+            logger.info("#" * 72)
+            codet_results = run_suite(FULL_RUN_PLAN, codet_cfg, run_preflight=RUN_PREFLIGHT_CHECK)
 
-        elif RUN_MODE == "iid_only":
+            # Cleanup between benchmarks (free VRAM, keep checkpoints on disk)
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+            import gc; gc.collect()
+
+            logger.info("\n" + "#" * 72)
+            logger.info("# PHASE 2/2: DroidCollection T1 + T3 + T4")
+            logger.info("#" * 72)
+            droid_results = run_droid_suite(droid_cfg)
+
+        elif RUN_MODE == "codet_only":
+            codet_results = run_suite(FULL_RUN_PLAN, codet_cfg, run_preflight=RUN_PREFLIGHT_CHECK)
+
+        elif RUN_MODE == "droid_only":
+            droid_results = run_droid_suite(droid_cfg)
+
+        elif RUN_MODE == "codet_iid":
             iid_plan = [e for e in FULL_RUN_PLAN if e[0] == "iid"]
-            run_suite(iid_plan, codet_cfg, run_preflight=RUN_PREFLIGHT_CHECK)
-
-        elif RUN_MODE == "ood_only":
-            ood_plan = [e for e in FULL_RUN_PLAN if e[0] == "ood"]
-            run_suite(ood_plan, codet_cfg, run_preflight=RUN_PREFLIGHT_CHECK)
+            codet_results = run_suite(iid_plan, codet_cfg, run_preflight=RUN_PREFLIGHT_CHECK)
 
         elif RUN_MODE == "single":
-            run_iid(SINGLE_TASK, codet_cfg, run_preflight=RUN_PREFLIGHT_CHECK)
+            r = run_iid(SINGLE_TASK, codet_cfg, run_preflight=RUN_PREFLIGHT_CHECK)
+            codet_results = {f"iid_{SINGLE_TASK}": r}
 
         else:
             raise ValueError(f"Unknown RUN_MODE: {RUN_MODE}")
+
+        # Emit ONE combined paper table covering both benches
+        emit_combined_paper_table(
+            codet_results=codet_results,
+            droid_results=droid_results,
+            method_name="HierTreeCode",
+            exp_id="climb_hiertree",
+        )
 
     except PreflightError as e:
         logger.error(f"PRE-FLIGHT FAILED: {e}")

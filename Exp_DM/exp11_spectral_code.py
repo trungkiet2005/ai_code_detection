@@ -1432,6 +1432,8 @@ class Trainer:
         if split_name == "Test":
             report = classification_report(all_labels, all_preds, digits=4)
             logger.info(f"\n{split_name} Classification Report:\n{report}")
+            report_dict = classification_report(all_labels, all_preds, digits=4, output_dict=True)
+            self.last_eval_metrics[split_name]["classification_report"] = report_dict
 
         return macro_f1
 
@@ -1500,8 +1502,12 @@ class Trainer:
         logger.info(f"\n*** Final Test Macro-F1: {test_f1:.4f} | Weighted-F1: {test_weighted:.4f} ***")
         return {
             "test_f1": float(test_f1),
+            "test_macro_f1": float(test_f1),
             "test_weighted_f1": float(test_weighted),
             "best_val_f1": float(self.best_f1),
+            "paper_primary_metric": "macro_f1",
+            "num_classes": int(self.model.num_classes),
+            "test_per_class": self.last_eval_metrics.get("Test", {}).get("classification_report", {}),
         }
 
 
@@ -1677,6 +1683,20 @@ def run_benchmark_suite(run_plan: List[Tuple[str, str]], base_config: Optional[C
         "results": results,
     }
     logger.info("SUITE_RESULTS_JSON=" + json.dumps(machine_block, ensure_ascii=True))
+
+    # Paper-ready copy-paste block (headline + per-class + tracker rows)
+    try:
+        from _paper_table import emit_paper_table
+        emit_paper_table(
+            method_name="SpectralCode",
+            exp_id="exp11",
+            run_plan=run_plan,
+            results=results,
+            timestamp=ts,
+            logger=logger,
+        )
+    except ImportError:
+        logger.warning("[_paper_table] helper not found; skipping paper-ready table emission")
     return results
 
 

@@ -271,13 +271,53 @@ Quick take:
 
 ### exp18 - HierTreeCode (Cross-domain stress-test)
 
-**Run timestamp:** `2026-04-01 07:22:11` (full suite done)
+**Run timestamp:** `2026-04-01 05:24:40 → 07:22:11` (full suite done, ~2h on H100 BF16)
 
-- Preflight + full suite completed for 5 runs on H100 BF16: `aicd_T1`, `aicd_T2`, `aicd_T3`, `droid_T3`, `droid_T4`
+- Preflight + full suite completed for 5 runs: `aicd_T1`, `aicd_T2`, `aicd_T3`, `droid_T3`, `droid_T4`
 - AICD final test Macro-F1: `T1=0.2572`, `T2=0.2071`, `T3=0.5502`
 - Droid final test Macro-F1: `T3=0.8531`, `T4=0.8453`
 - Best Val Macro-F1: `AICD_T1=0.9949`, `AICD_T2=0.2543`, `AICD_T3=0.7783`, `DROID_T3=0.8560`, `DROID_T4=0.8474`
-- Overall: strongest AICD T2 so far, strong Droid stability, but AICD T1 remains severe val-test collapse (0.9949 -> 0.2572)
+- Overall: strongest AICD T2 so far, strong Droid stability, but AICD T1 remains severe val-test collapse (0.9949 → 0.2572)
+- Params (task-dependent head): T1=151.74M / T2=151.75M / T3=151.74M / Droid-T3=151.74M
+
+#### Hier loss activity (confirms design correctness)
+
+| Task | # Classes | Hier ep1 | Hier ep3 | Δ | Behavior |
+|------|-----------|---------|---------|---|----------|
+| AICD T1 | 2 (binary) | **0.0000** | **0.0000** | 0% | ✅ **Correctly disabled** (family tree inactive on binary) |
+| AICD T2 | 12 | 0.3643 | 0.1944 | **-47%** | ✅ Strongest convergence; family constraint actively organizing |
+| AICD T3 | 4 | 0.3946 | 0.3072 | -22% | ✅ Moderate convergence |
+| DROID T3 | 3 | 0.3798 | 0.3035 | -20% | ✅ Converges to plateau |
+
+#### AICD T2 — per-class test F1 (12-class family attribution)
+
+| Class | Support | F1 | Status |
+|:------|--------:|:--:|:-------|
+| 0 | 23 870 | **0.0000** | ⚠️ **Full collapse** (majority class; never predicted) |
+| 10 | 10 260 | **0.5935** | Strongest |
+| 11 | 810 | 0.3340 | — |
+| 9 | 1 407 | 0.2579 | — |
+| 5 | 2 105 | 0.2531 | — |
+| 3 | 853 | 0.2398 | — |
+| 6 | 2 062 | 0.2237 | — |
+| 2 | 2 617 | 0.1799 | — |
+| 4 | 381 | 0.1430 | — |
+| 8 | 1 110 | 0.1372 | — |
+| 7 | 3 593 | 0.1110 | — |
+| 1 | 932 | 0.0121 | ⚠️ Near-zero (minority + LLM confusion) |
+
+> **Key issue:** class 0 (47.7% of test) is never predicted → severe minority class bias from class-weighted focal + label imbalance. Macro-F1 (0.2071) ≪ weighted-F1 (0.1802) ∴ improvement requires rebalancing, not more architecture.
+
+#### AICD T3 — per-class test F1 (4-class: human/machine/hybrid/adversarial)
+
+| Class | Support | Precision | Recall | F1 |
+|:------|--------:|:---------:|:------:|:--:|
+| 0 (human) | 33 668 | 0.9879 | 0.5852 | **0.7350** |
+| 1 | 5 841 | 0.4030 | 0.6828 | 0.5068 |
+| 3 (adversarial) | 3 198 | 0.5248 | 0.8580 | **0.6512** |
+| 2 (hybrid) | 7 293 | 0.2289 | 0.4685 | **0.3075** ← weakest |
+
+> Human separation strong (0.7350); **hybrid class (class 2) is the bottleneck** — adversarial code is easier to flag than mixed human-AI authorship.
 
 ---
 

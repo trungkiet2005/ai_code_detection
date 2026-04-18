@@ -1215,9 +1215,13 @@ def evaluate(
         per_group[gname] = {"n": int(mask.sum()), "macro_f1": gf1}
         logger.info("  Group %s: n=%d  macro_f1=%.4f", gname, mask.sum(), gf1)
 
+    report_dict: Dict[str, Any] = {}
     if split_name in {"Test", "OOD"}:
         report = classification_report(labels_arr, preds_arr, digits=4, zero_division=0)
         logger.info("\n%s Classification Report:\n%s", split_name, report)
+        report_dict = classification_report(
+            labels_arr, preds_arr, digits=4, output_dict=True, zero_division=0
+        )
 
     return {
         "macro_f1":    macro_f1,
@@ -1227,6 +1231,7 @@ def evaluate(
         "preds":       preds_arr,
         "labels":      labels_arr,
         "group_ids":   gids_arr,
+        "classification_report": report_dict,
     }
 
 
@@ -1355,6 +1360,8 @@ def _run_experiment(
         "per_group":         test_out["per_group"],
         "final_group_weights": {k: v for k, v in dro_loss_fn.get_weight_snapshot().items()
                                 if not k.startswith("_")},
+        "num_classes":       int(num_classes),
+        "test_per_class":    test_out.get("classification_report", {}),
     }
 
     if config.eval_breakdown:
@@ -1523,6 +1530,29 @@ def _log_final_summary(all_results: Dict[str, Any]):
         "results":   safe,
     }
     print("SUITE_RESULTS_JSON=" + json.dumps(payload, ensure_ascii=True, default=_make_serializable))
+
+    # Paper-ready copy-paste block (headline + per-class + tracker rows)
+    try:
+        from _paper_table import emit_paper_table
+        paper_run_plan = []
+        paper_results = {}
+        for task_key in ("iid_binary", "iid_author"):
+            r = all_results.get(task_key, {})
+            if isinstance(r, dict) and "test_f1" in r and "error" not in r:
+                task = task_key.replace("iid_", "")
+                paper_run_plan.append(("codet_m4", task))
+                paper_results[task_key] = r
+        if paper_run_plan:
+            emit_paper_table(
+                method_name="GroupDRO",
+                exp_id="exp15",
+                run_plan=paper_run_plan,
+                results=paper_results,
+                timestamp=ts,
+                logger=logger,
+            )
+    except ImportError:
+        logger.warning("[_paper_table] helper not found; skipping paper-ready table emission")
 
 
 # ============================================================================

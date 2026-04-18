@@ -746,6 +746,8 @@ class Trainer:
         if split_name == "Test":
             report = classification_report(all_labels, all_preds, digits=4)
             logger.info(f"\n{split_name} Classification Report:\n{report}")
+            report_dict = classification_report(all_labels, all_preds, digits=4, output_dict=True)
+            self.last_eval_metrics[split_name]["classification_report"] = report_dict
         return macro_f1
 
     def save_checkpoint(self, tag: str = "latest"):
@@ -792,7 +794,13 @@ class Trainer:
 
         test_weighted = self.last_eval_metrics.get("Test", {}).get("weighted_f1", test_f1)
         logger.info(f"*** Final Test Macro-F1: {test_f1:.4f} | Weighted-F1: {test_weighted:.4f} ***")
-        return {"test_f1": float(test_f1), "test_weighted_f1": float(test_weighted), "best_val_f1": float(self.best_f1)}
+        return {
+            "test_f1": float(test_f1),
+            "test_weighted_f1": float(test_weighted),
+            "best_val_f1": float(self.best_f1),
+            "num_classes": int(self.model.num_classes),
+            "test_per_class": self.last_eval_metrics.get("Test", {}).get("classification_report", {}),
+        }
 
 
 # ============================================================================
@@ -1405,6 +1413,29 @@ def _log_final_summary(all_results: Dict[str, Any], run_plan: List[Tuple[str, st
         ))
     except (TypeError, ValueError):
         logger.info("(JSON serialization of full results skipped)")
+
+    # Paper-ready copy-paste block (headline + per-class + tracker rows)
+    try:
+        from _paper_table import emit_paper_table
+        paper_run_plan = []
+        paper_results = {}
+        for mode, task in run_plan:
+            key = f"{mode}_{task}"
+            r = all_results.get(key, {})
+            if mode == "iid" and isinstance(r, dict) and "test_f1" in r:
+                paper_run_plan.append(("codet_m4", task))
+                paper_results[key] = r
+        if paper_run_plan:
+            emit_paper_table(
+                method_name="SpectralCode",
+                exp_id="exp11",
+                run_plan=paper_run_plan,
+                results=paper_results,
+                timestamp=ts,
+                logger=logger,
+            )
+    except ImportError:
+        logger.warning("[_paper_table] helper not found; skipping paper-ready table emission")
 
 
 # ============================================================================

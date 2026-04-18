@@ -129,15 +129,23 @@ main(task="T1", config=config)
 ## Project Structure
 
 ```
-CodeOrigin/
-├── experiment/
-│   └── exp00_codeorigin.py    # Full implementation (single-file, Kaggle-ready)
+ai_code_detection/
+├── README.md
+├── experiment/                 # Baseline: exp00_codeorigin.py (Kaggle-ready single-file)
+├── Exp_DM/                     # Novel methods on AICD + Droid (exp01..30)
+│   └── dm_tracker.md           # Results tracker for AICD + Droid
+├── Exp_CodeDet/                # Novel methods on CoDET-M4 (exp11..38)
+│   └── tracker.md              # Leaderboard for CoDET-M4
 ├── docs/
-│   └── performance_tracker.md # Experiment logs and results
-├── paper.txt                  # AICD-Bench paper reference
-├── read_dataset.txt           # Dataset schema
-└── README.md
+│   ├── CLAUDE.md               # Full repo context — start here for any AI assistant
+│   ├── performance_tracker.md  # Legacy tracker (superseded by Exp_DM/dm_tracker.md)
+│   ├── references/             # Source papers, dataset schemas, research notes
+│   └── archive/                # Completed session artifacts
+├── Slide/                      # Proposal deck (tex/pdf) + presentation script
+└── Formatting_Instructions_For_NeurIPS_2026/   # NeurIPS 2026 LaTeX template
 ```
+
+**New to the repo?** Read [docs/CLAUDE.md](docs/CLAUDE.md) first.
 
 ## Requirements
 

@@ -1223,6 +1223,10 @@ def run_iid_suite(
         "best_val_f1": float(best_f1),
         "breakdown": breakdown,
         "task": task,
+        "num_classes": int(num_classes),
+        "test_per_class": classification_report(
+            labels, preds, digits=4, output_dict=True, zero_division=0
+        ),
     }
 
 
@@ -1550,6 +1554,30 @@ def main():
         default=str,
     )
     print(f"\nSUITE_RESULTS_JSON={suite_json}")
+
+    # Paper-ready copy-paste block (headline + per-class + tracker rows)
+    try:
+        from _paper_table import emit_paper_table
+        paper_run_plan = []
+        paper_results = {}
+        for mode, task in plan:
+            key = f"{mode}_{task}"
+            r = all_results.get(key, {})
+            if mode == "iid" and isinstance(r, dict) and "test_f1" in r:
+                paper_run_plan.append(("codet_m4", task))
+                paper_results[key] = r
+        if paper_run_plan:
+            emit_paper_table(
+                method_name="HyperNetCode",
+                exp_id="exp16",
+                run_plan=paper_run_plan,
+                results=paper_results,
+                timestamp=ts,
+                logger=logger,
+            )
+    except ImportError:
+        logger.warning("[_paper_table] helper not found; skipping paper-ready table emission")
+
     return all_results
 
 

@@ -1118,6 +1118,10 @@ def _run_training(
         "test_f1": float(test_f1),
         "test_weighted_f1": float(test_wf1),
         "best_val_f1": float(best_val_f1),
+        "num_classes": int(num_classes),
+        "test_per_class": classification_report(
+            test_labels, test_preds, digits=4, output_dict=True, zero_division=0
+        ),
     }
 
     if codet_cfg.eval_breakdown:
@@ -1333,6 +1337,29 @@ def _log_final_summary(all_results: Dict[str, Any], run_plan: List[Tuple[str, st
         logger.info("SUITE_RESULTS_JSON=%s", json_str)
     except (TypeError, ValueError) as exc:
         logger.warning("JSON serialisation of full results skipped: %s", exc)
+
+    # Paper-ready copy-paste block (headline + per-class + tracker rows)
+    try:
+        from _paper_table import emit_paper_table
+        paper_run_plan = []
+        paper_results = {}
+        for mode, task in run_plan:
+            key = f"{mode}_{task}"
+            r = all_results.get(key, {})
+            if mode == "iid" and isinstance(r, dict) and "test_f1" in r:
+                paper_run_plan.append(("codet_m4", task))
+                paper_results[key] = r
+        if paper_run_plan:
+            emit_paper_table(
+                method_name="ProtoCon",
+                exp_id="exp14",
+                run_plan=paper_run_plan,
+                results=paper_results,
+                timestamp=ts,
+                logger=logger,
+            )
+    except ImportError:
+        logger.warning("[_paper_table] helper not found; skipping paper-ready table emission")
 
 
 def main():
