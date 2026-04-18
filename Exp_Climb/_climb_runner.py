@@ -23,14 +23,16 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import torch
 
-from _common import PreflightError, logger
+from _common import PreflightError, get_gpu_name, logger
 from _data_codet import (
     CoDETM4Config,
     FULL_RUN_PLAN,
+    preflight as preflight_codet,
     run_codet_suite,
     run_iid as run_codet_iid,
 )
-from _data_droid import DroidConfig, run_droid_suite
+from _data_droid import DroidConfig, preflight_droid, run_droid_suite
+from _features import ast_parser_available
 
 
 # ---------------------------------------------------------------------------
@@ -92,6 +94,128 @@ def emit_combined_paper_table(
 
 
 # ---------------------------------------------------------------------------
+# Environment + full-suite preflight (fail FAST before committing compute)
+# ---------------------------------------------------------------------------
+
+def preflight_env() -> Dict[str, Any]:
+    """Check CUDA, tree-sitter, torch version. Raises PreflightError on failure."""
+    import torch as _torch
+    import transformers as _tf
+
+    logger.info("\n" + "=" * 70)
+    logger.info("PREFLIGHT ENV")
+    logger.info("=" * 70)
+
+    gpu = get_gpu_name()
+    cuda_available = _torch.cuda.is_available()
+    report = {
+        "gpu": gpu,
+        "cuda_available": cuda_available,
+        "torch_version": _torch.__version__,
+        "transformers_version": _tf.__version__,
+        "tree_sitter_available": ast_parser_available(),
+    }
+    logger.info(
+        f"  GPU={gpu} | CUDA={cuda_available} | "
+        f"torch={_torch.__version__} | transformers={_tf.__version__} | "
+        f"tree-sitter={'OK' if report['tree_sitter_available'] else 'MISSING'}"
+    )
+    if not cuda_available:
+        logger.warning("  No CUDA device detected -- will run on CPU (extremely slow)")
+    if not report["tree_sitter_available"]:
+        logger.warning(
+            "  tree-sitter fallback active -- AST features use regex heuristic (lower quality)"
+        )
+    return report
+
+
+def _print_full_run_plan(
+    run_mode: str,
+    codet_plan: List[Tuple[str, str]],
+    droid_tasks: List[str],
+    codet_cfg: CoDETM4Config,
+    droid_cfg: DroidConfig,
+    method_name: str,
+):
+    """Print the full list of planned runs + data sizes before committing compute."""
+    logger.info("\n" + "#" * 72)
+    logger.info(f"# FULL RUN PLAN ({method_name}) -- mode={run_mode}")
+    logger.info("#" * 72)
+
+    logger.info(f"\nCoDET-M4 | train={codet_cfg.max_train_samples:,} val={codet_cfg.max_val_samples:,} "
+                f"test={'FULL' if codet_cfg.max_test_samples <= 0 else f'{codet_cfg.max_test_samples:,}'}")
+    ood_counts = {
+        ("ood", "generator"): 5,
+        ("ood", "language"): 3,
+        ("ood", "source"): 3,
+    }
+    codet_runs = 0
+    for i, (mode, task) in enumerate(codet_plan):
+        extra = f" ({ood_counts[(mode, task)]} held-outs)" if (mode, task) in ood_counts else ""
+        logger.info(f"  [C{i+1}] {mode}/{task}{extra}")
+        codet_runs += ood_counts.get((mode, task), 1)
+
+    logger.info(f"\nDroid | train={droid_cfg.max_train_samples:,} val={droid_cfg.max_val_samples:,} "
+                f"test={'FULL' if droid_cfg.max_test_samples <= 0 else f'{droid_cfg.max_test_samples:,}'}")
+    for i, task in enumerate(droid_tasks):
+        logger.info(f"  [D{i+1}] {task}")
+
+    total = codet_runs + len(droid_tasks)
+    logger.info(f"\nTOTAL TRAIN-EVAL CYCLES: {total} "
+                f"(CoDET={codet_runs} + Droid={len(droid_tasks)}) -- ~{total * 25} min on H100")
+    logger.info("#" * 72 + "\n")
+
+
+def preflight_full_climb(
+    codet_cfg: CoDETM4Config,
+    droid_cfg: DroidConfig,
+    run_mode: str,
+    method_name: str,
+    droid_tasks: Optional[List[str]] = None,
+) -> Dict[str, Any]:
+    """One-shot preflight for the entire climb.
+
+    Runs env check + CoDET probe + Droid probe (per needed bench). Aborts early
+    (PreflightError) before any training so you don't lose 7 hours to find out
+    Droid auth was broken.
+    """
+    if droid_tasks is None:
+        droid_tasks = ["T1", "T3", "T4"]
+
+    report: Dict[str, Any] = {"env": preflight_env()}
+
+    need_codet = run_mode in ("full", "codet_only", "codet_iid", "single")
+    need_droid = run_mode in ("full", "droid_only")
+
+    _print_full_run_plan(
+        run_mode=run_mode,
+        codet_plan=FULL_RUN_PLAN if run_mode in ("full", "codet_only") else [e for e in FULL_RUN_PLAN if e[0] == "iid"],
+        droid_tasks=droid_tasks if need_droid else [],
+        codet_cfg=codet_cfg,
+        droid_cfg=droid_cfg,
+        method_name=method_name,
+    )
+
+    if need_codet:
+        # Build a temp exp_cfg just for preflight tokenizer/AST check
+        from _common import apply_hardware_profile, SpectralConfig
+        exp_cfg = apply_hardware_profile(SpectralConfig(
+            task=codet_cfg.task, benchmark="codet_m4",
+            save_dir=codet_cfg.save_root,
+            require_tree_sitter=False,  # don't hard-fail preflight on regex fallback
+        ))
+        report["codet"] = preflight_codet(codet_cfg, exp_cfg)
+
+    if need_droid:
+        report["droid"] = preflight_droid(droid_cfg, tasks=droid_tasks)
+
+    logger.info("\n" + "=" * 70)
+    logger.info(f"PREFLIGHT FULL CLIMB ({method_name}) -- ALL CHECKS PASS")
+    logger.info("=" * 70 + "\n")
+    return report
+
+
+# ---------------------------------------------------------------------------
 # Full climb orchestrator
 # ---------------------------------------------------------------------------
 
@@ -128,6 +252,19 @@ def run_full_climb(
     if checkpoint_tag_prefix is None:
         checkpoint_tag_prefix = exp_id
 
+    # ── One-shot full-climb preflight (env + CoDET + Droid probes + run plan).
+    # Fails FAST before any training -- saves hours on misconfig.
+    if run_preflight:
+        preflight_full_climb(
+            codet_cfg=codet_cfg,
+            droid_cfg=droid_cfg,
+            run_mode=run_mode,
+            method_name=method_name,
+        )
+
+    # Inner suites should NOT re-run preflight (we already ran it once above).
+    inner_preflight = False
+
     codet_results: Optional[Dict[str, Any]] = None
     droid_results: Optional[Dict[str, Any]] = None
 
@@ -138,7 +275,7 @@ def run_full_climb(
             logger.info("#" * 72)
             codet_results = run_codet_suite(
                 FULL_RUN_PLAN, codet_cfg, loss_fn=loss_fn,
-                run_preflight=run_preflight, checkpoint_tag_prefix=checkpoint_tag_prefix,
+                run_preflight=inner_preflight, checkpoint_tag_prefix=checkpoint_tag_prefix,
             )
 
             # Free VRAM + Python-side tensors between benches
@@ -156,7 +293,7 @@ def run_full_climb(
         elif run_mode == "codet_only":
             codet_results = run_codet_suite(
                 FULL_RUN_PLAN, codet_cfg, loss_fn=loss_fn,
-                run_preflight=run_preflight, checkpoint_tag_prefix=checkpoint_tag_prefix,
+                run_preflight=inner_preflight, checkpoint_tag_prefix=checkpoint_tag_prefix,
             )
 
         elif run_mode == "droid_only":
@@ -168,13 +305,13 @@ def run_full_climb(
             iid_plan = [e for e in FULL_RUN_PLAN if e[0] == "iid"]
             codet_results = run_codet_suite(
                 iid_plan, codet_cfg, loss_fn=loss_fn,
-                run_preflight=run_preflight, checkpoint_tag_prefix=checkpoint_tag_prefix,
+                run_preflight=inner_preflight, checkpoint_tag_prefix=checkpoint_tag_prefix,
             )
 
         elif run_mode == "single":
             r = run_codet_iid(
                 single_task, codet_cfg, loss_fn=loss_fn,
-                run_preflight=run_preflight, checkpoint_tag_prefix=checkpoint_tag_prefix,
+                run_preflight=inner_preflight, checkpoint_tag_prefix=checkpoint_tag_prefix,
             )
             codet_results = {f"iid_{single_task}": r}
 

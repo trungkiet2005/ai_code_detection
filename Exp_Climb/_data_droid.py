@@ -19,7 +19,7 @@ import torch
 from datasets import Dataset, load_dataset
 from transformers import AutoTokenizer
 
-from _common import SpectralConfig, apply_hardware_profile, logger, set_seed
+from _common import PreflightError, SpectralConfig, apply_hardware_profile, logger, set_seed
 from _model import SpectralCode
 from _trainer import Trainer, compute_class_weights
 
@@ -139,6 +139,74 @@ def _make_droid_loaders(train_data, val_data, test_data, tokenizer, exp_cfg: Spe
         DataLoader(test_ds, shuffle=False, **loader_kwargs),
     )
 
+
+# ===========================================================================
+# Preflight
+# ===========================================================================
+
+def preflight_droid(droid_cfg: DroidConfig, tasks: Optional[List[str]] = None) -> Dict[str, Any]:
+    """Quick dataset access + label sanity check for Droid.
+
+    Loads a **tiny** sample (1000 rows) from each split for each requested task,
+    verifying: HF dataset reachable, non-zero labels per task, sensible class count.
+    Raises PreflightError on failure.
+    """
+    if tasks is None:
+        tasks = ["T1", "T3", "T4"]
+
+    logger.info("\n" + "=" * 70)
+    logger.info(f"PREFLIGHT DROID | dataset={droid_cfg.dataset_id} | tasks={tasks}")
+    logger.info("=" * 70)
+
+    report: Dict[str, Any] = {"dataset_id": droid_cfg.dataset_id, "tasks": {}}
+    for task in tasks:
+        try:
+            logger.info(f"[preflight] Probing Droid {task}...")
+            probe_train = load_dataset(
+                droid_cfg.dataset_id,
+                name=droid_cfg.config_name,
+                split=droid_cfg.split_map["train"],
+            ).select(range(min(1000, 100_000)))
+
+            mapped_labels = [_map_droid_label_to_task(r, task) for r in probe_train]
+            valid = [l for l in mapped_labels if l >= 0]
+            if len(valid) < 100:
+                raise PreflightError(
+                    f"Droid {task}: only {len(valid)}/1000 probe rows mapped to valid labels"
+                )
+            class_count = len(set(valid))
+            expected = {"T1": 2, "T3": 3, "T4": 4}[task]
+            if class_count < 2:
+                raise PreflightError(
+                    f"Droid {task}: found {class_count} classes in probe (need >= 2). "
+                    f"Expected {expected}. Check label mapping."
+                )
+            if class_count > expected:
+                logger.warning(
+                    f"Droid {task}: probe found {class_count} classes, expected {expected} "
+                    f"(may converge on full data)"
+                )
+            report["tasks"][task] = {
+                "probe_size": len(probe_train),
+                "valid_labels": len(valid),
+                "class_count": class_count,
+                "expected_classes": expected,
+            }
+            logger.info(
+                f"  Droid {task} OK | valid={len(valid)}/1000 | classes={class_count} (expected {expected})"
+            )
+        except PreflightError:
+            raise
+        except Exception as e:
+            raise PreflightError(f"Droid {task} probe failed: {e}") from e
+
+    logger.info("PREFLIGHT DROID OK")
+    return report
+
+
+# ===========================================================================
+# Config builder
+# ===========================================================================
 
 def build_droid_config(task_tag: str, save_root: str) -> SpectralConfig:
     cfg = SpectralConfig(

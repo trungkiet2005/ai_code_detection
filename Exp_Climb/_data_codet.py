@@ -538,12 +538,17 @@ def run_codet_suite(
         logger.info(f"  [{i+1}] {mode}/{task}")
     logger.info("=" * 70)
 
+    # Run preflight ONCE for the whole suite (not per task). Subsequent
+    # run_iid / _run_single_loo calls receive run_preflight=False.
+    preflight_done = False
+
     for mode, task in run_plan:
         key = f"{mode}_{task}"
         logger.info(f"\n{'#'*70}\nSUITE: {key}\n{'#'*70}")
+        do_preflight = run_preflight and not preflight_done
         if mode == "iid":
             all_results[key] = run_iid(
-                task, base_cfg, loss_fn=loss_fn, run_preflight=run_preflight,
+                task, base_cfg, loss_fn=loss_fn, run_preflight=do_preflight,
                 checkpoint_tag_prefix=checkpoint_tag_prefix,
             )
         elif mode == "ood" and task == "generator":
@@ -554,6 +559,7 @@ def run_codet_suite(
             all_results[key] = run_ood_source(base_cfg, loss_fn=loss_fn)
         else:
             logger.warning(f"Unknown suite entry: {mode}/{task}")
+        preflight_done = True
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
 
