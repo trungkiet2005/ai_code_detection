@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(gh pr:*)",
+      "Bash(where gh:*)",
+      "Bash(git stash:*)",
+      "Bash(git fetch:*)",
+      "Bash(git reset:*)",
+      "Bash(ls -lh /d/AI_RESEARCH/Software_Reseach/AICD_Bench/Exp_TK/*.py)"
+    ]
+  }
+}
