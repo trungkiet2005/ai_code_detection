@@ -246,6 +246,11 @@ Fill in after each `exp_NN_*.py` run by pasting the `BEGIN_PAPER_TABLE` block. B
 | 6 | **FlowCodeDet** | [exp_06_flow_matching.py](exp_06_flow_matching.py) | 20% | lean | TBD | TBD | TBD | TBD | TBD | ⏳ pending |
 | 7 | **SAMFlatCode** | [exp_07_sam_flat.py](exp_07_sam_flat.py) | 20% | lean | TBD | TBD | TBD | TBD | TBD | ⏳ pending |
 | 8 | **POEMPolarizedCode** | [exp_08_polarized_code.py](exp_08_polarized_code.py) | 20% | lean | TBD | TBD | TBD | TBD | TBD | ⏳ pending |
+| 9 | **EpiplexityCode** | [exp_09_epiplexity.py](exp_09_epiplexity.py) | 20% | lean | TBD | TBD | TBD | TBD | TBD | ⏳ pending |
+| 10 | **PredictiveCodingCode** | [exp_10_predictive_coding.py](exp_10_predictive_coding.py) | 20% | lean | TBD | TBD | TBD | TBD | TBD | ⏳ pending |
+| 11 | **PersistentHomologyCode** | [exp_11_persistent_homology.py](exp_11_persistent_homology.py) | 20% | lean | TBD | TBD | TBD | TBD | TBD | ⏳ pending |
+| 12 | **AvailabilityPredictivityCode** | [exp_12_shortcut_foundations.py](exp_12_shortcut_foundations.py) | 20% | lean | TBD | TBD | TBD | TBD | TBD | ⏳ pending |
+| 13 | **NTKAlignCode** | [exp_13_ntk_feature_selection.py](exp_13_ntk_feature_selection.py) | 20% | lean | TBD | TBD | TBD | TBD | TBD | ⏳ pending |
 
 ---
 
