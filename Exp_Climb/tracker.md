@@ -33,6 +33,9 @@ All 8 lean-mode tasks are reported below (CoDET: 2 IID + 3 OOD representative ·
 | — | Exp_14 | GHCurriculum + ablation | lean | — | — | — | — | — | — | — | — | — | — | — | ⏳ pending |
 | — | Exp_15 | GenealogyDistill + ablation | lean | — | — | — | — | — | — | — | — | — | — | — | ⏳ pending |
 | — | Exp_16 | DualModeFlowRAG + ablation | lean | — | — | — | — | — | — | — | — | — | — | — | ⏳ pending |
+| — | Exp_17 | TTTCode + ablation | lean | — | — | — | — | — | — | — | — | — | — | — | ⏳ pending |
+| — | Exp_18 | CausalInterventionCode + ablation | lean | — | — | — | — | — | — | — | — | — | — | — | ⏳ pending |
+| — | Exp_19 | GradAlignMoE + ablation | lean | — | — | — | — | — | — | — | — | — | — | — | ⏳ pending |
 | **REF** | Paper | **UniXcoder** | — | 98.65 | — | **66.33** | — | — | — | — | — | — | — | — | reference |
 | REF | Paper | CodeT5 | — | 98.35 | `-0.30` | 62.45 | `-3.88` | — | — | — | — | — | — | — | reference |
 | REF | Paper | CodeBERT | — | 95.70 | `-2.95` | 64.80 | `-1.53` | — | — | — | — | — | — | — | reference |
@@ -565,6 +568,36 @@ Keep it to one paragraph per method. Per-class detail lives in the `BEGIN_PAPER_
 - **Risk:** 4 simultaneous auxiliary losses can fight each other; the
   per-component lambdas (0.3 fm / 0.15 supcon_n / 0.15 supcon_s / 0.4 hier)
   are informed guesses from the component papers but un-tuned together.
+- **Result after run:** _(paste BEGIN_PAPER_TABLE + BEGIN_ABLATION_TABLE blocks)_
+
+### exp_17 TTTCode (2026-04-19, lean + ablation, EMNLP 2026 target)
+- **Novelty:** transfer of Test-Time Training (Sun ICML'20, Han 2506.23529 June'25, AdaContrast CVPR'22) to code detection.
+  (A) masked-dim reconstruction pretext on embeddings — encoder must be robust to subset masking;
+  (B) EMA class-centroid distillation (BYOL-style, momentum 0.995) — stable anchor for test-time adaptation;
+  (C) train-time groundwork so the encoder has the right inductive bias for a future test-time-adapted eval loop.
+- **Targets insight #16:** GH source OOD collapse is because BatchNorm / LayerNorm stats never adapt to GH. TTT fixes this structurally.
+- **Built-in ablation:** `lambda_ssl` (SSL pretext) and `lambda_teacher` (EMA anchor) each toggleable.
+- **Success gate:** OOD-SRC-gh > 0.38 AND Author IID >= 70.0.
+- **Result after run:** _(paste BEGIN_PAPER_TABLE + BEGIN_ABLATION_TABLE blocks)_
+
+### exp_18 CausalInterventionCode (2026-04-19, lean + ablation, EMNLP 2026 target)
+- **Novelty:** first climb entry to use **do-operations** instead of adversarial invariance. Cross-domain transfer from CAFE (Kim CVPR'23), Lemberger 2024 text counterfactuals, DINER (Wu'24 backdoor-adjust).
+  (A) counterfactual feature swap: anchor (author=a, source=s) + mate (author=a, source=s') — swap spectral sub-feature, enforce consistency;
+  (B) backdoor adjustment on source confounder — penalize variance of softmax across sources within same author;
+  (C) IV orthogonality: penalize correlation between logit norm and spectral-feature norm (instrument independence).
+- **Targets insight #5:** DANN/IRM adversarial methods collapsed (Exp19 -7.66%, Exp06 NaN). Causal theory provides guarantees adversarial methods lack.
+- **Built-in ablation:** `lambda_cf`, `lambda_backdoor`, `lambda_iv` toggleable.
+- **Success gate:** OOD-SRC-gh > 0.40 (EMNLP headline — first method to cross 0.40 on GH).
+- **Result after run:** _(paste BEGIN_PAPER_TABLE + BEGIN_ABLATION_TABLE blocks)_
+
+### exp_19 GradAlignMoE (2026-04-19, lean + ablation, EMNLP 2026 target)
+- **Novelty:** first method to explicitly resolve GRADIENT CONFLICT between stacked auxiliary losses on the shared encoder. Cross-domain transfer from Rep-MTL (Wang July'25 arXiv 2507.21049), SON-GOKU graph-coloring MTL (Patapati Sept'25 2509.16959), SAMO (Ban July'25 2507.07883).
+  (A) 4 expert projection heads (one per loss: hier / flow / supcon / ssl) with top-2 gated routing — each sample picks which auxiliary losses to contribute to;
+  (B) Rep-MTL entropy regularizer on gate — sharp per-sample routing reduces interference;
+  (C) SON-GOKU-style alignment reg pulling each expert projection toward its class-mean direction in main embedding space.
+- **Targets insight #14:** the Exp_27 cocktail (hier + dual SupCon + kNN) reaches 71.53 — we ask "can gradient alignment on 4 stacked losses push that to 72.5+ with the SAME components?"
+- **Built-in ablation (4-way):** `lambda_expert_sup`, `lambda_saliency`, `lambda_gradalign`, `lambda_hier` each toggleable.
+- **Success gate:** Author > 71.5 AND drop-sorted table identifies which of the 3 alignment mechanisms matters most.
 - **Result after run:** _(paste BEGIN_PAPER_TABLE + BEGIN_ABLATION_TABLE blocks)_
 
 ### exp_08 POEMPolarizedCode (2026-04-18, lean mode, H100 BF16 batch 64×1)
