@@ -17,7 +17,7 @@
 | 🥈 | **Exp18** | HierTreeCode | **99.06** | `+0.41` | 70.55 | `+4.22` | 71.88 | ✅ |
 | 🥉 | **Exp17** | RAGDetect | **99.09** | `+0.44` | 70.46 | `+4.13` | 70.99 | ✅ |
 | 4 | **Exp32** | HyperCode | 99.07 | `+0.42` | 70.33 | `+4.00` | 71.51 | ✅ |
-| 5 | **Exp31** | KANCode | **99.09** | `+0.44` | 70.30 | `+3.97` | 71.38 | ✅ |
+| 5 | **Exp31** | KANCode | **99.09** | `+0.44` | 70.30 | `+3.97` | 71.38 | ✅ re-run 70.30 |
 | 6 | **Exp37** | EnergyCode | 99.05 | `+0.40` | 70.26 | `+3.93` | 71.38 | ✅ |
 | 7 | **Exp20** | BiScopeCode | **99.06** | `+0.41` | 70.20 | `+3.87` | 71.22 | ✅ |
 | 8 | **Exp22** | TTACode | **99.06** | `+0.41` | 70.20 | `+3.87` | 71.32 | ✅ |
@@ -1286,10 +1286,15 @@ Top-rated paper ideas from NeurIPS/ICML/CVPR survey for NeurIPS 2026 ORAL:
 | **Runtime** | ~34 min binary + ~32 min author on H100 80GB (batch 64 × seq 512 × 3 epochs, `max_train=100K`) |
 | **Takeaway** | KAN head + EMA teacher gives a clean +0.11 over Exp21 MoECode's 70.04 and clears the 70.0–70.2 plateau, but **does NOT crack the Nxcode/Qwen family split** — so Exp18 HierTree's explicit genealogy prior is still what keeps it at 🥇. Natural next move: **stack KAN head on top of HierTree loss** (candidate Exp39). |
 
-**Re-run (2026-04-18, full suite)**
-- Binary: macro **99.09** / weighted **99.10** / val **98.98**
-- Author: macro **70.30** / weighted **80.79** / val **71.38**
-- Confusion remains centered on Nxcode↔Qwen (`nxcode->qwen=2025`, `qwen->nxcode=1910`), confirming the same failure mode as the first run.
+**Re-run (2026-04-18, full suite, ~1h 9m wall-clock)**
+- Binary: macro **99.09** / weighted **99.10** / val **98.98** — ~32 min, test acc 99.10
+- Author: macro **70.30** / weighted **80.79** / val **71.38** — ~35 min
+- Per-class Author F1 (re-run): human **0.9750** / cllama **0.7369** / gpt **0.7590** / l3.1 **0.8179** / nxcode **0.4865** / qwen **0.4426**
+- Per-source Author: cf **0.7621** / gh **0.5591** / lc **0.5998** — matches first run within 0.01
+- Per-language Author: java **0.7523** / cpp **0.7024** / python **0.6594** — python hardest
+- Binary per-source: cf **98.40** / gh **98.46** / lc **98.64** — GH is NOT a bottleneck on binary (only on author)
+- Confusion remains centered on Nxcode↔Qwen (`nxcode→qwen=2025`, `qwen→nxcode=1910`), confirming the structural failure mode from the first run.
+- **Reproducibility note:** KAN head is stable across runs (Δ < 0.01 on all subgroup metrics).
 
 ### Exp32 — HyperCode (completed 2026-04-18)
 
