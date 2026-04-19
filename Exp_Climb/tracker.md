@@ -105,14 +105,22 @@ halve → net ~10% faster per epoch.
 
 | Phase | Runs | ~Time/run | Total |
 |---|---:|---:|---:|
-| CoDET-M4 IID binary + author | 2 | ~7 min | 14 min |
-| OOD-SRC held-out=gh (hardest) | 1 | ~6 min | 6 min |
-| OOD-LANG held-out=python | 1 | ~6 min | 6 min |
-| OOD-GEN held-out=qwen1.5 | 1 | ~6 min | 6 min |
-| Droid T1 + T3 + T4 | 3 | ~7 min | 21 min |
-| **Total** | **8** | — | **~53 min** |
+| CoDET-M4 IID binary + author | 2 | ~22 min | 44 min |
+| OOD-SRC held-out=gh (hardest) | 1 | ~22 min | 22 min |
+| OOD-LANG held-out=python | 1 | ~22 min | 22 min |
+| OOD-GEN held-out=qwen1.5 | 1 | ~22 min | 22 min |
+| Droid T1 + T3 + T4 | 3 | ~22 min | 66 min |
+| **Total** | **8** | — | **~2 h 56 min** |
 
-Use `lean` to screen ideas (3 ideas/session). Switch to `full` only for paper-final winner.
+> **Measured** on H100 BF16 batch=64 × seq=512 from exp_08 POEMPolarized run
+> (2026-04-18, 10464 s total). Prior estimate "~53 min" was based on an
+> optimistic extrapolation and proved too low by ~3×.
+>
+> `full` mode (16 runs) ≈ **~5 h 52 min** on the same hardware. Kaggle 12h
+> kernel limit still safe, but plan only ONE full-mode run per session.
+
+Use `lean` to screen ideas (1-2 ideas per session). Switch to `full` only
+for paper-final winner after lean confirms novelty.
 
 Kaggle H100 kernel limit: 12h → **massive buffer** (~7× runtime). P100/T4 fallback: ~3-4× longer (~6-8h) — drop batch to 64 manually on those GPUs.
 
@@ -245,7 +253,7 @@ Fill in after each `exp_NN_*.py` run by pasting the `BEGIN_PAPER_TABLE` block. B
 | 5 | **SinkhornOTCode** | [exp_05_sinkhorn_ot.py](exp_05_sinkhorn_ot.py) | 20% | lean | TBD | TBD | TBD | TBD | TBD | ⏳ pending |
 | 6 | **FlowCodeDet** | [exp_06_flow_matching.py](exp_06_flow_matching.py) | 20% | lean | TBD | TBD | TBD | TBD | TBD | ⏳ pending |
 | 7 | **SAMFlatCode** | [exp_07_sam_flat.py](exp_07_sam_flat.py) | 20% | lean | TBD | TBD | TBD | TBD | TBD | ⏳ pending |
-| 8 | **POEMPolarizedCode** | [exp_08_polarized_code.py](exp_08_polarized_code.py) | 20% | lean | TBD | TBD | TBD | TBD | TBD | ⏳ pending |
+| 8 | **POEMPolarizedCode** | [exp_08_polarized_code.py](exp_08_polarized_code.py) | 20% | lean | **99.06** | **69.68** | 88.57 | 87.48 | **33.33** | ✅ |
 | 9 | **EpiplexityCode** | [exp_09_epiplexity.py](exp_09_epiplexity.py) | 20% | lean | TBD | TBD | TBD | TBD | TBD | ⏳ pending |
 | 10 | **PredictiveCodingCode** | [exp_10_predictive_coding.py](exp_10_predictive_coding.py) | 20% | lean | TBD | TBD | TBD | TBD | TBD | ⏳ pending |
 | 11 | **PersistentHomologyCode** | [exp_11_persistent_homology.py](exp_11_persistent_homology.py) | 20% | lean | TBD | TBD | TBD | TBD | TBD | ⏳ pending |
