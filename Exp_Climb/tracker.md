@@ -12,38 +12,49 @@
 > Paper baselines: **UniXcoder** 98.65 binary / **66.33** author / 88.96 lang-OOD / **DroidDetectCLS-Large** 0.8878 T3.
 > Δ-paper columns compare against the SAME paper baseline on that task.
 
-| Rank | Exp | Method | Mode | Bin F1 | Δ-Bin | **Author** | **Δ-Auth** | Droid T3 | Δ-Droid | OOD-SRC-gh | Status |
-|:----:|:---|:-------|:----:|:------:|:-----:|:------:|:------:|:--------:|:-------:|:----------:|:------:|
-| 🥇 | **Exp_06** | **FlowCodeDet** | lean | 99.02 | `+0.37` | **70.90** | **`+4.57`** | **89.34** | `+0.56` | **33.36** | ✅ |
-| 🥈 | **Exp_07** | SAMFlatCode | lean | 99.05 | `+0.40` | 70.22 | `+3.89` | 88.73 | `-0.05` | 31.41 | ✅ |
-| 🥉 | **Exp_02** | GHSourceInvariantCode | lean | 98.99 | `+0.34` | 70.20 | `+3.87` | 88.05 | `-0.73` | 30.44 | ✅ |
-| 4 | **Exp_00** | HierTreeCode (baseline) | full | 99.03 | `+0.38` | 69.93 | `+3.60` | 88.63 | `-0.15` | 27.20 | ✅ |
-| 5 | **Exp_03** | TokenStatRAGCode | lean | 99.05 | `+0.40` | 69.90 | `+3.57` | 88.94 | `+0.16` | 30.19 | ✅ |
-| 6 | **Exp_08** | POEMPolarizedCode | lean | **99.06** | `+0.41` | 69.68 | `+3.35` | 88.57 | `-0.21` | 33.33 | ✅ |
-| 7 | **Exp_04** | PoincareGenealogy | lean | 99.01 | `+0.36` | 69.58 | `+3.25` | **89.76** | `+0.98` | 26.47 | ✅ |
-| 8 | **Exp_05** | SinkhornOTCode | lean | 99.05 | `+0.40` | 68.40 | `+2.07` | 88.03 | `-0.75` | 28.96 | ✅ |
-| — | Exp_01 | GenealogyGraphCode | lean | — | — | — | — | — | — | — | ⏳ pending |
-| — | Exp_09 | EpiplexityCode | lean | — | — | — | — | — | — | — | ⏳ pending |
-| — | Exp_10 | PredictiveCodingCode | lean | — | — | — | — | — | — | — | ⏳ pending |
-| — | Exp_11 | PersistentHomologyCode | lean | — | — | — | — | — | — | — | ⏳ pending |
-| — | Exp_12 | AvailabilityPredictivityCode | lean | — | — | — | — | — | — | — | ⏳ pending |
-| — | Exp_13 | NTKAlignCode | lean | — | — | — | — | — | — | — | ⏳ pending |
-| **REF** | Paper | **UniXcoder** | — | 98.65 | — | **66.33** | — | — | — | — | reference |
-| REF | Paper | CodeT5 | — | 98.35 | `-0.30` | 62.45 | `-3.88` | — | — | — | reference |
-| REF | Paper | CodeBERT | — | 95.70 | `-2.95` | 64.80 | `-1.53` | — | — | — | reference |
-| **REF** | Paper | **DroidDetectCLS-Large** | — | — | — | — | — | **88.78** | — | — | reference (Droid) |
-| REF | Paper | DroidDetectCLS-Base | — | — | — | — | — | 86.76 | `-2.02` | — | reference (Droid) |
-| REF | Paper | CoDet-M4FT (Droid) | — | — | — | — | — | 83.25 | `-5.53` | — | reference (Droid) |
+All 8 lean-mode tasks are reported below (CoDET: 2 IID + 3 OOD representative · Droid: T1 + T3 + T4).
+
+| Rank | Exp | Method | Mode | **Bin** | Δ | **Auth** | **Δ** | **Gen-qw** | **Lang-py** | **Src-gh** | **T1** | **T3** | Δ | **T4** | Status |
+|:----:|:---|:-------|:----:|:-----:|:---:|:-----:|:-----:|:----------:|:-----------:|:----------:|:------:|:------:|:---:|:------:|:------:|
+| 🥇 | **Exp_06** | **FlowCodeDet** | lean | 99.02 | `+0.37` | **70.90** | **`+4.57`** | 49.67 | **64.50** | **33.36** | 97.01 | **89.34** | `+0.56` | **88.30** | ✅ |
+| 🥈 | **Exp_07** | SAMFlatCode | lean | 99.05 | `+0.40` | 70.22 | `+3.89` | 49.74 | 54.13 | 31.41 | 96.93 | 88.73 | `-0.05` | 87.51 | ✅ |
+| 🥉 | **Exp_02** | GHSourceInvariantCode | lean | 98.99 | `+0.34` | 70.20 | `+3.87` | 49.76 | 50.70 | 30.44 | 97.03 | 88.05 | `-0.73` | 87.38 | ✅ |
+| 4 | **Exp_00** | HierTreeCode (baseline) | full | 99.03 | `+0.38` | 69.93 | `+3.60` | 49.68 | 53.25 | 27.20 | 97.08 | 88.63 | `-0.15` | 87.60 | ✅ |
+| 5 | **Exp_03** | TokenStatRAGCode | lean | 99.05 | `+0.40` | 69.90 | `+3.57` | 49.62 | 52.60 | 30.19 | 97.07 | 88.94 | `+0.16` | 87.40 | ✅ |
+| 6 | **Exp_08** | POEMPolarizedCode | lean | **99.06** | `+0.41` | 69.68 | `+3.35` | 49.72 | 54.11 | 33.33 | 97.05 | 88.57 | `-0.21` | 87.48 | ✅ |
+| 7 | **Exp_04** | PoincareGenealogy | lean | 99.01 | `+0.36` | 69.58 | `+3.25` | 49.65 | 47.61 | 26.47 | 96.97 | **89.76** | `+0.98` | 87.99 | ✅ |
+| 8 | **Exp_05** | SinkhornOTCode | lean | 99.05 | `+0.40` | 68.40 | `+2.07` | 49.67 | 57.54 | 28.96 | 97.01 | 88.03 | `-0.75` | 87.52 | ✅ |
+| — | Exp_01 | GenealogyGraphCode | lean | — | — | — | — | — | — | — | — | — | — | — | ⏳ pending |
+| — | Exp_09 | EpiplexityCode | lean | — | — | — | — | — | — | — | — | — | — | — | ⏳ pending |
+| — | Exp_10 | PredictiveCodingCode | lean | — | — | — | — | — | — | — | — | — | — | — | ⏳ pending |
+| — | Exp_11 | PersistentHomologyCode | lean | — | — | — | — | — | — | — | — | — | — | — | ⏳ pending |
+| — | Exp_12 | AvailabilityPredictivityCode | lean | — | — | — | — | — | — | — | — | — | — | — | ⏳ pending |
+| — | Exp_13 | NTKAlignCode | lean | — | — | — | — | — | — | — | — | — | — | — | ⏳ pending |
+| **REF** | Paper | **UniXcoder** | — | 98.65 | — | **66.33** | — | — | — | — | — | — | — | — | reference |
+| REF | Paper | CodeT5 | — | 98.35 | `-0.30` | 62.45 | `-3.88` | — | — | — | — | — | — | — | reference |
+| REF | Paper | CodeBERT | — | 95.70 | `-2.95` | 64.80 | `-1.53` | — | — | — | — | — | — | — | reference |
+| **REF** | Paper | **DroidDetectCLS-Large** | — | — | — | — | — | — | — | — | — | **88.78** | — | — | reference (Droid) |
+| REF | Paper | DroidDetectCLS-Base | — | — | — | — | — | — | — | — | — | 86.76 | `-2.02` | — | reference (Droid) |
+| REF | Paper | CoDet-M4FT (Droid) | — | — | — | — | — | — | — | — | — | 83.25 | `-5.53` | — | reference (Droid) |
+
+Columns:
+- **Bin / Auth** = CoDET-M4 IID binary / author Macro-F1 (×100). Δ vs UniXcoder 98.65 / 66.33.
+- **Gen-qw / Lang-py / Src-gh** = CoDET-M4 OOD LOO Macro-F1 (×100) for held-out generator=qwen1.5, language=python, source=gh. Note: OOD-GEN LOO test contains only the held-out AI class → macro-F1 is ceiling-bound ~0.5 (signal is in weighted-F1 and per-class delta, not in the raw macro number).
+- **T1 / T3 / T4** = DroidCollection Weighted-F1 (×100) for 2/3/4-class tasks. Δ on T3 vs DroidDetectCLS-Large 88.78.
 
 ### Quick reads
 
-- **Best CoDET Author so far:** `exp_06 FlowCodeDet` at **70.90** (+4.57 vs UniXcoder). First climb entry to clear **70.6**; class-conditioned flow-matching auxiliary is the first recipe to beat plain HierTree on Author.
-- **Best Droid T3 so far:** `exp_04 PoincareGenealogy` at **89.76** (+0.98 vs DroidDetectCLS-Large). Hyperbolic geometry helps ID more than it helps author/OOD.
-- **Best OOD-SRC-gh so far:** tie between `exp_06 FlowCodeDet` **33.36** and `exp_08 POEMPolarizedCode` **33.33** — both break the 0.30 GH ceiling with different mechanisms.
+- **Best CoDET Author:** `exp_06 FlowCodeDet` at **70.90** (+4.57 vs UniXcoder). First climb entry to clear **70.6**; class-conditioned flow-matching auxiliary beats plain HierTree on Author.
+- **Best Droid T3:** `exp_04 PoincareGenealogy` at **89.76** (+0.98 vs DroidDetectCLS-Large). Hyperbolic geometry helps ID more than it helps author/OOD.
+- **Best OOD-SRC-gh:** tie `exp_06 FlowCodeDet` **33.36** / `exp_08 POEMPolarizedCode` **33.33** — both break the 0.30 GH ceiling with different mechanisms.
+- **Best OOD-LANG-python:** `exp_06 FlowCodeDet` **64.50** — +11 pts over the method pack (most cluster 47–57). Flow matching helps the hardest language LOO.
+- **Best Droid T1 (binary):** `exp_00 HierTreeCode` **97.08** — all methods sit in 96.9–97.1 range (noise-level spread, as expected for binary ceiling).
+- **Best Droid T4 (4-class adversarial):** `exp_06 FlowCodeDet` **88.30** — beats the pack by ~0.3–0.9 pts; consistent with its best-on-board ranking elsewhere.
+- **OOD-GEN qwen1.5 flat at ~49.7 across all methods** — expected: LOO test contains only qwen1.5 samples → macro-F1 is degenerate (ceiling 0.5 on a 2-class head seeing only one class). No method-level signal here; we keep the column to detect regressions, not to rank.
 - **Compare to Exp_CodeDet board:** Exp27 DeTeCtiveCode holds **71.53** Author on full CoDET (different codebase, HierTree + dual SupCon + kNN). The climb board's **70.90** is best-to-date for the `run_full_climb` harness.
-- **Still pending:** Exp_01 / 09–13 are queued; journal-grade methods (Epiplexity, PredictiveCoding, PH, NTK, Availability) unclaimed.
+- **Still pending:** Exp_01 + 09–13 (6 files). Journal-grade methods (Epiplexity / PredictiveCoding / PH / NTK / Availability) unclaimed.
 
-> Δ-Bin is measured vs UniXcoder 98.65. Δ-Auth vs UniXcoder 66.33. Δ-Droid vs DroidDetectCLS-Large 0.8878 (× 100 to match our %-scale). OOD-SRC-gh has no paper baseline on author task — the figure stands on its own as a "which method is least broken on GH" comparison. Status ✅ = run finished; ⏳ = file exists, not yet run on Kaggle.
+> Δ-Bin vs UniXcoder 98.65. Δ-Auth vs UniXcoder 66.33. Δ-T3 vs DroidDetectCLS-Large 0.8878 (×100). No paper baseline for OOD-SRC-gh (per-source LOO subgroup), OOD-GEN LOO, Droid T1/T4, or OOD-LANG held-out-python — those stand as relative comparisons between our methods. Status ✅ = run finished; ⏳ = file exists, not yet run on Kaggle.
 
 ---
 
