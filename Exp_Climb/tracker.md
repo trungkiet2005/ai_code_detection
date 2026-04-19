@@ -245,7 +245,7 @@ Fill in after each `exp_NN_*.py` run by pasting the `BEGIN_PAPER_TABLE` block. B
 
 | # | Method | File | Train % | Mode | CoDET Bin F1 | CoDET Auth F1 | Droid T3 W-F1 | Droid T4 W-F1 | OOD-SRC-gh | Status |
 |:-:|:-------|:-----|:-------:|:----:|:------------:|:-------------:|:-------------:|:-------------:|:----------:|:------:|
-| 0 | **HierTreeCode** | [exp_00_hiertree.py](exp_00_hiertree.py) | 20% | full | TBD | TBD | TBD | TBD | TBD | ⏳ running |
+| 0 | **HierTreeCode** | [exp_00_hiertree.py](exp_00_hiertree.py) | 20% | full | 99.03 | **69.93** | 88.63 | 87.60 | **27.20** | ✅ |
 | 1 | **GenealogyGraphCode** | [exp_01_genealogy_graph.py](exp_01_genealogy_graph.py) | 20% | lean | TBD | TBD | TBD | TBD | TBD | ⏳ pending |
 | 2 | **GHSourceInvariantCode** | [exp_02_gh_invariant.py](exp_02_gh_invariant.py) | 20% | lean | TBD | TBD | TBD | TBD | TBD | ⏳ pending |
 | 3 | **TokenStatRAGCode** | [exp_03_tokenstat_rag.py](exp_03_tokenstat_rag.py) | 20% | lean | 99.05 | 69.90 | **88.94** | 87.40 | 30.19 | ✅ |
