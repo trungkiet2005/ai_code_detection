@@ -222,6 +222,14 @@ def preflight_full_climb(
 
 RUN_MODES = ("full", "codet_only", "droid_only", "codet_iid", "single", "lean")
 
+# Freshness breadcrumb read by exp_NN bootstrap to detect stale clones.
+# When _paper_table or this file's public API changes in a way that old
+# caches on Kaggle can't handle, bump this string AND REQUIRED_TOKEN in
+# the exp files to force a fresh clone.
+#     _PAPER_BASELINES     -- added 2026-04-19 (per-subgroup breakdown + delta row)
+#     lean                 -- added 2026-04-18 (8-run screening mode)
+_RUNNER_API_TOKENS = ("lean", "_PAPER_BASELINES")
+
 # OOD representatives for lean mode: one hardest held-out per OOD type.
 # gh = hardest OOD-SRC (GH macro ~0.28 universally); python = largest OOD-LANG
 # test set (17K); qwen1.5 = hardest OOD-GEN (fine-tuned Nxcode confusion).

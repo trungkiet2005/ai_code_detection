@@ -67,7 +67,7 @@ import subprocess
 import sys
 
 REPO_URL = "https://github.com/trungkiet2005/ai_code_detection.git"
-REQUIRED_TOKEN = "lean"   # bump this when the climb runner API changes
+REQUIRED_TOKEN = "_PAPER_BASELINES"  # bump when _climb_runner or _paper_table APIs change   # bump this when the climb runner API changes
 
 
 def _runner_has_token(climb_dir: str, token: str) -> bool:
