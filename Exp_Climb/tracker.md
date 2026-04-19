@@ -30,6 +30,9 @@ All 8 lean-mode tasks are reported below (CoDET: 2 IID + 3 OOD representative ·
 | — | Exp_11 | PersistentHomologyCode | lean | — | — | — | — | — | — | — | — | — | — | — | ⏳ pending |
 | — | Exp_12 | AvailabilityPredictivityCode | lean | — | — | — | — | — | — | — | — | — | — | — | ⏳ pending |
 | — | Exp_13 | NTKAlignCode | lean | — | — | — | — | — | — | — | — | — | — | — | ⏳ pending |
+| — | Exp_14 | GHCurriculum + ablation | lean | — | — | — | — | — | — | — | — | — | — | — | ⏳ pending |
+| — | Exp_15 | GenealogyDistill + ablation | lean | — | — | — | — | — | — | — | — | — | — | — | ⏳ pending |
+| — | Exp_16 | DualModeFlowRAG + ablation | lean | — | — | — | — | — | — | — | — | — | — | — | ⏳ pending |
 | **REF** | Paper | **UniXcoder** | — | 98.65 | — | **66.33** | — | — | — | — | — | — | — | — | reference |
 | REF | Paper | CodeT5 | — | 98.35 | `-0.30` | 62.45 | `-3.88` | — | — | — | — | — | — | — | reference |
 | REF | Paper | CodeBERT | — | 95.70 | `-2.95` | 64.80 | `-1.53` | — | — | — | — | — | — | — | reference |
@@ -508,6 +511,61 @@ Keep it to one paragraph per method. Per-class detail lives in the `BEGIN_PAPER_
 - **Targets (from exp file):** OOD-SRC-gh **> 0.32**, CoDET author **~70.5**, Droid T4 **> 0.85**.
 - **Risk:** feature-space SAM can over-smooth discriminative directions if `lambda_sam` too large.
 - **Result after run:** Full suite `2026-04-18 20:18:54` on NVIDIA H100 80GB HBM3, BF16, batch 64×1. **CoDET-M4** — IID binary macro-F1 **0.9905** (best val 0.9902); IID author **0.7022** (val 0.7124); OOD source GH **0.3141** (val 0.9927); OOD language python **0.5413**; OOD generator qwen1.5 **0.4974** (class 0 support 0 — LOO-gen macro caveat). **Droid** — T1/T3/T4 weighted-F1 test **0.9692 / 0.8873 / 0.8751** (macro-F1 **0.9692 / 0.8468 / 0.8411**; best val primary **0.9702 / 0.8477 / 0.8411**). **Takeaway:** author **70.22** and Droid T4 **0.875** meet “stable IID / adv” expectations; OOD-GH **0.3141** lands **just under** the **0.32** screening bar from the exp file. Droid T3 **0.8873** sits slightly below DroidDetectCLS-Large (0.8878) and under exp_04/06 peaks; overall a solid mid-pack run vs **FlowCodeDet** on GH-OOD and author. UniXcoder author gap: **+3.89** pt.
+
+### exp_14 GHCurriculum (2026-04-19, lean + ablation, EMNLP 2026 target)
+- **Novelty (data-side):** first climb entry to reshape the TRAINING
+  distribution instead of the loss. Three stacked components:
+  (A) source-balanced WeightedRandomSampler so each batch sees CF:LC:GH ≈ 1:1:1 instead of natural 3:1:1;
+  (B) within-epoch curriculum (CF+LC → GH) so the hardest subgroup is learned against the STRONGEST IID representation;
+  (C) GH-only SimCLR-style consistency loss (feature Gaussian noise as augmentation proxy, cosine pull).
+- **Targets insight #3 + #16:** the 14 climb methods before it all fail on
+  OOD-SRC-gh because CF/LC templates dominate training -- this is the
+  first method to attack that cause, not the symptom.
+- **Built-in ablation:** drops `lambda_hier`, `lambda_gh_consist`; data-side
+  sampler/curriculum registered as placeholders (see `_ablation.py` for
+  mechanism).
+- **Success criteria (lean):** OOD-SRC-gh > 0.35 (break 0.33 cluster) AND
+  CoDET Author >= 70.0 AND Droid T3 stable ~ 0.88.
+- **Risk:** oversampling GH may shift CF/LC distribution enough to hurt
+  IID; curriculum pacing is fixed, not learned.
+- **Result after run:** _(paste BEGIN_PAPER_TABLE + BEGIN_ABLATION_TABLE blocks)_
+
+### exp_15 GenealogyDistill (2026-04-19, lean + ablation, EMNLP 2026 target)
+- **Novelty:** first climb entry to attack the Nxcode↔Qwen1.5 sibling pair
+  DIRECTLY instead of via family containment. Two mechanisms:
+  (A) pair-margin triplet loss with alpha > HierTree's 0.3, so the sibling gap is forced to be WIDER than the family gap;
+  (B) selective anti-distill on the 6-class softmax: when top-2 softmax is
+  ambiguous between Nxcode and Qwen1.5, penalize that hedging -- reward
+  decisive predictions.
+- **Targets insight #2 + Exp27 CM analysis:** Nxcode-Qwen confusion is
+  ~36-38% pairwise across every prior method; break 0.50 on both classes.
+- **Built-in ablation:** `lambda_hier`, `lambda_pair_margin`,
+  `lambda_anti_distill` each toggleable -- the drop-sorted ranking tells
+  which lever is load-bearing.
+- **Success criteria (lean):** CoDET Author > 72.0 (break Exp_27 by >0.5)
+  AND Qwen1.5 per-class F1 > 0.55 AND Nxcode per-class F1 > 0.55.
+- **Risk:** anti-distill can collapse if ambiguity threshold too low
+  (punishes every prediction); pair margin can over-dominate if alpha
+  too large (hurts other 4 classes).
+- **Result after run:** _(paste BEGIN_PAPER_TABLE + BEGIN_ABLATION_TABLE blocks)_
+
+### exp_16 DualModeFlowRAG (2026-04-19, lean + ablation, EMNLP 2026 target)
+- **Novelty:** deliberate stack of the two distinct SOTA recipes on the
+  two boards -- Exp_06 FlowCodeDet (Climb 🥇 70.90) and Exp_27
+  DeTeCtiveCode (CodeDet 🥇 71.53). Three training signals:
+  (A) class-conditioned flow matching (trains per-class velocity field);
+  (B) dual-level SupCon on neural + spectral projections (tightens clusters in both subspaces);
+  (C) test-time kNN blend over a pre-built train embedding bank (alpha=0.25, k=32).
+- **Targets insight #14:** stacking hier + SupCon + kNN hit 71.53 alone;
+  adding flow matching's per-class manifold should push it above 72.0.
+- **Built-in ablation (4-way):** flow / supcon-neural / supcon-spectral /
+  hier each toggleable. 5 single-task ablation runs total, ~110 min.
+- **Success criteria (lean):** CoDET Author > 72.0 (beat Exp_27) AND
+  OOD-SRC-gh > 0.35 AND Droid T3 > 0.90 (finally crack 0.8878 paper).
+- **Risk:** 4 simultaneous auxiliary losses can fight each other; the
+  per-component lambdas (0.3 fm / 0.15 supcon_n / 0.15 supcon_s / 0.4 hier)
+  are informed guesses from the component papers but un-tuned together.
+- **Result after run:** _(paste BEGIN_PAPER_TABLE + BEGIN_ABLATION_TABLE blocks)_
 
 ### exp_08 POEMPolarizedCode (2026-04-18, lean mode, H100 BF16 batch 64×1)
 - **Novelty:** POEM-style **orthogonal polarization** — split embedding into invariant vs source-specific subspaces (`L_ortho` on projectors), put source prediction on `z_spec` and entropy-regularize source on `z_inv` (no GRL / DANN).
