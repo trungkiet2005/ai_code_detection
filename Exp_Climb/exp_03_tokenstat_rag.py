@@ -54,10 +54,24 @@ from __future__ import annotations
 # ---------------------------------------------------------------------------
 
 import os
+import shutil
 import subprocess
 import sys
 
 REPO_URL = "https://github.com/trungkiet2005/ai_code_detection.git"
+REQUIRED_TOKEN = "lean"   # bump this when the climb runner API changes
+
+
+def _runner_has_token(climb_dir: str, token: str) -> bool:
+    """Return True iff _climb_runner.py already contains token."""
+    runner = os.path.join(climb_dir, "_climb_runner.py")
+    if not os.path.exists(runner):
+        return False
+    try:
+        with open(runner, "r", encoding="utf-8") as f:
+            return token in f.read()
+    except OSError:
+        return False
 
 
 def _bootstrap_climb_path() -> str:
@@ -67,23 +81,35 @@ def _bootstrap_climb_path() -> str:
         os.path.join(cwd, "ai_code_detection", "Exp_Climb"),
     ):
         if os.path.exists(os.path.join(candidate, "_common.py")):
-            return candidate
+            if _runner_has_token(candidate, REQUIRED_TOKEN):
+                return candidate
+            parent = os.path.dirname(candidate) if candidate.endswith("Exp_Climb") else candidate
+            if parent.endswith("ai_code_detection") and os.path.exists(parent):
+                print(f"[bootstrap] Stale clone at {parent} (no {REQUIRED_TOKEN!r} token) -> removing for fresh clone")
+                shutil.rmtree(parent, ignore_errors=True)
     try:
         here = os.path.dirname(os.path.abspath(__file__))  # noqa: F821
-        if os.path.exists(os.path.join(here, "_common.py")):
+        if os.path.exists(os.path.join(here, "_common.py")) and _runner_has_token(here, REQUIRED_TOKEN):
             return here
     except NameError:
         pass
     repo_dir = os.path.join(cwd, "ai_code_detection")
-    if not os.path.exists(repo_dir):
-        print(f"[bootstrap] Cloning {REPO_URL} -> {repo_dir}")
-        subprocess.check_call(["git", "clone", "--depth=1", REPO_URL, repo_dir])
+    if os.path.exists(repo_dir):
+        print(f"[bootstrap] Removing existing {repo_dir} to force fresh clone")
+        shutil.rmtree(repo_dir, ignore_errors=True)
+    print(f"[bootstrap] Cloning {REPO_URL} -> {repo_dir}")
+    subprocess.check_call(["git", "clone", "--depth=1", REPO_URL, repo_dir])
     return os.path.join(repo_dir, "Exp_Climb")
 
 
 _climb_dir = _bootstrap_climb_path()
 if _climb_dir not in sys.path:
     sys.path.insert(0, _climb_dir)
+for _mod in list(sys.modules):
+    if _mod.startswith(("_climb_runner", "_common", "_trainer",
+                        "_data_codet", "_data_droid", "_features",
+                        "_model", "_paper_table")):
+        del sys.modules[_mod]
 print(f"[bootstrap] Exp_Climb path: {_climb_dir}")
 
 
