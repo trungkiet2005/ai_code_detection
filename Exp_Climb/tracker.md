@@ -226,68 +226,200 @@ Run it → at bottom of log there's a `BEGIN_PAPER_TABLE ... END_PAPER_TABLE` bl
 
 ---
 
-## 📊 Paper baselines to beat
+## 📊 Paper baselines to beat (full enumeration)
 
 ### CoDET-M4 (Orel, Azizov & Nakov, **ACL Findings 2025**)
 
-**Table 2 — Binary IID Macro-F1 (%):**
+All values from Tables 2-14 of `docs/references/paper_CodeDet_M4.md`. Metric: **Macro-F1 (%)** unless noted.
 
-| Model | Binary F1 | Note |
-|:------|:---------:|:-----|
-| **UniXcoder** | **98.65** | paper best |
-| CodeT5 | 98.35 | |
-| CodeBERT | 95.70 | |
-| CatBoost | 88.78 | classical ML |
-| SVM | 72.19 | |
-| Baseline (logistic) | 62.03 | |
+**Table 2 — Binary IID:**
 
-**Table 3 — Binary per-language (UniXcoder reference):** C++ 98.24 / Java 99.02 / Python 98.60.
+| Model | P | R | **F** | A |
+|:------|:-:|:-:|:-:|:-:|
+| **UniXcoder** | 98.65 | 98.65 | **98.65** | 98.65 |
+| CodeT5 | 98.36 | 98.35 | 98.35 | 98.35 |
+| CodeBERT | 95.70 | 95.72 | 95.70 | 95.71 |
+| CatBoost | 88.71 | 88.81 | 88.78 | 88.79 |
+| SVM | 72.19 | 72.19 | 72.19 | 72.19 |
+| Baseline | 62.03 | 65.17 | 62.03 | 65.17 |
 
-**Table 4 — Binary per-source (UniXcoder reference):** CodeForces 96.54 / LeetCode 97.87 / GitHub 98.46.
+**Table 3 — Binary per-language (F1):**
 
-**Table 7 — Author 6-class IID Macro-F1:**
+| Model | C++ | Python | Java |
+|:------|:-:|:-:|:-:|
+| **UniXcoder** | **98.24** | **98.60** | **99.02** |
+| CodeT5 | 97.86 | 98.22 | 98.89 |
+| CodeBERT | 95.73 | 94.84 | 96.54 |
+| CatBoost | 91.94 | 86.04 | 88.81 |
 
-| Model | Author F1 |
-|:------|:---------:|
-| **UniXcoder** | **66.33** |
-| CodeBERT | 64.80 |
-| CodeT5 | 62.45 |
-| CatBoost | 45.42 |
-| SVM | 27.63 |
+**Table 4 — Binary per-source (F1):**
 
-**Table 8 — OOD Generator LOO avg F1:** UniXcoder **93.22**, CatBoost 92.31, CodeT5 79.43.
+| Model | CodeForces | LeetCode | GitHub |
+|:------|:-:|:-:|:-:|
+| **UniXcoder** | 96.54 | **97.87** | 98.46 |
+| CodeT5 | 97.24 | 66.23 | 98.54 |
+| CodeBERT | 91.67 | 87.63 | 95.31 |
+| CatBoost | 90.18 | 71.23 | 80.52 |
 
-**Table 9 — OOD Source LOO avg F1:** CodeT5 **58.22**, UniXcoder 55.01, CatBoost 50.62.
+**Table 7 — Author 6-class IID Macro-F1 (primary author metric):**
 
-**Table 10/12 — OOD Language LOO avg F1:** UniXcoder **88.96**, CodeT5 71.47, CodeBERT 58.78.
+| Model | P | R | **F** | A |
+|:------|:-:|:-:|:-:|:-:|
+| **UniXcoder** | 64.80 | 69.54 | **66.33** | 79.35 |
+| CodeBERT | 63.14 | 68.10 | 64.80 | 77.65 |
+| CodeT5 | 62.67 | 69.40 | 62.45 | 78.25 |
+| CatBoost | 50.46 | 44.41 | 45.42 | 66.19 |
+| SVM | 29.10 | 28.51 | 27.63 | 49.70 |
+
+**Table 8 — OOD-Generator (unseen LLMs, binary). Precision excluded (only positive class in labels):**
+
+| Model | R | **F** | A |
+|:------|:-:|:-:|:-:|
+| **UniXcoder** | 87.30 | **93.22** | 87.30 |
+| CatBoost | 85.71 | 92.31 | 85.71 |
+| CodeT5 | 65.87 | 79.43 | 65.87 |
+| CodeBERT | 50.00 | 66.67 | 50.00 |
+| SVM | 80.16 | 88.99 | 80.16 |
+| Baseline | 29.37 | 59.65 | 64.68 |
+
+**Table 9 — OOD-Source (unseen domains):**
+
+| Model | P | R | **F** | A |
+|:------|:-:|:-:|:-:|:-:|
+| **CodeT5** | 78.43 | 59.18 | **58.22** | 74.11 |
+| UniXcoder | 76.00 | 57.11 | 55.01 | 72.81 |
+| CatBoost | 60.32 | 53.54 | 50.62 | 69.11 |
+| Baseline | 67.31 | 50.34 | 49.84 | 50.30 |
+| CodeBERT | 45.69 | 48.91 | 43.16 | 66.01 |
+| SVM | 37.11 | 41.37 | 38.66 | 55.16 |
+
+**Table 10 — OOD-Language per-language (UniXcoder is the clear winner):**
+
+| Model | C# | Golang | JavaScript | PHP |
+|:------|:-:|:-:|:-:|:-:|
+| **UniXcoder** | **91.31** | **90.01** | **81.48** | **96.17** |
+| CodeT5 | 78.55 | 88.78 | 34.81 | 93.66 |
+| CodeBERT | 45.31 | 52.46 | 26.84 | 56.68 |
+| CatBoost | 51.01 | 64.72 | 26.03 | 45.08 |
+| SVM | 43.16 | 20.94 | 24.23 | 41.94 |
+| Baseline | 39.60 | 46.15 | 56.27 | 28.33 |
+
+**Table 12 — OOD-Language avg (unseen langs):**
+
+| Model | P | R | **F** | A |
+|:------|:-:|:-:|:-:|:-:|
+| **UniXcoder** | 89.13 | 89.20 | **88.96** | 88.96 |
+| CodeT5 | 76.87 | 73.29 | 71.47 | 72.17 |
+| CodeBERT | 60.31 | 59.79 | 58.78 | 59.10 |
+| CatBoost | 61.25 | 57.86 | 53.42 | 56.26 |
+| Baseline | 70.53 | 57.36 | 51.53 | 59.64 |
+| SVM | 26.42 | 38.27 | 28.68 | 36.29 |
+
+**Table 13 — Hybrid Authorship (UniXcoder's ceiling, precision excluded):**
+
+| Model | R | **F** | A |
+|:------|:-:|:-:|:-:|
+| **UniXcoder** | 33.22 | **39.36** | 64.71 |
+| Baseline | 14.86 | 22.91 | 29.72 |
+
+**Table 14 — Ternary (human / LLM / hybrid) Macro-F1:**
+
+| Model | P | R | **F** | A |
+|:------|:-:|:-:|:-:|:-:|
+| **UniXcoder** | 86.48 | 85.93 | **86.10** | 86.16 |
+| CodeBERT | 85.91 | 85.96 | 85.94 | 85.84 |
+| CodeT5 | 79.72 | 78.78 | 78.99 | 79.43 |
 
 ### DroidCollection (Orel, Paul, Gurevych, Nakov, **EMNLP 2025**)
 
-**Table 3/4 — 3-class (human / generated / refined) Weighted-F1 averaged across domains:**
+All values from Tables 3-6 of `docs/references/paper_Droid.md`. Metric: **Weighted-F1 (%)** unless noted. Best backbone = **DroidDetectCLS-Large**.
 
-| Model | Droid 3-class W-F1 |
-|:------|:---------:|
-| **DroidDetectCLS-Large** | **0.8878** |
-| DroidDetectCLS-Base | 0.8676 |
-| CoDet-M4FT | 0.8325 |
-| GPT-SnifferFT | 0.8275 |
-| M4FT | 0.7350 |
+**Table 3 — 2-class / 3-class per-domain (Full Training split, Avg column is our canonical target):**
+
+| Model (Full Training) | 2-Class Gen | 2-Class Algo | 2-Class RDS | **2-Class Avg** | 3-Class Gen | 3-Class Algo | 3-Class RDS | **3-Class Avg** |
+|:---|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|
+| **DroidDetectCLS-Large** | 99.38 | 98.39 | 93.24 | **97.00** | 93.08 | 92.86 | 80.42 | **88.78** |
+| DroidDetectCLS-Base | 99.22 | 98.22 | 87.57 | 95.00 | 92.78 | 93.05 | 74.46 | 86.76 |
+| CoDet-M4FT | 98.89 | 98.23 | 83.77 | 93.63 | 85.46 | 90.41 | 73.88 | 83.25 |
+| GPT-SnifferFT | 97.72 | 96.52 | 80.46 | 91.56 | 89.42 | 88.12 | 70.72 | 82.75 |
+| M4FT | 92.99 | 89.36 | 73.99 | 85.45 | 80.98 | 80.72 | 58.80 | 73.50 |
+| **Zero-Shot: Fast-DetectGPT** | 75.07 | 63.05 | 65.43 | 67.85 | 66.43 | 62.90 | 64.30 | 64.54 |
+| Zero-Shot: CoDet-M4 | 53.41 | 44.63 | 65.43 | 54.49 | 41.90 | 46.06 | 55.43 | 47.80 |
+
+**Table 4 — 2-class / 3-class per-language (Full Training split, Avg column):**
+
+| Model | 2-Class C/C++ | C# | Go | Java | Python | JS | **2-Class Avg** | 3-Class C/C++ | C# | Go | Java | Python | JS | **3-Class Avg** |
+|:---|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|
+| **DroidDetectCLS-Large** | 99.31 | 99.51 | 99.32 | 99.45 | 99.11 | 98.67 | **99.23** | 94.24 | 93.87 | 94.42 | 94.05 | 94.13 | 91.27 | **93.66** |
+| DroidDetectCLS-Base | 99.29 | 99.33 | 99.32 | 99.45 | 98.87 | 98.38 | 99.11 | 94.43 | 94.06 | 93.98 | 93.93 | 93.95 | 90.99 | 93.56 |
+| CoDet-M4FT | 99.36 | 99.22 | 99.31 | 99.04 | 98.28 | 99.24 | 99.08 | 89.98 | 88.94 | 89.73 | 91.70 | 85.80 | 91.46 | 89.60 |
+| GPT-SnifferFT | 97.64 | 97.36 | 97.33 | 97.96 | 95.07 | 97.94 | 97.22 | 85.14 | 85.75 | 85.78 | 86.97 | 79.02 | 88.28 | 85.16 |
+| M4FT | 94.18 | 89.98 | 92.19 | 92.63 | 87.19 | 93.61 | 91.63 | 79.56 | 75.55 | 77.63 | 79.55 | 69.63 | 77.53 | 76.57 |
+| Fine-Tuned Baseline: CatBoost | 94.00 | 91.20 | 90.57 | 92.26 | 89.51 | 82.55 | 90.02 | 84.57 | 81.32 | 81.54 | 82.42 | 78.15 | 70.98 | 78.83 |
+| Fine-Tuned Baseline: GCN | 79.06 | 78.33 | 84.33 | 80.04 | 72.49 | 69.69 | 77.32 | 65.97 | 58.03 | 65.20 | 60.13 | 55.22 | 54.72 | 59.88 |
+
+**Table 5 — Adversarial robustness (Recall on human-written vs. adversarial samples):**
+
+| Model | Human-written Recall | Adversarial Recall |
+|:---|:-:|:-:|
+| **DroidDetectCLS-Large** | **0.98** | **0.92** |
+| DroidDetectCLS-Base | 0.93 | 0.92 |
+| CoDet-M4FT | 0.96 | 0.51 |
+| GPT-SnifferFT | 0.97 | 0.55 |
+| M4FT | 0.91 | 0.67 |
+| Fast-DetectGPT (zero-shot) | 0.84 | 0.48 |
+| GPT-Sniffer (zero-shot) | 0.65 | 0.49 |
+| M4 (zero-shot) | 0.40 | 0.73 |
+| CoDet-M4 (zero-shot) | 0.38 | 0.63 |
+| GPT-Zero | 0.53 | 0.10 |
+
+**Table 6 — DroidDetect backbone ablation (Weighted-F1, avg across settings, our final method name in the paper):**
+
+| Model | 2-Class Gen | 2-Class Algo | 2-Class RDS | 3-Class Gen | 3-Class Algo | 3-Class RDS |
+|:---|:-:|:-:|:-:|:-:|:-:|:-:|
+| **DroidDetect** (final) | **99.18** | **99.25** | **94.36** | **95.17** | **92.95** | **94.30** |
+| DroidDetectSCL | see paper | see paper | see paper | see paper | see paper | see paper |
+| DroidDetectCLS | 99.22 | 98.22 | 87.57 | 92.78 | 93.05 | 74.46 |
+
+> Note: "RDS" = Research/DataScience. "Algo" = Algorithmic. "Gen" = General.
 
 ---
 
 ## 🎯 SOTA targets (goals for every climb method)
 
-| Benchmark / Task | Paper best | **Our target** | Minimum to claim SOTA |
-|:-----------------|:----------:|:--------------:|:---------------------:|
-| CoDET-M4 Binary IID Macro-F1 | 98.65 (UniXcoder) | **≥ 99.00** | > 98.65 |
-| CoDET-M4 Author (6-class) Macro-F1 | 66.33 (UniXcoder) | **≥ 70.00** | > 66.33 |
-| CoDET-M4 OOD Generator avg | 93.22 (UniXcoder) | ≥ 94.00 | > 93.22 |
-| CoDET-M4 OOD Source avg | 58.22 (CodeT5) | **≥ 58.50** | > 58.22 |
-| CoDET-M4 OOD Language avg | 88.96 (UniXcoder) | ≥ 85.00 (stretch) | > 88.96 (hard) |
-| Droid T3 Weighted-F1 | 0.8878 (DroidDetectCLS-Large) | **≥ 0.90** | > 0.8878 |
-| Droid T4 Weighted-F1 (adversarial-aware) | — | ≥ 0.85 | first to report |
+Target = beat the **strongest** published baseline for that task (not just beat the popular reference).
+Paper columns anchor to the tables above.
 
-**Data-efficiency framing:** any of the targets above, achieved with ~20% training data, becomes a paper-worthy headline. Paper baselines all use 100% training data.
+| Benchmark / Task | Paper best | Source | **Our target** | Minimum to claim SOTA |
+|:-----------------|:----------:|:-------|:--------------:|:---------------------:|
+| CoDET Binary IID Macro-F1 | **98.65** | UniXcoder, Table 2 | **≥ 99.00** | > 98.65 |
+| CoDET Binary per-lang (C++) | **98.24** | UniXcoder, Table 3 | — | > 98.24 |
+| CoDET Binary per-lang (Python) | **98.60** | UniXcoder, Table 3 | — | > 98.60 |
+| CoDET Binary per-lang (Java) | **99.02** | UniXcoder, Table 3 | — | > 99.02 |
+| CoDET Binary per-src (CodeForces) | **96.54** | UniXcoder, Table 4 | — | > 96.54 |
+| CoDET Binary per-src (LeetCode) | **97.87** | UniXcoder, Table 4 | — | > 97.87 |
+| CoDET Binary per-src (GitHub) | **98.46** | UniXcoder, Table 4 | — | > 98.46 |
+| **CoDET Author (6-class) Macro-F1** | **66.33** | UniXcoder, Table 7 | **≥ 70.00** | > 66.33 |
+| CoDET OOD-Generator (unseen LLMs) F | **93.22** | UniXcoder, Table 8 | ≥ 94.00 | > 93.22 |
+| CoDET OOD-Source (unseen domains) F | **58.22** | **CodeT5**, Table 9 | **≥ 58.50** | > 58.22 |
+| CoDET OOD-Language avg F | **88.96** | UniXcoder, Table 12 | ≥ 85.00 (stretch) | > 88.96 (hard) |
+| CoDET OOD-Language (C#) | **91.31** | UniXcoder, Table 10 | — | > 91.31 |
+| CoDET OOD-Language (Golang) | **90.01** | UniXcoder, Table 10 | — | > 90.01 |
+| CoDET OOD-Language (JavaScript) | **81.48** | UniXcoder, Table 10 | — | > 81.48 |
+| CoDET OOD-Language (PHP) | **96.17** | UniXcoder, Table 10 | — | > 96.17 |
+| CoDET Hybrid Authorship F | **39.36** | UniXcoder, Table 13 | ≥ 45.00 | > 39.36 (very hard) |
+| CoDET Ternary (human/LLM/hybrid) F | **86.10** | UniXcoder, Table 14 | ≥ 87.00 | > 86.10 |
+| **Droid 3-Class per-domain Avg W-F1** | **88.78** | DroidDetectCLS-Large, Table 3 | **≥ 90.00** | > 88.78 |
+| Droid 2-Class per-domain Avg W-F1 | **97.00** | DroidDetectCLS-Large, Table 3 | ≥ 97.50 | > 97.00 |
+| **Droid 3-Class per-language Avg W-F1** | **93.66** | DroidDetectCLS-Large, Table 4 | ≥ 94.50 | > 93.66 |
+| Droid 2-Class per-language Avg W-F1 | **99.23** | DroidDetectCLS-Large, Table 4 | ≥ 99.30 | > 99.23 |
+| Droid 3-Class (Research/DS) | **80.42** | DroidDetectCLS-Large, Table 3 | ≥ 82.00 | > 80.42 |
+| Droid Adversarial Recall | **0.92** | DroidDetectCLS-L, Table 5 | ≥ 0.94 | > 0.92 |
+| Droid 3-Class General (DroidDetect) | **95.17** | DroidDetect final, Table 6 | ≥ 95.50 | > 95.17 |
+
+**Data-efficiency framing:** any target above, achieved with ~20% training data, becomes a paper-worthy headline. All paper baselines use 100% training data.
+
+> **Our climb's primary metric mapping:** `Bin` in the top leaderboard maps to **CoDET Binary IID Macro-F1** (Table 2 row). `Auth` maps to **Table 7 Author Macro-F1**. `Src-gh` is our **held-out-GH subset of Table 4's GitHub column** — but we test the **author** head on it (6-class), so it is strictly harder than UniXcoder's Table 4 number (which is only binary). `T3` maps to **Table 3 3-Class Avg Weighted-F1**. Other climb columns (OOD-LANG-python LOO, OOD-GEN-qwen1.5 LOO, Droid T1, Droid T4) do **not** have a direct paper baseline — they are relative-to-other-methods comparisons.
 
 ---
 
