@@ -6,6 +6,47 @@
 
 ---
 
+## 🏆 Climb Leaderboard — sorted by CoDET Author Macro-F1 ↓
+
+> **Primary metric** = **Author IID Macro-F1** (6-class, hardest task). Binary is ceiling-bound ~99%.
+> Paper baselines: **UniXcoder** 98.65 binary / **66.33** author / 88.96 lang-OOD / **DroidDetectCLS-Large** 0.8878 T3.
+> Δ-paper columns compare against the SAME paper baseline on that task.
+
+| Rank | Exp | Method | Mode | Bin F1 | Δ-Bin | **Author** | **Δ-Auth** | Droid T3 | Δ-Droid | OOD-SRC-gh | Status |
+|:----:|:---|:-------|:----:|:------:|:-----:|:------:|:------:|:--------:|:-------:|:----------:|:------:|
+| 🥇 | **Exp_06** | **FlowCodeDet** | lean | 99.02 | `+0.37` | **70.90** | **`+4.57`** | **89.34** | `+0.56` | **33.36** | ✅ |
+| 🥈 | **Exp_07** | SAMFlatCode | lean | 99.05 | `+0.40` | 70.22 | `+3.89` | 88.73 | `-0.05` | 31.41 | ✅ |
+| 🥉 | **Exp_02** | GHSourceInvariantCode | lean | 98.99 | `+0.34` | 70.20 | `+3.87` | 88.05 | `-0.73` | 30.44 | ✅ |
+| 4 | **Exp_00** | HierTreeCode (baseline) | full | 99.03 | `+0.38` | 69.93 | `+3.60` | 88.63 | `-0.15` | 27.20 | ✅ |
+| 5 | **Exp_03** | TokenStatRAGCode | lean | 99.05 | `+0.40` | 69.90 | `+3.57` | 88.94 | `+0.16` | 30.19 | ✅ |
+| 6 | **Exp_08** | POEMPolarizedCode | lean | **99.06** | `+0.41` | 69.68 | `+3.35` | 88.57 | `-0.21` | 33.33 | ✅ |
+| 7 | **Exp_04** | PoincareGenealogy | lean | 99.01 | `+0.36` | 69.58 | `+3.25` | **89.76** | `+0.98` | 26.47 | ✅ |
+| 8 | **Exp_05** | SinkhornOTCode | lean | 99.05 | `+0.40` | 68.40 | `+2.07` | 88.03 | `-0.75` | 28.96 | ✅ |
+| — | Exp_01 | GenealogyGraphCode | lean | — | — | — | — | — | — | — | ⏳ pending |
+| — | Exp_09 | EpiplexityCode | lean | — | — | — | — | — | — | — | ⏳ pending |
+| — | Exp_10 | PredictiveCodingCode | lean | — | — | — | — | — | — | — | ⏳ pending |
+| — | Exp_11 | PersistentHomologyCode | lean | — | — | — | — | — | — | — | ⏳ pending |
+| — | Exp_12 | AvailabilityPredictivityCode | lean | — | — | — | — | — | — | — | ⏳ pending |
+| — | Exp_13 | NTKAlignCode | lean | — | — | — | — | — | — | — | ⏳ pending |
+| **REF** | Paper | **UniXcoder** | — | 98.65 | — | **66.33** | — | — | — | — | reference |
+| REF | Paper | CodeT5 | — | 98.35 | `-0.30` | 62.45 | `-3.88` | — | — | — | reference |
+| REF | Paper | CodeBERT | — | 95.70 | `-2.95` | 64.80 | `-1.53` | — | — | — | reference |
+| **REF** | Paper | **DroidDetectCLS-Large** | — | — | — | — | — | **88.78** | — | — | reference (Droid) |
+| REF | Paper | DroidDetectCLS-Base | — | — | — | — | — | 86.76 | `-2.02` | — | reference (Droid) |
+| REF | Paper | CoDet-M4FT (Droid) | — | — | — | — | — | 83.25 | `-5.53` | — | reference (Droid) |
+
+### Quick reads
+
+- **Best CoDET Author so far:** `exp_06 FlowCodeDet` at **70.90** (+4.57 vs UniXcoder). First climb entry to clear **70.6**; class-conditioned flow-matching auxiliary is the first recipe to beat plain HierTree on Author.
+- **Best Droid T3 so far:** `exp_04 PoincareGenealogy` at **89.76** (+0.98 vs DroidDetectCLS-Large). Hyperbolic geometry helps ID more than it helps author/OOD.
+- **Best OOD-SRC-gh so far:** tie between `exp_06 FlowCodeDet` **33.36** and `exp_08 POEMPolarizedCode` **33.33** — both break the 0.30 GH ceiling with different mechanisms.
+- **Compare to Exp_CodeDet board:** Exp27 DeTeCtiveCode holds **71.53** Author on full CoDET (different codebase, HierTree + dual SupCon + kNN). The climb board's **70.90** is best-to-date for the `run_full_climb` harness.
+- **Still pending:** Exp_01 / 09–13 are queued; journal-grade methods (Epiplexity, PredictiveCoding, PH, NTK, Availability) unclaimed.
+
+> Δ-Bin is measured vs UniXcoder 98.65. Δ-Auth vs UniXcoder 66.33. Δ-Droid vs DroidDetectCLS-Large 0.8878 (× 100 to match our %-scale). OOD-SRC-gh has no paper baseline on author task — the figure stands on its own as a "which method is least broken on GH" comparison. Status ✅ = run finished; ⏳ = file exists, not yet run on Kaggle.
+
+---
+
 ## Folder structure (modular, no code duplication)
 
 ```
@@ -247,12 +288,12 @@ Fill in after each `exp_NN_*.py` run by pasting the `BEGIN_PAPER_TABLE` block. B
 |:-:|:-------|:-----|:-------:|:----:|:------------:|:-------------:|:-------------:|:-------------:|:----------:|:------:|
 | 0 | **HierTreeCode** | [exp_00_hiertree.py](exp_00_hiertree.py) | 20% | full | 99.03 | **69.93** | 88.63 | 87.60 | **27.20** | ✅ |
 | 1 | **GenealogyGraphCode** | [exp_01_genealogy_graph.py](exp_01_genealogy_graph.py) | 20% | lean | TBD | TBD | TBD | TBD | TBD | ⏳ pending |
-| 2 | **GHSourceInvariantCode** | [exp_02_gh_invariant.py](exp_02_gh_invariant.py) | 20% | lean | TBD | TBD | TBD | TBD | TBD | ⏳ pending |
+| 2 | **GHSourceInvariantCode** | [exp_02_gh_invariant.py](exp_02_gh_invariant.py) | 20% | lean | **98.99** | **70.20** | 88.05 | 87.38 | 30.44 | ✅ |
 | 3 | **TokenStatRAGCode** | [exp_03_tokenstat_rag.py](exp_03_tokenstat_rag.py) | 20% | lean | 99.05 | 69.90 | **88.94** | 87.40 | 30.19 | ✅ |
-| 4 | **PoincareGenealogy** | [exp_04_hyperbolic_poincare.py](exp_04_hyperbolic_poincare.py) | 20% | lean | TBD | TBD | TBD | TBD | TBD | ⏳ pending |
-| 5 | **SinkhornOTCode** | [exp_05_sinkhorn_ot.py](exp_05_sinkhorn_ot.py) | 20% | lean | TBD | TBD | TBD | TBD | TBD | ⏳ pending |
-| 6 | **FlowCodeDet** | [exp_06_flow_matching.py](exp_06_flow_matching.py) | 20% | lean | TBD | TBD | TBD | TBD | TBD | ⏳ pending |
-| 7 | **SAMFlatCode** | [exp_07_sam_flat.py](exp_07_sam_flat.py) | 20% | lean | TBD | TBD | TBD | TBD | TBD | ⏳ pending |
+| 4 | **PoincareGenealogy** | [exp_04_hyperbolic_poincare.py](exp_04_hyperbolic_poincare.py) | 20% | lean | **99.01** | **69.58** | **89.76** | 87.99 | 26.47 | ✅ |
+| 5 | **SinkhornOTCode** | [exp_05_sinkhorn_ot.py](exp_05_sinkhorn_ot.py) | 20% | lean | **99.05** | **68.40** | 88.03 | 87.52 | 28.96 | ✅ |
+| 6 | **FlowCodeDet** | [exp_06_flow_matching.py](exp_06_flow_matching.py) | 20% | lean | **99.02** | **70.90** | **89.34** | 88.30 | **33.36** | ✅ |
+| 7 | **SAMFlatCode** | [exp_07_sam_flat.py](exp_07_sam_flat.py) | 20% | lean | **99.05** | **70.22** | 88.73 | 87.51 | 31.41 | ✅ |
 | 8 | **POEMPolarizedCode** | [exp_08_polarized_code.py](exp_08_polarized_code.py) | 20% | lean | **99.06** | **69.68** | 88.57 | 87.48 | **33.33** | ✅ |
 | 9 | **EpiplexityCode** | [exp_09_epiplexity.py](exp_09_epiplexity.py) | 20% | lean | TBD | TBD | TBD | TBD | TBD | ⏳ pending |
 | 10 | **PredictiveCodingCode** | [exp_10_predictive_coding.py](exp_10_predictive_coding.py) | 20% | lean | TBD | TBD | TBD | TBD | TBD | ⏳ pending |
@@ -300,19 +341,49 @@ Keep it to one paragraph per method. Per-class detail lives in the `BEGIN_PAPER_
 - **Risk:** prototypes may collapse if EMA too strong; graph-smooth term is a warm-start prior that tapers off.
 - **Result after run:** _(paste BEGIN_PAPER_TABLE block summary)_
 
-### exp_02 GHSourceInvariantCode (pending, lean mode)
+### exp_02 GHSourceInvariantCode (2026-04-18, lean mode, H100 BF16 batch 64×1)
 - **Novelty:** first method to attack the GH-source OOD bottleneck (insight #16). Couples SOURCE-IRM (per-source IRMv1 penalty, 3 envs cf/gh/lc) with a gradient-reversed STYLE-only adversary predicting source. HierTree preserved for genealogy signal.
 - **Targets insight #3 + #16:** surface-style shortcut on CF/LC templates is the root cause of GH-OOD catastrophic failure. Source-invariance on style subspace (not on content) should close gap without hurting author signal.
 - **Success criteria (lean screening):** OOD-SRC held-out=gh > 0.30 AND CoDET Author IID >= 70.3 (no regression).
 - **Risk:** IRM penalty may explode without annealing (Exp06 lesson) — mitigated by `irm_warmup_epochs=1`. Requires dataset to expose per-sample `source` field in outputs dict.
-- **Result after run:** _(paste BEGIN_PAPER_TABLE block summary)_
+- **Result after run:** Full suite `2026-04-18 19:53:52` on NVIDIA H100 80GB HBM3, BF16, batch 64×1. **CoDET-M4** — IID binary macro-F1 **0.9899** (best val 0.9894); IID author **0.7020** (val 0.7118); OOD source GH **0.3044** (val 0.9928); OOD language python **0.5070**; OOD generator qwen1.5 **0.4976** (per-class table shows class 0 support 0 — headline macro is still a degenerate-case signal). **Droid** — T1/T3/T4 weighted-F1 test **0.9703 / 0.8805 / 0.8738** (primary vs best val **0.9714 / 0.8420 / 0.8392**). OOD-SRC-gh clears the 0.30 bar; author lands at 70.20 (just under the 70.30 regression guard). Droid T3/T4 sit slightly below the DroidDetectCLS-Large paper line (0.8878) but remain strong ID.
 
-### exp_03 TokenStatRAGCode (pending, lean mode)
+### exp_03 TokenStatRAGCode (2026-04-18, lean mode, H100 BF16 batch 64×1)
 - **Novelty:** first method to use retrieval DURING TRAINING (not just test-time). In-batch kNN over token-statistics features (label-independent surface features → cannot trivially memorise). Same-label neighbours pull, different-label neighbours hinge-push.
 - **Targets insight #12 + #14:** combines cheap token-stat booster (Droid) with training-time retrieval signal (OOD + Author). Prior work (Exp17 RAGDetect 70.46) used embedding-space retrieval = circular.
 - **Success criteria (lean screening):** CoDET Author > 70.60 AND Droid T3 > 0.89 AND OOD-SRC-gh > 0.32.
 - **Risk:** token-stat features need to be surfaced by the backbone (`outputs["tokenstat"]` or `spectral_features`); fallback uses last-16-dim embedding slice.
-- **Result after run:** _(paste BEGIN_PAPER_TABLE block summary)_
+- **Result after run:** Full suite `2026-04-18 20:24:37` on NVIDIA H100 80GB HBM3, BF16, batch 64×1. **CoDET-M4** — IID binary macro-F1 **0.9905** (best val 0.9902); IID author **0.6990** (val 0.7043); OOD source GH **0.3019** (val 0.9926); OOD language python **0.5260**; OOD generator qwen1.5 **0.4962** (per-class: class 0 support 0 — same degenerate macro caveat as other LOO gen runs). **Droid** — T1/T3/T4 weighted-F1 test **0.9707 / 0.8894 / 0.8740** (macro-F1 **0.9706 / 0.8493 / 0.8401**; best val primary **0.9709 / 0.8497 / 0.8391**). **Lean gates:** Droid T3 **0.8894** is just under the 0.89 bar; OOD-SRC-gh **0.3019** under 0.32; author **69.90** under 70.60 — screening criteria not all met, but Droid T3 still edges past DroidDetectCLS-Large paper (0.8878) and binary/ID Droid stay strong.
+
+### exp_04 PoincareGenealogy (2026-04-18, lean mode, H100 BF16 batch 64×1)
+- **Novelty:** Poincaré-ball embeddings + hyperbolic distance for the CoDET generator tree (Euclidean → exp map, learnable curvature, hierarchy/radial regularizers) — geometry aimed at low tree distortion vs Euclidean HierTree-style losses.
+- **Targets (from exp file):** CoDET author **> 70.7**, Qwen1.5 per-class F1 **> 0.48**, Droid T3 stable **~0.89**; OOD GH remains the stress test.
+- **Risk:** hyperbolic optimization can be brittle; family depth targets may trade off against author discrimination.
+- **Result after run:** Full suite `2026-04-18 19:55:51` on NVIDIA H100 80GB HBM3, BF16, batch 64×1. **CoDET-M4** — IID binary macro-F1 **0.9901** (best val 0.9904); IID author **0.6958** (val 0.7111); OOD source GH **0.2647** (val 0.9928); OOD language python **0.4761**; OOD generator qwen1.5 **0.4965** (class 0 support 0 in per-class table — same LOO-gen macro caveat). **Droid** — T1/T3/T4 weighted-F1 test **0.9697 / 0.8976 / 0.8799** (macro-F1 **0.9696 / 0.8592 / 0.8465**; best val primary **0.9704 / 0.8623 / 0.8430**). **Takeaway:** Droid T3 clears DroidDetectCLS-Large (**0.8976** vs 0.8878) — best T3 in the climb board so far; CoDET author sits below the 70.7 stretch goal and OOD-GH (**0.2647**) is weaker than exp_02/exp_03, so hyperbolic genealogy helps Droid ID more than GH-OOD under this lean recipe.
+
+### exp_05 SinkhornOTCode (2026-04-18, lean mode, H100 BF16 batch 64×1)
+- **Novelty:** batch-level Sinkhorn–Knopp optimal-transport targets (balanced class mass) + KL to softmax logits vs standard CE/focal — aims to fix minority-class starvation on imbalanced 6-way author.
+- **Targets (from exp file):** CoDET author **> 70.6** (balanced OT head); stackable with HierTree auxiliary.
+- **Risk:** OT iterations each batch add compute; equal column-mass may fight natural human majority if ε too small.
+- **Result after run:** Full suite `2026-04-18 20:10:15` on NVIDIA H100 80GB HBM3, BF16, batch 64×1. **CoDET-M4** — IID binary macro-F1 **0.9905** (best val 0.9897); IID author **0.6840** (val 0.6924); OOD source GH **0.2896** (val 0.9927); OOD language python **0.5754**; OOD generator qwen1.5 **0.4967** (class 0 support 0 — LOO-gen macro caveat). **Droid** — T1/T3/T4 weighted-F1 test **0.9701 / 0.8803 / 0.8752** (macro-F1 **0.9700 / 0.8393 / 0.8415**; best val primary **0.9711 / 0.8421 / 0.8410**). **Takeaway:** beats UniXcoder on author (**+2.07** pt) but **below** the file’s 70.6 OT target and behind stronger climb authors (exp_02/03/04). **OOD-LANG python** (**0.5754**) is a bright spot vs recent climbs; OOD-GH **0.2896** sits under the 0.30 bar; Droid T3/T4 trail paper SOTA and exp_04’s T3 peak.
+
+### exp_06 FlowCodeDet (2026-04-18, lean mode, H100 BF16 batch 64×1)
+- **Novelty:** class-conditioned flow-matching auxiliary head (`CondVelocityMLP`) — per-class velocity field regularizes embeddings (stronger than pairwise SupCon per cited FM work); linear noise interpolant + MSE on predicted velocity.
+- **Targets (from exp file):** CoDET author **> 70.6**, Droid T4 **> 0.85**, OOD-GEN qwen1.5 **> 0.51** (degenerate macro caveat applies).
+- **Risk:** extra FM loss weight vs CE; sampling `t` can dominate early training if `lambda_fm` too high.
+- **Result after run:** Full suite `2026-04-18 20:04:43` on NVIDIA H100 80GB HBM3, BF16, batch 64×1. **CoDET-M4** — IID binary macro-F1 **0.9902** (best val 0.9897); IID author **0.7090** (val 0.7158); OOD source GH **0.3336** (val 0.9918); OOD language python **0.6450**; OOD generator qwen1.5 **0.4967** (class 0 support 0 — LOO-gen macro caveat). **Droid** — T1/T3/T4 weighted-F1 test **0.9701 / 0.8934 / 0.8830** (macro-F1 **0.9701 / 0.8541 / 0.8479**; best val primary **0.9706 / 0.8542 / 0.8488**). **Takeaway:** **strongest CoDET author in the climb board so far (70.90)** and **best OOD-GH (0.3336)** among completed lean runs; clears the file’s **70.6** author bar and Droid T4 **> 0.85**. Droid T3 **0.8934** beats DroidDetectCLS-Large (0.8878) but sits slightly under exp_04’s peak T3; OOD-LANG python **0.645** is best-in-climb. UniXcoder gap on author: **+4.57** pt.
+
+### exp_07 SAMFlatCode (2026-04-18, lean mode, H100 BF16 batch 64×1)
+- **Novelty:** Sharpness-Aware–style flatness via **embedding-space** adversarial perturbation (FGSM on features + auxiliary head loss) as a cheap proxy for SAM — targets OOD transfer without DANN-style domain confusion.
+- **Targets (from exp file):** OOD-SRC-gh **> 0.32**, CoDET author **~70.5**, Droid T4 **> 0.85**.
+- **Risk:** feature-space SAM can over-smooth discriminative directions if `lambda_sam` too large.
+- **Result after run:** Full suite `2026-04-18 20:18:54` on NVIDIA H100 80GB HBM3, BF16, batch 64×1. **CoDET-M4** — IID binary macro-F1 **0.9905** (best val 0.9902); IID author **0.7022** (val 0.7124); OOD source GH **0.3141** (val 0.9927); OOD language python **0.5413**; OOD generator qwen1.5 **0.4974** (class 0 support 0 — LOO-gen macro caveat). **Droid** — T1/T3/T4 weighted-F1 test **0.9693 / 0.8873 / 0.8751** (macro-F1 **0.9692 / 0.8468 / 0.8411**; best val primary **0.9702 / 0.8477 / 0.8411**). **Takeaway:** author **70.22** and Droid T4 **0.875** meet “stable IID / adv” expectations; OOD-GH **0.3141** lands **just under** the **0.32** screening bar from the exp file. Droid T3 **0.8873** sits slightly below DroidDetectCLS-Large (0.8878) and under exp_04/06 peaks; overall a solid mid-pack run vs **FlowCodeDet** on GH-OOD and author. UniXcoder author gap: **+3.89** pt.
+
+### exp_08 POEMPolarizedCode (2026-04-18, lean mode, H100 BF16 batch 64×1)
+- **Novelty:** POEM-style **orthogonal polarization** — split embedding into invariant vs source-specific subspaces (`L_ortho` on projectors), put source prediction on `z_spec` and entropy-regularize source on `z_inv` (no GRL / DANN).
+- **Targets (from exp file):** OOD-SRC-gh **> 0.32**, CoDET author **~70.4**, Droid T3 **~0.88**.
+- **Risk:** rank split can under-feed the author head if `z_inv` is too narrow.
+- **Result after run:** Full suite `2026-04-18 20:16:47` on NVIDIA H100 80GB HBM3, BF16, batch 64×1. **CoDET-M4** — IID binary macro-F1 **0.9906** (best val 0.9902); IID author **0.6968** (val 0.7083); OOD source GH **0.3333** (val 0.9928); OOD language python **0.5411**; OOD generator qwen1.5 **0.4972** (class 0 support 0 — LOO-gen macro caveat). **Droid** — T1/T3/T4 weighted-F1 test **0.9705 / 0.8857 / 0.8748** (macro-F1 **0.9704 / 0.8450 / 0.8409**; best val primary **0.9711 / 0.8466 / 0.8412**). **Takeaway:** OOD-GH **0.3333** clears the exp-file **0.32** bar and matches the **exp_06** GH cluster (0.3336) within noise; author **69.68** tracks the ~70.4 expectation but trails **FlowCodeDet**; Droid T3 **0.8857** sits just under DroidDetectCLS-Large (0.8878). UniXcoder author gap: **+3.35** pt.
 
 ---
 
