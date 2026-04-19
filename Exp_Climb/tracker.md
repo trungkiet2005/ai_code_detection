@@ -17,7 +17,7 @@ All 8 lean-mode tasks are reported below (CoDET: 2 IID + 3 OOD representative ·
 | Rank | Exp | Method | Mode | **Bin** | Δ | **Auth** | **Δ** | **Gen-qw** | **Lang-py** | **Src-gh** | **T1** | **T3** | Δ | **T4** | Status |
 |:----:|:---|:-------|:----:|:-----:|:---:|:-----:|:-----:|:----------:|:-----------:|:----------:|:------:|:------:|:---:|:------:|:------:|
 | 🥇 | **Exp_06** | **FlowCodeDet** | lean | 99.02 | `+0.37` | **70.90** | **`+4.57`** | 49.67 | **64.50** | **33.36** | 97.01 | **89.34** | `+0.56` | **88.30** | ✅ |
-| 🥈 | **Exp_07** | SAMFlatCode | lean | 99.05 | `+0.40` | 70.22 | `+3.89` | 49.74 | 54.13 | 31.41 | 96.93 | 88.73 | `-0.05` | 87.51 | ✅ |
+| 🥈 | **Exp_07** | SAMFlatCode | lean | 99.05 | `+0.40` | 70.22 | `+3.89` | 49.74 | 54.13 | 31.41 | 96.92 | 88.73 | `-0.05` | 87.51 | ✅ |
 | 🥉 | **Exp_02** | GHSourceInvariantCode | lean | 98.99 | `+0.34` | 70.20 | `+3.87` | 49.76 | 50.70 | 30.44 | 97.03 | 88.05 | `-0.73` | 87.38 | ✅ |
 | 4 | **Exp_00** | HierTreeCode (baseline) | full | 99.03 | `+0.38` | 69.93 | `+3.60` | 49.68 | 53.25 | 27.20 | 97.08 | 88.63 | `-0.15` | 87.60 | ✅ |
 | 5 | **Exp_03** | TokenStatRAGCode | lean | 99.05 | `+0.40` | 69.90 | `+3.57` | 49.62 | 52.60 | 30.19 | 97.07 | 88.94 | `+0.16` | 87.40 | ✅ |
@@ -293,24 +293,11 @@ Run it → at bottom of log there's a `BEGIN_PAPER_TABLE ... END_PAPER_TABLE` bl
 
 ## 📈 Method leaderboard
 
-Fill in after each `exp_NN_*.py` run by pasting the `BEGIN_PAPER_TABLE` block. Bold = beats corresponding paper baseline.
+Fill in after each `exp_NN_*.py` run by pasting the `BEGIN_PAPER_TABLE` block.
 
-| # | Method | File | Train % | Mode | CoDET Bin F1 | CoDET Auth F1 | Droid T3 W-F1 | Droid T4 W-F1 | OOD-SRC-gh | Status |
-|:-:|:-------|:-----|:-------:|:----:|:------------:|:-------------:|:-------------:|:-------------:|:----------:|:------:|
-| 0 | **HierTreeCode** | [exp_00_hiertree.py](exp_00_hiertree.py) | 20% | full | 99.03 | **69.93** | 88.63 | 87.60 | **27.20** | ✅ |
-| 1 | **GenealogyGraphCode** | [exp_01_genealogy_graph.py](exp_01_genealogy_graph.py) | 20% | lean | TBD | TBD | TBD | TBD | TBD | ⏳ pending |
-| 2 | **GHSourceInvariantCode** | [exp_02_gh_invariant.py](exp_02_gh_invariant.py) | 20% | lean | **98.99** | **70.20** | 88.05 | 87.38 | 30.44 | ✅ |
-| 3 | **TokenStatRAGCode** | [exp_03_tokenstat_rag.py](exp_03_tokenstat_rag.py) | 20% | lean | 99.05 | 69.90 | **88.94** | 87.40 | 30.19 | ✅ |
-| 4 | **PoincareGenealogy** | [exp_04_hyperbolic_poincare.py](exp_04_hyperbolic_poincare.py) | 20% | lean | **99.01** | **69.58** | **89.76** | 87.99 | 26.47 | ✅ |
-| 5 | **SinkhornOTCode** | [exp_05_sinkhorn_ot.py](exp_05_sinkhorn_ot.py) | 20% | lean | **99.05** | **68.40** | 88.03 | 87.52 | 28.96 | ✅ |
-| 6 | **FlowCodeDet** | [exp_06_flow_matching.py](exp_06_flow_matching.py) | 20% | lean | **99.02** | **70.90** | **89.34** | 88.30 | **33.36** | ✅ |
-| 7 | **SAMFlatCode** | [exp_07_sam_flat.py](exp_07_sam_flat.py) | 20% | lean | **99.05** | **70.22** | 88.73 | 87.51 | 31.41 | ✅ |
-| 8 | **POEMPolarizedCode** | [exp_08_polarized_code.py](exp_08_polarized_code.py) | 20% | lean | **99.06** | **69.68** | 88.57 | 87.48 | **33.33** | ✅ |
-| 9 | **EpiplexityCode** | [exp_09_epiplexity.py](exp_09_epiplexity.py) | 20% | lean | TBD | TBD | TBD | TBD | TBD | ⏳ pending |
-| 10 | **PredictiveCodingCode** | [exp_10_predictive_coding.py](exp_10_predictive_coding.py) | 20% | lean | TBD | TBD | TBD | TBD | TBD | ⏳ pending |
-| 11 | **PersistentHomologyCode** | [exp_11_persistent_homology.py](exp_11_persistent_homology.py) | 20% | lean | TBD | TBD | TBD | TBD | TBD | ⏳ pending |
-| 12 | **AvailabilityPredictivityCode** | [exp_12_shortcut_foundations.py](exp_12_shortcut_foundations.py) | 20% | lean | TBD | TBD | TBD | TBD | TBD | ⏳ pending |
-| 13 | **NTKAlignCode** | [exp_13_ntk_feature_selection.py](exp_13_ntk_feature_selection.py) | 20% | lean | TBD | TBD | TBD | TBD | TBD | ⏳ pending |
+> **See the [🏆 Climb Leaderboard](#-climb-leaderboard--sorted-by-codet-author-macro-f1-) at the top of this file** for the full 8-task ranked results. This section is reserved for per-method narrative (novelty, risks, lean-gate outcome) — kept below in the `Insights log` subsection.
+>
+> Retired duplicate summary table: the top leaderboard now covers every lean task (Bin / Auth / OOD-GEN-qw / OOD-LANG-py / OOD-SRC-gh / Droid T1 / T3 / T4) so there is no second table to sync.
 
 ---
 
@@ -388,7 +375,7 @@ Keep it to one paragraph per method. Per-class detail lives in the `BEGIN_PAPER_
 - **Novelty:** Sharpness-Aware–style flatness via **embedding-space** adversarial perturbation (FGSM on features + auxiliary head loss) as a cheap proxy for SAM — targets OOD transfer without DANN-style domain confusion.
 - **Targets (from exp file):** OOD-SRC-gh **> 0.32**, CoDET author **~70.5**, Droid T4 **> 0.85**.
 - **Risk:** feature-space SAM can over-smooth discriminative directions if `lambda_sam` too large.
-- **Result after run:** Full suite `2026-04-18 20:18:54` on NVIDIA H100 80GB HBM3, BF16, batch 64×1. **CoDET-M4** — IID binary macro-F1 **0.9905** (best val 0.9902); IID author **0.7022** (val 0.7124); OOD source GH **0.3141** (val 0.9927); OOD language python **0.5413**; OOD generator qwen1.5 **0.4974** (class 0 support 0 — LOO-gen macro caveat). **Droid** — T1/T3/T4 weighted-F1 test **0.9693 / 0.8873 / 0.8751** (macro-F1 **0.9692 / 0.8468 / 0.8411**; best val primary **0.9702 / 0.8477 / 0.8411**). **Takeaway:** author **70.22** and Droid T4 **0.875** meet “stable IID / adv” expectations; OOD-GH **0.3141** lands **just under** the **0.32** screening bar from the exp file. Droid T3 **0.8873** sits slightly below DroidDetectCLS-Large (0.8878) and under exp_04/06 peaks; overall a solid mid-pack run vs **FlowCodeDet** on GH-OOD and author. UniXcoder author gap: **+3.89** pt.
+- **Result after run:** Full suite `2026-04-18 20:18:54` on NVIDIA H100 80GB HBM3, BF16, batch 64×1. **CoDET-M4** — IID binary macro-F1 **0.9905** (best val 0.9902); IID author **0.7022** (val 0.7124); OOD source GH **0.3141** (val 0.9927); OOD language python **0.5413**; OOD generator qwen1.5 **0.4974** (class 0 support 0 — LOO-gen macro caveat). **Droid** — T1/T3/T4 weighted-F1 test **0.9692 / 0.8873 / 0.8751** (macro-F1 **0.9692 / 0.8468 / 0.8411**; best val primary **0.9702 / 0.8477 / 0.8411**). **Takeaway:** author **70.22** and Droid T4 **0.875** meet “stable IID / adv” expectations; OOD-GH **0.3141** lands **just under** the **0.32** screening bar from the exp file. Droid T3 **0.8873** sits slightly below DroidDetectCLS-Large (0.8878) and under exp_04/06 peaks; overall a solid mid-pack run vs **FlowCodeDet** on GH-OOD and author. UniXcoder author gap: **+3.89** pt.
 
 ### exp_08 POEMPolarizedCode (2026-04-18, lean mode, H100 BF16 batch 64×1)
 - **Novelty:** POEM-style **orthogonal polarization** — split embedding into invariant vs source-specific subspaces (`L_ortho` on projectors), put source prediction on `z_spec` and entropy-regularize source on `z_inv` (no GRL / DANN).
