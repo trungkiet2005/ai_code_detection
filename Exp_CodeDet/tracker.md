@@ -2,7 +2,7 @@
 
 > **Benchmark Dataset:** `DaniilOr/CoDET-M4` (~500K samples, Python/Java/C++)  
 > **Paper Baseline:** Orel, Azizov & Nakov, ACL Findings 2025 (UniXcoder)  
-> **Current Best:** **Exp18 HierTreeCode** — Author IID 70.55 F1 (+4.22% vs UniXcoder)
+> **Current Best:** **Exp27 DeTeCtiveCode** — Author IID 71.53 F1 (+5.20% vs UniXcoder), Binary 99.06
 
 ---
 
@@ -13,25 +13,26 @@
 
 | Rank | Exp | Method | Binary F1 | Δ-Paper | Author F1 | Δ-Paper | Val F1 | Status |
 |:----:|:----|:-------|:---------:|:-------:|:---------:|:-------:|:------:|:------:|
-| 🥇 | **Exp18** | **HierTreeCode** | **99.06** | `+0.41` | **70.55** | **`+4.22`** | **71.88** | ✅ |
-| 🥈 | **Exp17** | RAGDetect | **99.09** | `+0.44` | 70.46 | `+4.13` | 70.99 | ✅ |
-| 🥉 | **Exp32** | **HyperCode** | 99.07 | `+0.42` | **70.33** | `+4.00` | **71.51** | ✅ |
-| 4 | **Exp31** | KANCode | **99.09** | `+0.44` | 70.30 | `+3.97` | 71.38 | ✅ |
-| 5 | **Exp37** | EnergyCode | 99.05 | `+0.40` | 70.26 | `+3.93` | 71.38 | ✅ |
-| 6 | **Exp20** | BiScopeCode | **99.06** | `+0.41` | 70.20 | `+3.87` | 71.22 | ✅ |
-| 7 | **Exp22** | TTACode | **99.06** | `+0.41` | 70.20 | `+3.87` | 71.32 | ✅ |
-| 8 | **Exp25** | MultiGranCode | 99.03 | `+0.38` | 70.19 | `+3.86` | 71.22 | ✅ |
-| 9 | **Exp15** | GroupDRO | 98.98 | `+0.33` | 70.17 | `+3.84` | 70.59 | ✅ |
-| 10 | **Exp38** | WaveCLCode | 99.02 | `+0.37` | 70.16 | `+3.83` | 71.44 | ✅ |
-| 11 | **Exp26** | SelfDistillCode | 99.04 | `+0.39` | 70.14 | `+3.81` | 71.22 | ✅ |
-| 12 | **Exp14** | ProtoCon | **99.06** | `+0.41` | 70.13 | `+3.80` | 71.26 | ✅ |
-| 13 | **Exp21** | MoECode | **99.09** | `+0.44` | 70.04 | `+3.71` | 71.20 | ✅ |
-| 14 | **Exp34** | TTLCode | 99.05 | `+0.40` | 70.04 | `+3.71` | 70.93 | ✅ |
-| 15 | **Exp33** | IBCode | 99.07 | `+0.42` | 70.02 | `+3.69` | 71.01 | ✅ |
-| 16 | **Exp36** | MambaCode | 99.05 | `+0.40` | 69.98 | `+3.65` | 70.68 | ✅ |
-| 17 | **Exp11** | SpectralCode | **99.06** | `+0.41` | 69.82 | `+3.49` | 70.80 | ✅ |
-| 18 | **Exp23** | GraphStyleCode | 99.00 | `+0.35` | 69.71 | `+3.38` | 70.89 | ✅ |
-| 19 | **Exp24** | CosineProtoCode | 99.03 | `+0.38` | 67.80 | `+1.47` | 68.70 | ✅ |
+| 🥇 | **Exp27** | **DeTeCtiveCode** | **99.06** | `+0.41` | **71.53** | **`+5.20`** | **71.81** | ✅ NEW |
+| 🥈 | **Exp18** | HierTreeCode | **99.06** | `+0.41` | 70.55 | `+4.22` | 71.88 | ✅ |
+| 🥉 | **Exp17** | RAGDetect | **99.09** | `+0.44` | 70.46 | `+4.13` | 70.99 | ✅ |
+| 4 | **Exp32** | HyperCode | 99.07 | `+0.42` | 70.33 | `+4.00` | 71.51 | ✅ |
+| 5 | **Exp31** | KANCode | **99.09** | `+0.44` | 70.30 | `+3.97` | 71.38 | ✅ |
+| 6 | **Exp37** | EnergyCode | 99.05 | `+0.40` | 70.26 | `+3.93` | 71.38 | ✅ |
+| 7 | **Exp20** | BiScopeCode | **99.06** | `+0.41` | 70.20 | `+3.87` | 71.22 | ✅ |
+| 8 | **Exp22** | TTACode | **99.06** | `+0.41` | 70.20 | `+3.87` | 71.32 | ✅ |
+| 9 | **Exp25** | MultiGranCode | 99.03 | `+0.38` | 70.19 | `+3.86` | 71.22 | ✅ |
+| 10 | **Exp15** | GroupDRO | 98.98 | `+0.33` | 70.17 | `+3.84` | 70.59 | ✅ |
+| 11 | **Exp38** | WaveCLCode | 99.02 | `+0.37` | 70.16 | `+3.83` | 71.44 | ✅ |
+| 12 | **Exp26** | SelfDistillCode | 99.04 | `+0.39` | 70.14 | `+3.81` | 71.22 | ✅ |
+| 13 | **Exp14** | ProtoCon | **99.06** | `+0.41` | 70.13 | `+3.80` | 71.26 | ✅ |
+| 14 | **Exp21** | MoECode | **99.09** | `+0.44` | 70.04 | `+3.71` | 71.20 | ✅ |
+| 15 | **Exp34** | TTLCode | 99.05 | `+0.40` | 70.04 | `+3.71` | 70.93 | ✅ |
+| 16 | **Exp33** | IBCode | 99.07 | `+0.42` | 70.02 | `+3.69` | 71.01 | ✅ |
+| 17 | **Exp36** | MambaCode | 99.05 | `+0.40` | 69.98 | `+3.65` | 70.68 | ✅ |
+| 18 | **Exp11** | SpectralCode | **99.06** | `+0.41` | 69.82 | `+3.49` | 70.80 | ✅ |
+| 19 | **Exp23** | GraphStyleCode | 99.00 | `+0.35` | 69.71 | `+3.38` | 70.89 | ✅ |
+| 20 | **Exp24** | CosineProtoCode | 99.03 | `+0.38` | 67.80 | `+1.47` | 68.70 | ✅ |
 | — | **Exp16** | HyperNetCode | **99.07** | `+0.42` | — ❌ bug | — | — | ✅ |
 | — | **Exp19** | EAGLECode (DANN) | 98.73 | `+0.08` | 62.89 ↓↓ | `-3.44` | 64.23 | ✅ |
 | — | **Exp35** | TopoCode | — | — | — | — | — | ⏳ pending |
@@ -1250,7 +1251,15 @@ Top-rated paper ideas from NeurIPS/ICML/CVPR survey for NeurIPS 2026 ORAL:
 | **Novelty** | Multi-level **SupCon** on neural + spectral projections (DeTeCtive / SupCon line); same **HierTree** as Exp18; test-time **kNN** over embedding bank (`rag_k=32`, `rag_alpha=0.25`) |
 | **Loss** | `L_task + 0.3 L_neural + 0.3 L_spectral + λ_hier L_hier + λ_supcon (SupCon_n+SupCon_s)/2` |
 | **Cross-bench** | Run with `Exp_DM/exp27_detective_code.py` (AICD T1/T2/T3 + Droid T3/T4) for 3-way benchmark alignment |
-| **Status** | Pending GPU run — add results to leaderboard when available |
+| **Status** | ✅ Completed 2026-04-18 |
+| **Binary IID test** | **Macro-F1 99.06** (Val 99.01, W-F1 99.06) — matches Exp18 binary ceiling |
+| **Author IID test** | **Macro-F1 71.53** (Val 71.81, W-F1 81.89) — **NEW SOTA** (+0.98 over Exp18 70.55) |
+| **Author per-class F1** | human 98.59 / cllama 74.51 / gpt 77.96 / l3.1 82.49 / nxcode 46.63 / qwen 49.01 |
+| **Author breakdown by source** | cf=76.71 / gh=57.62 / lc=60.33 — **best GH macro on author task yet (57.62)** |
+| **Author breakdown by language** | cpp=70.56 / java=76.67 / python=67.01 |
+| **Parameters** | 152.1M (binary) / 152.1M (author) |
+| **kNN blend** | Active: k=32, α=0.25, bank=50K samples |
+| **Key takeaway** | HierTree + dual SupCon (neural+spectral) + kNN cracks the 70.55 plateau. Qwen/Nxcode confusion persists (F1 ~0.49/0.47) but GPT lifted to 0.78 (massive gain). GH subgroup on author lifted from ~0.56 to 0.58 — first real signal on GH bottleneck. |
 
 ### Exp28–Exp30 — New batch (implemented 2026-04-02)
 
