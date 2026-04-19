@@ -1,0 +1,118 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "permissions": {
+    "allow": [
+      "Bash(ruff:*)",
+      "Bash(black:*)",
+      "Bash(isort:*)",
+      "Bash(mypy:*)",
+      "Bash(python -m py_compile:*)",
+      "Bash(python -m ruff:*)",
+      "Bash(python -m black:*)",
+      "Bash(git status)",
+      "Bash(git status:*)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)",
+      "Bash(git show:*)",
+      "Bash(git branch:*)",
+      "Bash(git stash:*)",
+      "Bash(git fetch:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git push:*)",
+      "Bash(git pull:*)",
+      "Bash(git reset:*)",
+      "Bash(git restore:*)",
+      "Bash(git checkout:*)",
+      "Bash(git rev-parse:*)",
+      "Bash(gh pr:*)",
+      "Bash(gh issue:*)",
+      "Bash(gh repo view:*)",
+      "Bash(gh run:*)",
+      "Bash(where:*)",
+      "Bash(which:*)",
+      "Bash(ls:*)",
+      "Bash(wc:*)",
+      "Bash(pwd)",
+      "Bash(du:*)",
+      "Bash(df:*)",
+      "Bash(tree:*)",
+      "Bash(file:*)",
+      "Bash(head:*)",
+      "Bash(tail:*)",
+      "Bash(cat Exp_*/tracker.md)",
+      "Bash(cat Exp_*/dm_tracker.md)",
+      "Bash(cat docs/CLAUDE.md)",
+      "Bash(cat README.md)",
+      "Bash(grep:*)",
+      "Bash(rg:*)",
+      "Bash(find:*)",
+      "Read(**)",
+      "Glob(**)",
+      "Grep(**)",
+      "WebFetch(domain:huggingface.co)",
+      "WebFetch(domain:arxiv.org)",
+      "WebFetch(domain:openreview.net)",
+      "WebFetch(domain:neurips.cc)",
+      "WebFetch(domain:aclanthology.org)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:docs.anthropic.com)",
+      "WebFetch(domain:pytorch.org)"
+    ],
+    "deny": [
+      "Bash(python Exp_DM/*:*)",
+      "Bash(python Exp_CodeDet/*:*)",
+      "Bash(python Exp_Climb/*:*)",
+      "Bash(python Exp_TK/exp*:*)",
+      "Bash(python3 Exp_DM/*:*)",
+      "Bash(python3 Exp_CodeDet/*:*)",
+      "Bash(python3 Exp_Climb/*:*)",
+      "Bash(python3 Exp_TK/exp*:*)",
+      "Bash(pytest:*)",
+      "Bash(rm -rf:*)",
+      "Bash(rm -rf /:*)",
+      "Bash(git push --force:*)",
+      "Bash(git push -f:*)",
+      "Bash(git reset --hard origin/main)",
+      "Bash(git clean -fdx:*)",
+      "Bash(git commit --no-verify:*)",
+      "Edit(Formatting_Instructions_For_NeurIPS_2026/*.sty)",
+      "Edit(Formatting_Instructions_For_NeurIPS_2026/*.cls)",
+      "Edit(docs/references/**)",
+      "Write(logs/**)",
+      "Write(results/**)",
+      "Write(codet_m4_checkpoints/**)",
+      "Write(**/*.pt)",
+      "Write(**/*.bin)"
+    ]
+  },
+  "env": {
+    "PYTHONDONTWRITEBYTECODE": "1",
+    "PYTHONUNBUFFERED": "1",
+    "TRANSFORMERS_VERBOSITY": "error",
+    "TOKENIZERS_PARALLELISM": "false"
+  },
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo '[repo-rules] LOCAL=code+analyze, KAGGLE=run. AICD→Macro-F1 | Droid→Weighted-F1 | CoDET-M4→Macro-F1. Never mix benchmarks. Never reuse expNN IDs. Always report val-test gap.'"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python .claude/hooks/guard_destructive.py"
+          }
+        ]
+      }
+    ]
+  }
+}

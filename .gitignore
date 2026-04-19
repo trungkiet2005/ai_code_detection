@@ -7,9 +7,19 @@ env/
 venv/
 .env
 .venv
-.claude/
+
+# Claude Code — ignore everything except team-shared config
+.claude/*
+!.claude/settings.json
+!.claude/commands/
+!.claude/agents/
+!.claude/hooks/
+!.claude/README.md
+
+# Other AI tool caches
 .cursor/
 .gemini/
+
 .ipynb_checkpoints/
 codet_m4_checkpoints/
 *.pt
