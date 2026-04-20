@@ -87,8 +87,80 @@ def _sample_dataset(dataset: Dataset, max_samples: int, seed: int) -> Dataset:
     return dataset.select(indices)
 
 
+def _droid_label_raw(row) -> str:
+    return str(row.get("Label", "")).upper()
+
+
+# -----------------------------------------------------------------------------
+# Source -> Paper Table 3 domain bucket (verified against HF schema 2026-04-20).
+#
+# DroidCollection HF columns (confirmed):
+#   Code, Label, Language, Generator, Generation_Mode, Source,
+#   Sampling_Params, Rewriting_Params, Model_Family
+#
+# Paper section 3.1 splits the Source values into three domains. The mapping
+# is not a single field on HF -- we reconstruct it per the paper's §3.1 text.
+# -----------------------------------------------------------------------------
+DROID_SOURCE_TO_DOMAIN = {
+    # General Use Code (paper §3.1): web, firmware, game-engine etc. from
+    # GitHub-hosted code datasets.
+    "STARCODER_DATA": "general",
+    "THEVAULT_FUNCTION": "general",
+    "DROID_PERSONAHUB": "general",  # PersonaHub-prompted open-domain code
+    # Algorithmic Problems: competitive-programming platforms.
+    "TACO": "algorithmic",
+    "CODENET": "algorithmic",
+    "ATCODER": "algorithmic",
+    "AIZU": "algorithmic",
+    "LEETCODE": "algorithmic",
+    "CODEFORCES": "algorithmic",
+    # Research / Data-Science: ObscuraCoder + Lu 2025 research-paper code.
+    # Column values for this family are less documented; we treat anything
+    # with "OBSCURA" or "RESEARCH" prefix as Research/DS.  `""` below is a
+    # fallthrough that run_breakdown_eval_droid ignores.
+    "OBSCURACODER": "research_ds",
+    "OBSCURA_CODER": "research_ds",
+    "RESEARCH": "research_ds",
+    "DATASCIENCE": "research_ds",
+}
+
+
+def _source_to_domain(source_raw: str) -> str:
+    """Paper Table 3 domain mapping. Normalises case + separators then looks
+    up the fixed table. Returns '' for unknown sources (breakdown skips).
+    Also provides a substring-based fallback so variants like "leet-code"
+    and "Leet Code" still resolve.
+    """
+    if not source_raw:
+        return ""
+    # Strict key: uppercase, underscore as canonical separator.
+    key = source_raw.strip().upper().replace("-", "_").replace(" ", "_")
+    if key in DROID_SOURCE_TO_DOMAIN:
+        return DROID_SOURCE_TO_DOMAIN[key]
+    # Substring / no-separator fallback covers "LEET_CODE" vs "LEETCODE",
+    # "OBSCURA_CODER" vs "OBSCURACODER", future schema drift, etc.
+    nosep = key.replace("_", "")
+    if "OBSCURA" in nosep or "RESEARCH" in nosep or "DATASCIENCE" in nosep:
+        return "research_ds"
+    if any(k in nosep for k in ("LEETCODE", "CODEFORCES", "ATCODER", "AIZU", "TACO", "CODENET")):
+        return "algorithmic"
+    if any(k in nosep for k in ("STARCODER", "VAULT", "PERSONA", "GITHUB")):
+        return "general"
+    return ""
+
+
 def load_droid_data(cfg: DroidConfig, task: str):
-    """Load Droid splits and convert to {code, label}."""
+    """Load Droid splits and convert to {code, label, language, source,
+    domain, generator, model_family, generation_mode, ...}.
+
+    Schema verified against the DroidCollection HF viewer (2026-04-20):
+    columns = Code / Label / Language / Generator / Generation_Mode / Source /
+              Sampling_Params / Rewriting_Params / Model_Family.
+
+    `domain` is derived from Source via DROID_SOURCE_TO_DOMAIN (paper §3.1);
+    any dim that ends up all-empty is silently skipped by the breakdown, so
+    future Source values that we haven't catalogued degrade gracefully.
+    """
     def _convert_split(split_name: str, max_samples: int) -> Dataset:
         source_split = cfg.split_map[split_name]
         logger.info(f"Loading Droid split '{source_split}' for {split_name}...")
@@ -96,9 +168,25 @@ def load_droid_data(cfg: DroidConfig, task: str):
         ds = _sample_dataset(ds, max_samples, cfg.seed)
 
         def _convert_row(row):
+            raw_label = _droid_label_raw(row)
+            source_raw = str(row.get("Source", "") or "").strip()
             return {
                 "code": row.get("Code", "") or "",
                 "label": _map_droid_label_to_task(row, task),
+                # The shared AICDDataset.source_id field maps {cf,gh,lc}->0..2
+                # and uses -1 for everything else. Droid sources are not CoDET's
+                # cf/gh/lc so we emit "" (sentinel -1) here. Source-conditioned
+                # losses (exp_02/08/14/18) short-circuit cleanly.
+                "source": "",
+                # Paper Table 3/4/5 breakdown dims.
+                "language": str(row.get("Language", "") or "").strip().lower(),
+                "source_raw": source_raw,                     # e.g. "LEETCODE"
+                "domain": _source_to_domain(source_raw),      # "algorithmic"
+                "generator": str(row.get("Generator", "") or "").strip().lower(),
+                "model_family": str(row.get("Model_Family", "") or "").strip().lower(),
+                "generation_mode": str(row.get("Generation_Mode", "") or "").strip().upper(),
+                "is_adversarial": int(raw_label == "MACHINE_GENERATED_ADVERSARIAL"),
+                "is_human": int(raw_label == "HUMAN_GENERATED"),
             }
 
         converted = ds.map(_convert_row, remove_columns=ds.column_names)
@@ -205,6 +293,115 @@ def preflight_droid(droid_cfg: DroidConfig, tasks: Optional[List[str]] = None) -
 
 
 # ===========================================================================
+# Paper-protocol breakdown helper (Droid Tables 3/4/5)
+# ===========================================================================
+
+def collect_droid_predictions(model: torch.nn.Module, loader, device: str):
+    """Return (preds, labels) arrays for a trained Droid model."""
+    import numpy as np
+    model.eval()
+    all_preds: List[int] = []
+    all_labels: List[int] = []
+    for batch in loader:
+        input_ids = batch["input_ids"].to(device)
+        attention_mask = batch["attention_mask"].to(device)
+        ast_seq = batch["ast_seq"].to(device)
+        struct_feat = batch["struct_feat"].to(device)
+        with torch.no_grad():
+            out = model(input_ids, attention_mask, ast_seq, struct_feat)
+        preds = out["logits"].argmax(dim=-1).cpu().numpy()
+        all_preds.extend(preds)
+        all_labels.extend(batch["label"].numpy())
+    return np.array(all_preds), np.array(all_labels)
+
+
+def run_breakdown_eval_droid(preds, labels, test_data, task: str) -> Dict[str, Any]:
+    """Paper-protocol breakdown emitting Table 3 (per-domain), Table 4
+    (per-language), and Table 5 (human / adversarial recall) cells from a
+    single trained model.  Any dim whose column is all-empty in the HF
+    schema is silently skipped so the function is robust to schema drift.
+    """
+    import numpy as np
+    from sklearn.metrics import f1_score, recall_score
+
+    results: Dict[str, Any] = {}
+    # `len(test_data)` is number-of-columns for a dict-backed test set and
+    # number-of-rows for a HF Dataset, so pick the row count explicitly.
+    if hasattr(test_data, "num_rows"):
+        n_rows = int(test_data.num_rows)
+    else:
+        # dict-of-columns: take the first column's length.
+        try:
+            first_col = next(iter(test_data.values()))
+            n_rows = len(first_col)
+        except (StopIteration, TypeError):
+            n_rows = len(preds)
+    n = min(len(preds), n_rows)
+    preds, labels = preds[:n], labels[:n]
+
+    overall_macro = float(f1_score(labels, preds, average="macro"))
+    overall_weighted = float(f1_score(labels, preds, average="weighted"))
+    results["overall"] = {"macro_f1": overall_macro, "weighted_f1": overall_weighted}
+    logger.info(f"  Overall: macro={overall_macro:.4f}  weighted={overall_weighted:.4f}")
+
+    # Table 3 analog (per-domain: general/algorithmic/research_ds, derived from Source)
+    # Table 4 analog (per-language: C-C++, C#, Go, Java, Python, JS)
+    # Extra: per-raw-source (TACO, LEETCODE, STARCODER_DATA, ...)
+    #         per-generator (GPT-4o-mini, Qwen2.5-72B, ...)
+    #         per-model_family (paper Table 3 bottom: within-model-family stability)
+    for dim_name in ("domain", "language", "source_raw", "generator", "model_family"):
+        try:
+            dim_vals = test_data[dim_name][:n]
+        except KeyError:
+            continue
+        # Skip dim if every value is empty (schema drift)
+        if not any(v for v in dim_vals):
+            continue
+        unique = sorted(set(v for v in dim_vals if v))
+        dim_results: Dict[str, Dict[str, float]] = {}
+        dim_paper_tag = {
+            "domain":       "paper Table 3",
+            "language":     "paper Table 4",
+            "source_raw":   "raw Source column (pre-domain bucketing)",
+            "generator":    "per-generator diagnostic",
+            "model_family": "paper §A model-family breakdown",
+        }.get(dim_name, dim_name)
+        logger.info(f"  Breakdown by {dim_name} ({dim_paper_tag}):")
+        for val in unique:
+            mask = np.array([v == val for v in dim_vals])
+            if mask.sum() < 10:
+                continue
+            mf1 = float(f1_score(labels[mask], preds[mask], average="macro"))
+            wf1 = float(f1_score(labels[mask], preds[mask], average="weighted"))
+            dim_results[val] = {"n": int(mask.sum()), "macro_f1": mf1, "weighted_f1": wf1}
+            logger.info(f"    {val:>14s}: n={int(mask.sum()):>6d}  macro={mf1:.4f}  weighted={wf1:.4f}")
+        results[dim_name] = dim_results
+
+    # Table 5 analog: human-class recall + adversarial-class recall.
+    # Only meaningful when we have both flags exposed.
+    if task in ("T3", "T4"):
+        try:
+            is_human = np.asarray(test_data["is_human"][:n])
+            is_adv = np.asarray(test_data["is_adversarial"][:n])
+            if is_human.any():
+                # Label 0 = human in both T3 and T4.
+                hum_correct = (preds[is_human == 1] == 0).mean() if is_human.sum() else 0.0
+                results["human_recall"] = float(hum_correct)
+                logger.info(f"  Human recall (Table 5): {hum_correct:.4f}  (n={int(is_human.sum())})")
+            if is_adv.any():
+                # Adversarial samples: in T3, labelled 1 (merged with MACHINE_GENERATED);
+                # in T4, labelled 3 (own class).
+                adv_target = 1 if task == "T3" else 3
+                adv_correct = (preds[is_adv == 1] == adv_target).mean() if is_adv.sum() else 0.0
+                results["adversarial_recall"] = float(adv_correct)
+                logger.info(f"  Adversarial recall (Table 5): {adv_correct:.4f}  (n={int(is_adv.sum())})")
+        except (KeyError, IndexError):
+            pass
+
+    return results
+
+
+# ===========================================================================
 # Config builder
 # ===========================================================================
 
@@ -230,8 +427,15 @@ def run_droid_iid(
     droid_cfg: Optional[DroidConfig] = None,
     loss_fn: Optional[Any] = None,
     checkpoint_tag_prefix: str = "model",
+    eval_breakdown: bool = False,
 ) -> Dict[str, Any]:
-    """Train + eval on one Droid task (T1/T3/T4) with FULL test set."""
+    """Train + eval on one Droid task (T1/T3/T4) with FULL test set.
+
+    eval_breakdown=True -> after training, run the paper-protocol breakdown
+    (Table 3 per-domain / Table 4 per-language / Table 5 human + adversarial
+    recall).  Adds ~30 s of post-eval inference time; requires the Droid HF
+    schema to expose Language / Domain columns (silently skipped if not).
+    """
     if droid_cfg is None:
         droid_cfg = DroidConfig()
 
@@ -257,6 +461,10 @@ def run_droid_iid(
     result["task"] = task
     result["num_classes"] = int(num_classes)
     result["paper_primary_metric"] = "weighted_f1"  # Droid primary = Weighted-F1
+
+    if eval_breakdown:
+        preds, labels = collect_droid_predictions(model, test_loader, exp_cfg.device)
+        result["breakdown"] = run_breakdown_eval_droid(preds, labels, test_data, task)
 
     del model, trainer, train_loader, val_loader, test_loader
     if torch.cuda.is_available():

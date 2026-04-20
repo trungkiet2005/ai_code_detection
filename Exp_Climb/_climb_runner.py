@@ -185,8 +185,11 @@ def preflight_full_climb(
 
     report: Dict[str, Any] = {"env": preflight_env()}
 
-    need_codet = run_mode in ("full", "codet_only", "codet_iid", "single", "lean")
-    need_droid = run_mode in ("full", "droid_only", "lean")
+    need_codet = run_mode in ("full", "codet_only", "codet_iid", "single", "lean", "paper_proto")
+    need_droid = run_mode in ("full", "droid_only", "lean", "paper_proto")
+    # paper_proto only needs T3 (not T1/T4) -- lighter preflight.
+    if run_mode == "paper_proto":
+        droid_tasks = ["T3"]
 
     _print_full_run_plan(
         run_mode=run_mode,
@@ -220,7 +223,7 @@ def preflight_full_climb(
 # Full climb orchestrator
 # ---------------------------------------------------------------------------
 
-RUN_MODES = ("full", "codet_only", "droid_only", "codet_iid", "single", "lean")
+RUN_MODES = ("full", "codet_only", "droid_only", "codet_iid", "single", "lean", "paper_proto")
 
 # Freshness breadcrumb read by exp_NN bootstrap to detect stale clones.
 # When _paper_table or this file's public API changes in a way that old
@@ -228,7 +231,8 @@ RUN_MODES = ("full", "codet_only", "droid_only", "codet_iid", "single", "lean")
 # the exp files to force a fresh clone.
 #     _PAPER_BASELINES     -- added 2026-04-19 (per-subgroup breakdown + delta row)
 #     lean                 -- added 2026-04-18 (8-run screening mode)
-_RUNNER_API_TOKENS = ("lean", "_PAPER_BASELINES")
+#     paper_proto          -- added 2026-04-20 (3-run paper-protocol mode, <=2h H100)
+_RUNNER_API_TOKENS = ("lean", "_PAPER_BASELINES", "paper_proto")
 
 # OOD representatives for lean mode: one hardest held-out per OOD type.
 # gh = hardest OOD-SRC (GH macro ~0.28 universally); python = largest OOD-LANG
@@ -369,6 +373,100 @@ def run_full_climb(
                 run_preflight=inner_preflight, checkpoint_tag_prefix=checkpoint_tag_prefix,
             )
             codet_results = {f"iid_{single_task}": r}
+
+        elif run_mode == "paper_proto":
+            # Paper-protocol lean: 3 training runs that surface as many paper
+            # baseline cells as possible with a SHARED model per bench.
+            #   1) CoDET IID binary -> Table 2 + Table 3 (per-lang) + Table 4 (per-src)
+            #   2) CoDET IID author -> Table 7 + Figure 2 confusion matrix
+            #   3) Droid T3         -> Table 3 (per-domain) + Table 4 (per-lang)
+            #                          + Table 5 (human recall, adversarial recall)
+            # Budget target: <= 2 h total on H100.  We shrink train-set to
+            # 60K and run 2 epochs per task -> ~13 min/run x 3 = ~40 min
+            # training + ~15 min dataset loading/eval = ~1 h end-to-end.
+            # The lean-climb LOO probes (OOD-SRC / OOD-LANG / OOD-GEN) are
+            # NOT in this mode -- they live in run_mode="lean".
+            import dataclasses as _dc
+            proto_codet = _dc.replace(
+                codet_cfg,
+                max_train_samples=min(getattr(codet_cfg, "max_train_samples", 60_000), 60_000),
+                max_val_samples=min(getattr(codet_cfg, "max_val_samples", 10_000), 10_000),
+                eval_breakdown=True,
+            )
+            proto_droid = _dc.replace(
+                droid_cfg,
+                max_train_samples=min(getattr(droid_cfg, "max_train_samples", 60_000), 60_000),
+                max_val_samples=min(getattr(droid_cfg, "max_val_samples", 10_000), 10_000),
+            )
+
+            # Shared 2-epoch override: patched on the SpectralConfig inside
+            # run_iid / run_droid_iid via the helper below.
+            original_build_codet = None
+            original_build_droid = None
+            try:
+                import _data_codet as _dc_mod
+                import _data_droid as _dd_mod
+                original_build_codet = _dc_mod.build_codet_config
+                original_build_droid = _dd_mod.build_droid_config
+
+                def _proto_build_codet(task_tag: str, save_root: str):
+                    cfg = original_build_codet(task_tag, save_root)
+                    cfg.epochs = 2
+                    return cfg
+
+                def _proto_build_droid(task_tag: str, save_root: str):
+                    cfg = original_build_droid(task_tag, save_root)
+                    cfg.epochs = 2
+                    return cfg
+
+                _dc_mod.build_codet_config = _proto_build_codet
+                _dd_mod.build_droid_config = _proto_build_droid
+
+                logger.info("\n" + "#" * 72)
+                logger.info(f"# [{method_name}] PAPER_PROTO 1/3: CoDET IID binary + breakdown")
+                logger.info("#" * 72)
+                r_bin = run_codet_iid(
+                    "binary", proto_codet, loss_fn=loss_fn,
+                    run_preflight=inner_preflight,
+                    checkpoint_tag_prefix=checkpoint_tag_prefix,
+                )
+
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+                gc.collect()
+
+                logger.info("\n" + "#" * 72)
+                logger.info(f"# [{method_name}] PAPER_PROTO 2/3: CoDET IID author + breakdown")
+                logger.info("#" * 72)
+                r_auth = run_codet_iid(
+                    "author", proto_codet, loss_fn=loss_fn,
+                    run_preflight=False,
+                    checkpoint_tag_prefix=checkpoint_tag_prefix,
+                )
+                codet_results = {"iid_binary": r_bin, "iid_author": r_auth}
+
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+                gc.collect()
+
+                logger.info("\n" + "#" * 72)
+                logger.info(f"# [{method_name}] PAPER_PROTO 3/3: Droid T3 + breakdown")
+                logger.info("#" * 72)
+                from _data_droid import run_droid_iid as _run_droid_iid
+                r_t3 = _run_droid_iid(
+                    "T3", proto_droid, loss_fn=loss_fn,
+                    checkpoint_tag_prefix=checkpoint_tag_prefix,
+                    eval_breakdown=True,
+                )
+                droid_results = {"droid_T3": r_t3}
+            finally:
+                # Restore the real builders so subsequent runs in the same
+                # Python session (e.g. when paper_proto is followed by an
+                # ablation suite) aren't stuck at 2 epochs.
+                if original_build_codet is not None:
+                    _dc_mod.build_codet_config = original_build_codet
+                if original_build_droid is not None:
+                    _dd_mod.build_droid_config = original_build_droid
 
         # Emit ONE combined paper table
         emit_combined_paper_table(
