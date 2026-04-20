@@ -34,24 +34,28 @@ Each ZS file now runs on BOTH benchmarks via `run_zs_oral` and emits a combined 
 
 | Rank | Exp | Method | Signal family | **Droid T3 (3-cls)** | **CoDET binary** | Human R (D/C) | Adv R (D only) | Wall | Status |
 |:-:|:--|:--|:--|:-:|:-:|:-:|:-:|:-:|:-:|
-| — | exp_zs_00 | **RandomScorer** (floor A) | random | — | — | — / — | — | — | ⏳ pending |
-| — | exp_zs_00 | **LengthOnlyScorer** (floor B) | length | — | — | — / — | — | — | ⏳ pending |
-| — | exp_zs_03 | **Ghostbuster-Code** (token-stat committee) | token-stats | — | — | — / — | — | — | ⏳ pending |
-| — | exp_zs_04 | **SpectralSignature** (ModernBERT PC-1) | embed-geometry | — | — | — / — | — | — | ⏳ pending |
-| — | exp_zs_01 | **BinocularsLogRatio** (ModernBERT surrogate) | log-ratio | — | — | — / — | — | — | ⏳ pending |
+| — | exp_zs_00 | **RandomScorer** (floor A) | random | **0.3664** | **0.3782** | 0.9430 / 0.9510 | 0.0583 | 74s | ⚠️ FAIL (36.64 << 64.54; Droid HR<0.95) |
+| — | exp_zs_00 | **LengthOnlyScorer** (floor B) | length | **0.3133** | **0.3267** | 0.9583 / 0.9430 | 0.0058 | 49s | ⚠️ FAIL (31.33 << 64.54; CoDET HR<0.95) |
+| — | exp_zs_03 | **Ghostbuster-Code** (token-stat committee) | token-stats | **0.3519** | **0.3986** | 0.9482 / 0.9479 | 0.0430 | 91s | ⚠️ FAIL (35.19 << 64.54; HR<0.95 both) |
+| — | exp_zs_04 | **SpectralSignature** (ModernBERT PC-1) | embed-geometry | **0.3164** | **0.4267** | 0.9496 / 0.9480 | 0.0076 | 283s | ⚠️ FAIL (31.64 << 64.54; HR<0.95 both; stability>10pt) |
+| — | exp_zs_01 | **BinocularsLogRatio** (ModernBERT surrogate) | log-ratio | **0.3901** | **0.5849** | 0.9590 / 0.7922 | 0.0242 | 280s | ⚠️ FAIL (39.01 << 64.54; CoDET HR<0.95; stability>10pt) |
 | — | exp_zs_02 | **Fast-DetectGPT** (CodeBERT curvature) | curvature | — | — | — / — | — | — | ⏳ pending |
-| — | exp_zs_05 | **MahalanobisOnManifold** (Sigma^-1 distance) | embed-geometry | — | — | — / — | — | — | ⏳ pending |
-| — | exp_zs_06 | **DC-PDD** (divergence-calibrated MI) | information-theoretic | — | — | — / — | — | — | ⏳ pending |
-| — | exp_zs_07 | **Min-K%++** (vocab-normalised bottom-k) | membership | — | — | — / — | — | — | ⏳ pending |
-| — | exp_zs_08 | **EnergyScore** (free-energy) | likelihood-margin | — | — | — / — | — | — | ⏳ pending |
-| — | exp_zs_09 | **LZ77Complexity** (gzip NCD) | compression | — | — | — / — | — | — | ⏳ pending |
-| — | exp_zs_10 | **FisherDivergence** (Hutchinson trace) | curvature-gen | — | — | — / — | — | — | ⏳ pending |
+| — | exp_zs_05 | **MahalanobisOnManifold** (Sigma^-1 distance) | embed-geometry | **0.3564** | **0.3909** | 0.8886 / 0.9556 | 0.0850 | 292s | ⚠️ FAIL (35.64 << 64.54; Droid HR<0.95) |
+| — | exp_zs_06 | **DC-PDD** (divergence-calibrated MI) | information-theoretic | **0.3551** | **0.3660** | 0.9475 / 0.9424 | 0.1011 | 429s | ⚠️ FAIL (35.51 << 64.54; HR<0.95 both) |
+| — | exp_zs_07 | **Min-K%++** (vocab-normalised bottom-k) | membership | **0.3181** | **0.3493** | 0.9476 / 0.9523 | 0.0113 | 333s | ⚠️ FAIL (31.81 << 64.54; Droid HR<0.95) |
+| — | exp_zs_08 | **EnergyScore** (free-energy) | likelihood-margin | **0.3315** | **0.3507** | 0.9449 / 0.9427 | 0.0315 | 338s | ⚠️ FAIL (33.15 << 64.54; HR<0.95 both) |
+| — | exp_zs_09 | **LZ77Complexity** (gzip NCD) | compression | **0.3317** | **0.3524** | 0.9589 / 0.9441 | 0.0331 | 77s | ⚠️ FAIL (33.17 << 64.54) |
+| — | exp_zs_10 | **FisherDivergence** (Hutchinson trace) | curvature-gen | **0.3601** | **0.4358** | 0.9473 / 0.9449 | 0.0474 | 1233s | ⚠️ FAIL (36.01 << 64.54) |
 | 🆕 | exp_zs_11 | **PathSignatureDivergence** (Chen rough-path) | path-signature | — | — | — / — | — | ~15m | ⏳ pending |
 | 🆕 | exp_zs_12 | **AttentionCriticality** (Hill power-law exponent) | physics-criticality | — | — | — / — | — | ~12m | ⏳ pending |
 | 🆕 | exp_zs_13 | **SinkhornOT** (entropic OT divergence) | optimal-transport | — | — | — / — | — | ~18m | ⏳ pending |
 | 🆕 | exp_zs_14 | **MartingaleCurvature** (De Jong test on AST-depth residuals) | martingale / econometric | — | — | — / — | — | ~10m | ⏳ pending |
 | 🆕 | exp_zs_15 | **BuresQuantumFidelity** (density-matrix Bures metric) | quantum-info-geometry | — | — | — / — | — | ~11m | ⏳ pending |
 | 🆕 | exp_zs_16 | **KSDScope** (Kernel Stein + scope graph) | structural-Stein | — | — | — / — | — | ~10m | ⏳ pending |
+| 🆕🆕 | exp_zs_17 | **PerturbationStructuralStability** (embedding robustness) | structural-robustness | — | — | — / — | — | ~11m | ⏳ pending |
+| 🆕🆕 | exp_zs_18 | **ControlFlowEntropy** (cyclomatic complexity) | control-flow-complexity | — | — | — / — | — | ~8m | ⏳ pending |
+| 🆕🆕 | exp_zs_19 | **SemanticDriftDetector** (paraphrase stability) | semantic-invariance | — | — | — / — | — | ~14m | ⏳ pending |
+| 🆕🆕 | exp_zs_20 | **TypeConstraintDeviation** (type-system slack) | type-system-semantics | — | — | — / — | — | ~9m | ⏳ pending |
 | **REF** | Paper | **Fast-DetectGPT** (Droid paper Table 3/5) | **64.54** | — | 0.84 / — | 0.48 | — | reference |
 | REF | Paper | M4 (ZS) | 55.27 | — | 0.40 ⚠️ / — | 0.73 | — | reference |
 | REF | Paper | GPTZero | 49.10 | — | 0.53 / — | 0.10 | — | reference |
@@ -84,14 +88,18 @@ No direct paper baseline for CoDET binary zero-shot (CoDET-M4 paper's only ZS nu
 | exp_zs_14 | **MartingaleCurvature** 🆕 | OUR OWN (Hong-Lee Econometrica 2005 transfer): under human-wrote-null, log-prob residuals conditioned on AST depth form martingale-difference sequence; De Jong statistic has closed-form chi² null | OLS residuals e_t = log-p_t minus beta·depth_t; DJ = Σ e_t e_{t-1} / sqrt(normaliser) | 1 MLM fwd + O(L) regex/regress |
 | exp_zs_15 | **BuresQuantumFidelity** 🆕 | Uhlmann (1976) + Bausch et al. arXiv:2510.04411 — Bures metric is UNIQUE Riemannian metric on quantum density matrices monotone under CPTP maps; captures entanglement invisible to Shannon | von Neumann entropy S(ρ) + Bures distance to ρ_ref; ρ = A A^T / Tr(A A^T) from middle-layer attention | 1 MLM fwd + scipy sqrtm O(L³) |
 | exp_zs_16 | **KSDScope** 🆕 | OUR OWN (Gretton KSD + variable-scoping): Stein operator over discrete kernel of (def-line, first-use-line) pairs; structural distribution mismatch invisible to log-prob-only detectors | Mean Gaussian kernel over scope-graph edges extracted via regex | ~0 fwd passes, pure CPU |
+| exp_zs_17 | **PerturbationStructuralStability** 🆕🆕 | He et al. arXiv:2510.02319 (EMNLP'25) + OUR framework: measure embedding robustness under semantic-preserving refactoring (rename, reorder, negate); AI code invariant under refactoring, human code drifts | Embedding L2 distance: ||emb(code) - emb(refactored)||_2 over 3 refactoring ops (rename_ids, reorder_stmts, negate_cond) | 4 forward passes |
+| exp_zs_18 | **ControlFlowEntropy** 🆕🆕 | Beggs-Plenz 2003 + Li et al. ICLR'25: critical systems have power-law branching; AI produces regular CFG, human has irregular nesting/branches/returns. Score entropy H(CC) where CC = cyclomatic complexity per function. | AST-based cyclomatic complexity extraction (count decisions: if/elif/for/while/except/and/or); entropy of CC distribution across functions | Pure regex, O(L), no GPU |
+| exp_zs_19 | **SemanticDriftDetector** 🆕🆕 | TempParaphraser EMNLP'25 + Meng et al. USENIX'25: under paraphrase-preserving refactoring (rename identifiers + reorder statements), AI code meaning STABLE, human code meaning DRIFTS | Semantic embedding L2: ||emb_CodeBERT(code) - emb_CodeBERT(refactored)||_2; refactoring = identifier rename + stmt reorder | 2 forward passes |
+| exp_zs_20 | **TypeConstraintDeviation** 🆕🆕 | OUR OWN (type-system defensive programming): AI code *over-satisfies* type constraints (strict types, minimal casting); human code uses Any/cast/guards indicating defensive style. Score: (count_Any + count_cast + count_isinstance) / total_annotations. | Type-slack ratio from AST regex: count explicit Any, cast() calls, isinstance/hasattr/try guards; compute ratio as proxy for defensiveness | Pure regex, O(L), no GPU |
 
-All methods feed **scalar scores** (higher = more AI-like) into the shared `_zs_runner.run_zs_oral` → threshold calibration on dev (Droid + CoDET independently) → test metrics + per-dim breakdown + combined `BEGIN_ZS_ORAL_TABLE` block with oral-claim check.
+All methods feed **scalar scores** (higher = more AI-like for 11-16, higher = more human-like for 17-20) into the shared `_zs_runner.run_zs_oral` → threshold calibration on dev (Droid + CoDET independently) → test metrics + per-dim breakdown + combined `BEGIN_ZS_ORAL_TABLE` block with oral-claim check.
 
 **Floor baselines (exp_zs_00):** `RandomScorer` (U(0,1) noise, macro-F1 ≈ 0.50) + `LengthOnlyScorer` (log-char-length, expected 0.55–0.60). Any proposed ZS detector that doesn't clear both floors AND Fast-DetectGPT 64.54 on Droid T3 is *not* an oral-level contribution.
 
 ---
 
-## 🌌 Novelty axes — 16 detectors × 16 signal families (EMNLP Oral ablation panel)
+## 🌌 Novelty axes — 20 detectors × 20+ signal families (NeurIPS Oral ablation panel)
 
 | Signal family | Detector(s) | What it captures | Novelty status |
 |:--|:--|:--|:--|
