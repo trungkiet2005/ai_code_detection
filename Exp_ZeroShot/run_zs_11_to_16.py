@@ -143,8 +143,31 @@ if __name__ == "__main__":
     print("="*75)
 
     # Save results to JSON for downstream analysis
-    with open("Exp_ZeroShot/run_zs_11_to_16_results.json", "w") as f:
-        json.dump(results, f, indent=2)
-    print(f"\n[OK] Results saved to Exp_ZeroShot/run_zs_11_to_16_results.json")
-    print(f"[READY] Next: paste console output above into tracker update")
+    out_json = "ai_code_detection/Exp_ZeroShot/run_zs_11_to_16_results.json" \
+               if os.path.exists("ai_code_detection/Exp_ZeroShot") \
+               else "Exp_ZeroShot/run_zs_11_to_16_results.json"
+    try:
+        os.makedirs(os.path.dirname(out_json), exist_ok=True)
+        with open(out_json, "w") as f:
+            json.dump(results, f, indent=2)
+        print(f"\n[OK] Results saved to {out_json}")
+    except Exception as e:
+        print(f"\n[WARN] Could not save runner JSON: {e}")
+
+    # Auto-aggregate: scan Exp_ZeroShot/results/*.json and print combined leaderboard.
+    print("\n" + "="*75)
+    print("[AGGREGATE] Scanning all per-exp result JSONs for combined leaderboard...")
+    print("="*75)
+    agg_script_candidates = [
+        "ai_code_detection/Exp_ZeroShot/aggregate_results.py",
+        "Exp_ZeroShot/aggregate_results.py",
+    ]
+    agg_script = next((p for p in agg_script_candidates if os.path.exists(p)), None)
+    if agg_script is None:
+        print("[AGGREGATE] aggregate_results.py not found — skipping combined table.")
+    else:
+        try:
+            subprocess.run([sys.executable, agg_script], check=False)
+        except Exception as e:
+            print(f"[AGGREGATE] Failed to run aggregator: {e}")
 
