@@ -148,13 +148,15 @@ def _pife_struct_score(codes: List[str], cfg: ZSConfig) -> np.ndarray:
             mlm = mlm.to(torch.bfloat16)
 
     scores = np.zeros(len(codes), dtype=np.float64)
-    bs = cfg.batch_size
+    # 4 forwards per chunk × 50265 vocab × 512 seq × bs × fp32 → OOM at bs=128.
+    # Cut bs by 8 to cap peak VRAM at ~3 GB per forward.
+    bs = max(8, cfg.batch_size // 8)
 
     with torch.no_grad():
         for start in range(0, len(codes), bs):
             chunk = codes[start : start + bs]
 
-            # Encode original
+            # Encode original — extract CLS embedding, release vocab logits immediately
             enc_orig = tokenizer(
                 chunk, max_length=cfg.scorer_max_length,
                 padding="max_length", truncation=True, return_tensors="pt",
@@ -165,8 +167,11 @@ def _pife_struct_score(codes: List[str], cfg: ZSConfig) -> np.ndarray:
                 input_ids = input_ids.to("cuda")
                 attn = attn.to("cuda")
 
-            out_orig = mlm(input_ids=input_ids, attention_mask=attn).logits.float()
-            emb_orig = out_orig[:, 0, :].cpu()  # CLS token embedding
+            out_orig_logits = mlm(input_ids=input_ids, attention_mask=attn).logits
+            emb_orig = out_orig_logits[:, 0, :].float().cpu()
+            del out_orig_logits, input_ids, attn
+            if cfg.device == "cuda":
+                torch.cuda.empty_cache()
 
             # Apply 3 refactorings
             refactorings = [
@@ -187,8 +192,11 @@ def _pife_struct_score(codes: List[str], cfg: ZSConfig) -> np.ndarray:
                     input_ids_r = input_ids_r.to("cuda")
                     attn_r = attn_r.to("cuda")
 
-                out_refac = mlm(input_ids=input_ids_r, attention_mask=attn_r).logits.float()
-                emb_refac = out_refac[:, 0, :].cpu()
+                out_refac_logits = mlm(input_ids=input_ids_r, attention_mask=attn_r).logits
+                emb_refac = out_refac_logits[:, 0, :].float().cpu()
+                del out_refac_logits, input_ids_r, attn_r
+                if cfg.device == "cuda":
+                    torch.cuda.empty_cache()
 
                 dist = torch.norm(emb_orig - emb_refac, dim=1).numpy()
                 dists.append(dist)

@@ -86,26 +86,29 @@ from _zs_runner import run_zs_oral
 
 
 def _count_type_slack(code: str) -> float:
-    """Extract type-slack ratio from code."""
-    # Count Any
-    count_any = len(re.findall(r':\s*Any\b|->.*Any\b', code))
+    """Extract type-slack ratio from code (multi-language robust)."""
+    # Python-ish explicit type slack
+    count_any = len(re.findall(r':\s*Any\b|->.*Any\b|:\s*object\b', code))
+    count_cast = len(re.findall(r'\bcast\s*\(|\bType\s*\[', code))
 
-    # Count cast()
-    count_cast = len(re.findall(r'\bcast\s*\(', code))
+    # Defensive guards (common across languages: py / js / ts / java / go)
+    count_isinstance = len(re.findall(r'\bisinstance\s*\(|\binstanceof\b|\btypeof\b', code))
+    count_hasattr = len(re.findall(r'\bhasattr\s*\(|\bhasOwnProperty\b', code))
+    count_try = len(re.findall(r'\btry\s*[:{\n]|\bcatch\s*[({]|\brescue\b', code))
+    count_null_guard = len(re.findall(r'==\s*(None|null|nil|undefined)\b|!=\s*(None|null|nil|undefined)\b|\bis\s+None\b|\bis\s+not\s+None\b', code))
 
-    # Count guard clauses
-    count_isinstance = len(re.findall(r'\bisinstance\s*\(', code))
-    count_hasattr = len(re.findall(r'\bhasattr\s*\(', code))
-    count_try = len(re.findall(r'\btry\s*:', code))
+    count_guard = count_isinstance + count_hasattr + count_try + count_null_guard
 
-    count_guard = count_isinstance + count_hasattr + count_try
-
-    # Count total type annotations (rough: lines with : followed by type)
+    # Total annotation-like pattern (language-agnostic proxy)
     count_typed = len(re.findall(r':\s*[A-Za-z_][\w\[\],\s]*', code))
+    # Also proxy via function signatures across languages
+    count_typed += len(re.findall(r'\w+\s*:\s*\w+|\bfunction\s+\w+|\bdef\s+\w+|\bfunc\s+\w+', code))
+
+    n_lines = max(1, len(code.split('\n')))
 
     if count_typed == 0:
-        # If no type annotations, ratio depends only on guards
-        ratio = float(count_guard) / (len(code.split('\n')) + 1)
+        # No type annotations — fall back to guard density per line
+        ratio = float(count_guard) / n_lines
     else:
         ratio = (count_any + count_cast + count_guard) / (count_typed + 1)
 
@@ -113,7 +116,12 @@ def _count_type_slack(code: str) -> float:
 
 
 def _type_constraint_score(codes: List[str], cfg: ZSConfig) -> np.ndarray:
-    """Type-slack metric: higher = more defensive (human-like)."""
+    """Type-slack metric: higher = more defensive (human-like).
+
+    Robust to multi-language benchmarks (Droid spans 9 langs). Adds a tiny
+    length-based tiebreaker so that all-zero slack distributions don't collapse
+    threshold calibration to τ=0 (the degenerate dev-scoring observed 2026-04-20).
+    """
     scores = np.zeros(len(codes), dtype=np.float64)
 
     for i, code in enumerate(codes):
@@ -122,7 +130,10 @@ def _type_constraint_score(codes: List[str], cfg: ZSConfig) -> np.ndarray:
             continue
 
         slack = _count_type_slack(code)
-        scores[i] = slack
+        # Length-based tiebreaker in [0, 0.05] prevents degenerate τ=0 when
+        # a large fraction of samples has slack=0 (common for JS/C/Go/Rust in Droid).
+        tiebreak = 0.05 * np.tanh(len(code) / 1000.0)
+        scores[i] = float(slack + tiebreak)
 
     return scores
 

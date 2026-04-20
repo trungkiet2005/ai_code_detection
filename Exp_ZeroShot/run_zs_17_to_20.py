@@ -106,8 +106,9 @@ if __name__ == "__main__":
 
     results = []
 
-    # Parallel execution: max 2 concurrent exps to stay within H100 80GB VRAM budget
-    with ThreadPoolExecutor(max_workers=2) as executor:
+    # Sequential execution (workers=1): exp_17 PIFE forwards 4 vocab-logit batches
+    # that contend for VRAM with neighbors (OOMed 12.27 GiB in earlier parallel run).
+    with ThreadPoolExecutor(max_workers=1) as executor:
         futures = {}
         for exp_file, exp_id, est_min in EXP_FILES:
             future = executor.submit(run_exp, exp_file, exp_id)

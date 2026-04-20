@@ -118,7 +118,9 @@ def _extract_path(codes: List[str], cfg: ZSConfig) -> np.ndarray:
     """Return (N, T_max, 3) stacked per-sample paths + valid-length mask."""
     import torch
     mlm, tokenizer = _get_mlm(cfg)
-    bs = cfg.batch_size
+    # rank_proxy builds a (B, L, V) boolean tensor → 128*512*50265 ≈ 12 GB OOM.
+    # Cap bs at 16 → peak ~1.5 GB for the comparison tensor.
+    bs = max(4, cfg.batch_size // 8)
     paths = []
     valid_lens = []
     with torch.no_grad():
@@ -145,16 +147,24 @@ def _extract_path(codes: List[str], cfg: ZSConfig) -> np.ndarray:
             # rank computed via argsort-argsort trick (rough); keep on GPU in O(V log V) -> fallback numpy
             # To avoid full sort we approximate rank via quantile of log-prob: higher log-prob -> lower rank
             rank_proxy = (log_probs > obs_lp.unsqueeze(-1)).sum(dim=-1).float() / float(V)  # fraction beating x_t
-            for i in range(input_ids.shape[0]):
-                n = int(attn[i].sum().item())
+            obs_lp_cpu = obs_lp.cpu().numpy()
+            rank_proxy_cpu = rank_proxy.cpu().numpy()
+            margin_cpu = margin.cpu().numpy()
+            attn_cpu = attn.cpu().numpy()
+            del logits, log_probs, obs_lp, top2, margin, rank_proxy, input_ids, attn
+            if cfg.device == "cuda":
+                torch.cuda.empty_cache()
+
+            for i in range(obs_lp_cpu.shape[0]):
+                n = int(attn_cpu[i].sum())
                 if n < 4:
                     paths.append(np.zeros((4, 3), dtype=np.float32))
                     valid_lens.append(4)
                     continue
                 x = np.stack([
-                    obs_lp[i, :n].cpu().numpy(),
-                    rank_proxy[i, :n].cpu().numpy(),
-                    margin[i, :n].cpu().numpy(),
+                    obs_lp_cpu[i, :n],
+                    rank_proxy_cpu[i, :n],
+                    margin_cpu[i, :n],
                 ], axis=-1)                                                      # (n, 3)
                 paths.append(x.astype(np.float32))
                 valid_lens.append(n)

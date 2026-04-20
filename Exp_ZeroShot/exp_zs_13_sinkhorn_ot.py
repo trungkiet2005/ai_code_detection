@@ -147,7 +147,8 @@ def _sinkhorn_ot_score(codes: List[str], cfg: ZSConfig, top_k: int = 16) -> np.n
     import torch
     mlm, tokenizer, emb_matrix = _get_mlm(cfg)
     scores = np.zeros(len(codes), dtype=np.float64)
-    bs = cfg.batch_size
+    # Sinkhorn cost matrix + vocab logits → OOM at bs=128 (12.27 GiB). Cap bs=16.
+    bs = max(4, cfg.batch_size // 8)
 
     with torch.no_grad():
         for start in range(0, len(codes), bs):

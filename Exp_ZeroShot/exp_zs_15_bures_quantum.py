@@ -179,7 +179,9 @@ def _bures_score(codes: List[str], cfg: ZSConfig) -> np.ndarray:
     global _rho_ref
     import torch
     mlm, tokenizer = _get_mlm(cfg)
-    bs = cfg.batch_size
+    # Attention + density matrix + scipy sqrtm are all additive → CUBLAS_ALLOC at
+    # bs=128. Cap bs=16 → ~1 GB peak for attention tensor.
+    bs = max(4, cfg.batch_size // 8)
     scores = np.zeros(len(codes), dtype=np.float64)
     n_layers = getattr(mlm.config, "num_hidden_layers", 12)
     mid_layer = n_layers // 2

@@ -46,16 +46,16 @@ Each ZS file now runs on BOTH benchmarks via `run_zs_oral` and emits a combined 
 | — | exp_zs_08 | **EnergyScore** (free-energy) | likelihood-margin | **0.3315** | **0.3507** | 0.9449 / 0.9427 | 0.0315 | 338s | ⚠️ FAIL (33.15 << 64.54; HR<0.95 both) |
 | — | exp_zs_09 | **LZ77Complexity** (gzip NCD) | compression | **0.3317** | **0.3524** | 0.9589 / 0.9441 | 0.0331 | 77s | ⚠️ FAIL (33.17 << 64.54) |
 | — | exp_zs_10 | **FisherDivergence** (Hutchinson trace) | curvature-gen | **0.3601** | **0.4358** | 0.9473 / 0.9449 | 0.0474 | 1233s | ⚠️ FAIL (36.01 << 64.54) |
-| 🆕 | exp_zs_11 | **PathSignatureDivergence** (Chen rough-path) | path-signature | — | — | — / — | — | ~15m | ⏳ pending |
-| 🆕 | exp_zs_12 | **AttentionCriticality** (Hill power-law exponent) | physics-criticality | — | — | — / — | — | ~12m | ⏳ pending |
-| 🆕 | exp_zs_13 | **SinkhornOT** (entropic OT divergence) | optimal-transport | — | — | — / — | — | ~18m | ⏳ pending |
-| 🆕 | exp_zs_14 | **MartingaleCurvature** (De Jong test on AST-depth residuals) | martingale / econometric | — | — | — / — | — | ~10m | ⏳ pending |
-| 🆕 | exp_zs_15 | **BuresQuantumFidelity** (density-matrix Bures metric) | quantum-info-geometry | — | — | — / — | — | ~11m | ⏳ pending |
-| 🆕 | exp_zs_16 | **KSDScope** (Kernel Stein + scope graph) | structural-Stein | — | — | — / — | — | ~10m | ⏳ pending |
-| 🆕🆕 | exp_zs_17 | **PerturbationStructuralStability** (embedding robustness) | structural-robustness | — | — | — / — | — | ~11m | ⏳ pending |
-| 🆕🆕 | exp_zs_18 | **ControlFlowEntropy** (cyclomatic complexity) | control-flow-complexity | — | — | — / — | — | ~8m | ⏳ pending |
-| 🆕🆕 | exp_zs_19 | **SemanticDriftDetector** (paraphrase stability) | semantic-invariance | — | — | — / — | — | ~14m | ⏳ pending |
-| 🆕🆕 | exp_zs_20 | **TypeConstraintDeviation** (type-system slack) | type-system-semantics | — | — | — / — | — | ~9m | ⏳ pending |
+| 🆕 | exp_zs_11 | **PathSignatureDivergence** (Chen rough-path) | path-signature | — | — | — / — | — | 0.6m | ❌ OOM 24.54 GiB (rank_proxy (B,L,V)) → fix: bs//=8 + empty_cache (applied 2026-04-20) |
+| 🆕 | exp_zs_12 | **AttentionCriticality** (Hill power-law exponent) | physics-criticality | — | — | — / — | — | 1.5m | ❌ OOM 6.14 GiB (attention (B,H=12,L,L)) → fix: bs//=8 (applied 2026-04-20) |
+| 🆕 | exp_zs_13 | **SinkhornOT** (entropic OT divergence) | optimal-transport | — | — | — / — | — | 0.9m | ❌ OOM 12.27 GiB (cost matrix + vocab logits) → fix: bs//=8 (applied 2026-04-20) |
+| 🆕 | exp_zs_14 | **MartingaleCurvature** (De Jong test on AST-depth residuals) | martingale / econometric | **0.3615** | **0.3619** | 0.9431 / 0.9538 | 0.0669 | 6.2m | ⚠️ FAIL (36.15<<64.54); ✅ codet HR≥0.95; stability 0.04pt ✅ (best stability of suite) |
+| 🆕 | exp_zs_15 | **BuresQuantumFidelity** (density-matrix Bures metric) | quantum-info-geometry | — | — | — / — | — | 0.7m | ❌ CUBLAS_ALLOC (density matrix 768×768 × bs=128) → fix: bs//=8 (applied 2026-04-20) |
+| 🆕 | exp_zs_16 | **KSDScope** (Kernel Stein + scope graph) | structural-Stein | **0.3511** | **0.4348** | 0.9439 / 0.9416 | 0.0408 | 1.5m | ⚠️ FAIL (35.11<<64.54; HR<0.95 both); stability 8.36pt ✅ |
+| 🆕🆕 | exp_zs_17 | **PerturbationStructuralStability** (embedding robustness) | structural-robustness | — | — | — / — | — | 1.1m | ❌ OOM 12.27 GiB (4 forwards × vocab logits) → fix: bs//=8 + empty_cache (applied 2026-04-20) |
+| 🆕🆕 | exp_zs_18 | **ControlFlowEntropy** (cyclomatic complexity) | control-flow-complexity | **0.4261** | **0.3640** | 0.9484 / 0.9467 | 0.0756 | 1.2m | ⚠️ FAIL (42.61<<64.54; HR<0.95 both); stability 6.21pt ✅ |
+| 🆕🆕 | exp_zs_19 | **SemanticDriftDetector** (paraphrase stability) | semantic-invariance | **0.3550** | **0.3512** | 0.9450 / 0.9477 | 0.0866 | 8.4m | ⚠️ FAIL (35.50<<64.54; HR<0.95 both); stability 0.38pt ✅ (τ=409.7 raw cosine, not normalized) |
+| 🆕🆕 | exp_zs_20 | **TypeConstraintDeviation** (type-system slack) | type-system-semantics | **0.3456** | **0.3461** | 0.0000 / 0.9475 | 1.0000 | 1.3m | ❌ DEGENERATE τ=0 Droid (all-zero slack in non-Python langs) → fix: multi-lang guards + length tiebreaker (applied 2026-04-20) |
 | 🌟 | exp_zs_21 | **TaskConditioningEntropy** (ECML PKDD'25) | task-conditioned-entropy | — | — | — / — | — | 0.7m | ❌ BFloat16 unsupported for torch.log → fix: cast logits to fp32 (applied 2026-04-20) |
 | 🌟 | exp_zs_22 | **ContrastiveHardNegatives** (ACL'25) | manifold-disentanglement | — | — | — / — | — | 0.7m | ❌ OOM 12.27GiB (bs=128 × 2 vocab-logit tensors) → fix: bs//=4 + empty_cache (applied 2026-04-20) |
 | 🌟 | exp_zs_23 | **KLDivergenceSignal** (arXiv:2504.10637) | distribution-divergence | — | — | — / — | — | 0.7m | ❌ GPT-2 is causal LM, loaded as MLM → fix: AutoModelForCausalLM + shift logits (applied 2026-04-20) |
@@ -73,6 +73,26 @@ Each ZS file now runs on BOTH benchmarks via `run_zs_oral` and emits a combined 
 | REF | Paper | GPTSniffer (ZS) | 38.95 | — | 0.65 / — | 0.49 | — | reference |
 
 ⚠️ M4 + CoDet-M4 have chased adversarial recall at the cost of human recall — the failure mode the paper explicitly flags in §4.5.4. Our oral claim avoids this by pinning Human R ≥ 0.95 in the τ-calibration step.
+
+### 🛠️ Failure diagnosis + fixes (applied 2026-04-20 after first Kaggle H100 pass)
+
+**8 exps OOMed/degenerate on first run.** Root causes + patches, in one table:
+
+| Exp | Symptom on Kaggle | Root cause | Fix applied |
+|:--|:--|:--|:--|
+| **11 PathSig** | OOM 24.54 GiB | `rank_proxy` builds `(B,L,V)=(128,512,50265)` bool tensor ≈ 12 GB on top of vocab logits | `bs //= 8`, move to CPU + `empty_cache` after forward |
+| **12 AttCrit** | OOM 6.14 GiB | Attention tensor `(B,H,L,L)=(128,12,512,512)` fp32 = 6 GB | `bs //= 8` → peak ~750 MB |
+| **13 Sinkhorn** | OOM 12.27 GiB | Cost matrix + vocab logits stacked | `bs //= 8` |
+| **15 Bures** | CUBLAS_ALLOC | Density matrix 768×768 + scipy sqrtm at bs=128 | `bs //= 8` → ~1 GB peak |
+| **17 PIFE** | OOM 12.27 GiB × 2 bench | 4 forward passes × vocab logits at bs=128 | `bs //= 8` + `del logits; empty_cache` per forward |
+| **20 TypeConstraint** | τ=0 Droid (degenerate) | All-zero slack on JS/C/Go/Rust → no calibration | Multi-lang guards (`instanceof`/`typeof`/`catch`) + length tiebreaker |
+| **21 TaskCond** | BFloat16 unsupported for torch.log | `torch.log` not implemented for bf16 | `logits.float()` before softmax |
+| **22 ContrastiveHN** | OOM 12.27 GiB | 2 forwards × vocab logits at bs=128 | `bs //= 4` + `empty_cache` |
+| **23 KLDiv** | GPT-2 MLM mismatch | GPT-2 is causal, loaded as MLM | `AutoModelForCausalLM` + shift logits `[:,:-1]` |
+
+**Systemic pattern:** all OOMs came from **vocab-logit tensors `(B, L, V)` at `bs=128`**. Our H100 profile chose bs=128 assuming only CLS embedding survives to CPU, but most methods hold vocab logits for `log_softmax`/`topk`. **Canonical fix going forward:** cap `bs = cfg.batch_size // 8` (= 16 on H100) in any method that keeps vocab-size logits in memory, and call `empty_cache()` between chained forwards.
+
+**Also applied:** `max_workers=1` in `run_zs_11_to_16.py` and `run_zs_17_to_20.py`. Previous `workers=3` stacked 3× vocab-logit tensors → 4/6 methods OOMed in the first pass. Sequential run is slower but fits on single H100 session.
 
 No direct paper baseline for CoDET binary zero-shot (CoDET-M4 paper's only ZS number is Fast-DetectGPT 62.03 in Table 2, reported as "baseline" — this cell is already in our CoDET mirror leaderboard).
 

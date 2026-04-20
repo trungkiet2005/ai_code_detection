@@ -107,9 +107,10 @@ if __name__ == "__main__":
 
     results = []
 
-    # Parallel execution: max 3 concurrent exps to stay within H100 80GB VRAM budget
-    # Estimated peak: exp_13 (~12GB) + exp_15 (~8GB) + exp_16 (~2GB) = 22GB << 80GB
-    with ThreadPoolExecutor(max_workers=3) as executor:
+    # Sequential execution: max_workers=1 to avoid VRAM contention on heavy ops
+    # (PathSig rank_proxy 12 GB, Sinkhorn cost matrix 12 GB, Bures density 25 GB,
+    # AttCrit attention 6 GB). Earlier run with workers=3 OOMed 4/6 methods.
+    with ThreadPoolExecutor(max_workers=1) as executor:
         futures = {}
         for exp_file, exp_id, est_min in EXP_FILES:
             future = executor.submit(run_exp, exp_file, exp_id)

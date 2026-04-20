@@ -155,7 +155,9 @@ def _criticality_score(codes: List[str], cfg: ZSConfig) -> np.ndarray:
     import torch
     mlm, tokenizer = _get_mlm(cfg)
     scores = np.zeros(len(codes), dtype=np.float64)
-    bs = cfg.batch_size
+    # Attention tensor (B, H=12, L=512, L=512) × fp32 = 6 GB at bs=128 → OOM.
+    # Cap bs=16 → ~750 MB per attention batch.
+    bs = max(4, cfg.batch_size // 8)
 
     # Pick a middle layer (e.g. 6 of 12 for CodeBERT-base)
     n_layers = getattr(mlm.config, "num_hidden_layers", 12)
