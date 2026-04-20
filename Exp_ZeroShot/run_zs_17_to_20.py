@@ -91,6 +91,13 @@ if __name__ == "__main__":
     print("\n" + "="*75)
     print("ZERO-SHOT NEW ORAL-LEVEL EXPERIMENTS RUNNER (exp_zs_17..20)")
     print("="*75)
+
+    # Clone repo if not already here
+    if not os.path.exists("Exp_ZeroShot"):
+        print("[SETUP] Cloning ai_code_detection repo...")
+        subprocess.check_call(["git", "clone", "--depth=1",
+                              "https://github.com/trungkiet2005/ai_code_detection.git"])
+
     gpu_vram = get_gpu_memory_gb()
     print(f"[HW] Detected GPU VRAM: {gpu_vram:.1f} GB")
     print(f"[SUITE] 4 new detectors: structural robustness, CFG entropy, semantic drift, type-constraint")
