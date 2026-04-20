@@ -192,11 +192,25 @@ def apply_hardware_profile(cfg: ZSConfig) -> ZSConfig:
                 cfg.binoculars_block_size = 512
                 logger.info(f"[ZS hw-profile] {name} ({total_gb:.0f} GB) -> batch=64 {cfg.precision}")
             else:
-                # Smaller consumer / T4 / P100
+                # Kaggle-free tier: T4 (15 GB) / P100 (16 GB).
+                # Single T4 is ~6-8x slower than H100 on ModernBERT; we keep
+                # batch modest to avoid the ~4 GB activation ceiling and
+                # bump workers to Kaggle's 4 vCPU allocation.
                 cfg.batch_size = 32
                 cfg.precision = "fp16"
-                cfg.num_workers = 2
-                logger.info(f"[ZS hw-profile] {name} ({total_gb:.0f} GB) -> batch=32 fp16")
+                cfg.num_workers = 4
+                cfg.prefetch_factor = 2
+                cfg.pin_memory = True
+                # Fast-DetectGPT on T4 at N_SAMPLES=3 is already ~2.5 h on full
+                # Droid test; keep it at 3 (paper uses 100, so 3 is the
+                # documented noisy-but-feasible floor).
+                cfg.fast_detect_n_samples = 3
+                cfg.binoculars_block_size = 256
+                logger.info(
+                    f"[ZS hw-profile] {name} ({total_gb:.0f} GB, Kaggle T4/P100 tier) -> "
+                    f"batch=32 fp16 workers=4 prefetch=2 pin=True "
+                    f"FDG_samples=3 bino_block=256"
+                )
         else:
             # CPU fallback: shrink everything so laptop tests run
             cfg.batch_size = 8

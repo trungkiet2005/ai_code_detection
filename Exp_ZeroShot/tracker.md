@@ -102,6 +102,32 @@ Well under the 2h Exp_Climb paper_proto envelope. `exp_zs_02` is the heaviest �
 
 **Regression guard on the Binoculars O(N²) memory fix (2026-04-20):** the earlier implementation computed the cosine matrix against **all N test samples** (N² allocations), which OOMs on full Droid test (~106K × 106K floats ≈ 45 GB). The fix replaces the all-pairs softmax with a **reference-pool sketch** of size `binoculars_block_size` (1024 on H100). Memory drops from O(N²) to O(N·R). Theory unchanged — the reference pool plays the role of Binoculars' null "performer LM" population.
 
+### Kaggle free-tier (T4 15GB / P100 16GB) — slower but fits
+
+Same harness, slower forward pass (~6-8× H100). T4-preset bumps `num_workers` to 4 (Kaggle vCPU count) + keeps batch 32 fp16. T4 does NOT support bf16, so precision auto-drops to fp16.
+
+**Wall-time estimate (T4 single-GPU, full Droid + CoDET tests per exp):**
+
+| Exp | T4 single | H100 speedup | Notes |
+|:--|:-:|:-:|:--|
+| exp_zs_00 floor | ~15 s | 1.5× | CPU-bound, GPU idle |
+| exp_zs_03 Ghostbuster (pure numpy) | **~2 min** | 1× | Identical — never touches GPU |
+| exp_zs_04 SpectralSignature | ~25-30 min | 5-6× | 1 ModernBERT forward per bench |
+| exp_zs_01 Binoculars | ~40-45 min | 5-6× | 1 ModernBERT forward + cosine sketch |
+| exp_zs_02 Fast-DetectGPT | **~2 h 30 min** | 4-5× | 3 CodeBERT forwards × 2 benches, slowest by far |
+| **Sequential total (all 5)** | **~3 h 45 min** | | Single 12 h Kaggle session handles it |
+
+**Kaggle T4 recommendation.** If budget is tight, SKIP `exp_zs_02 Fast-DetectGPT` (the heaviest) and run only the first 4 in ~1h 10 min. Fast-DetectGPT is the theorem-carrying proof-of-curvature; having it is nice but not load-bearing for the oral story (Binoculars + SpectralSignature already cover the Neyman-Pearson / spectral angles). Run Fast-DetectGPT separately on an H100 kernel when available.
+
+**Kaggle T4 × 2 (dual GPU).** Default Kaggle free tier. Our harness is single-device by design (no DataParallel). Best use: run Droid on GPU 0 and CoDET on GPU 1 *manually* by launching the script twice with different `CUDA_VISIBLE_DEVICES` and setting `benchmarks=("droid_T3",)` / `("codet_binary",)`. Halves the total sequential wall time to ~1 h 50 min for all 5 exps. We do NOT automate this (adds fragility for a small speedup); users who need it can edit `if __name__ == "__main__"` in each file.
+
+| GPU preset | batch | prec | workers | FDG N | Bino R | Total wall (all 5, both benches) |
+|:--|:-:|:-:|:-:|:-:|:-:|:-:|
+| H100 80GB | 128 | bf16 | 8 | 10 | 1024 | **~50 min** |
+| A100 40GB / V100 32GB | 64 | bf16 / fp16 | 4 | 5 | 512 | ~1 h 30 min |
+| **Kaggle T4 / P100 15-16GB** | **32** | **fp16** | **4** | **3** | **256** | **~3 h 45 min** |
+| CPU | 8 | fp32 | 0 | 3 | 256 | day-scale, smoke only |
+
 ---
 
 ## 📐 Protocol (dual-benchmark oral default)
