@@ -168,21 +168,29 @@ def run_zs_suite(
     )
     logger.info("")
     logger.info("### Delta vs Droid Table 3/4/5 zero-shot baselines")
-    logger.info("| Baseline | Bench | Macro-F1 | Delta (ours-paper) |")
-    logger.info("|:--|:-:|:-:|:-:|")
-    # Paper Table 3 zero-shot Avg rows (3-class)
+    # Paper Droid (EMNLP'25) Tables 3–5 report **Weighted-F1** for Droid T1/T3 —
+    # per repo rule CLAUDE.md: Droid -> Weighted-F1. Report ours-vs-paper on the
+    # same metric. CoDET follows Macro-F1 protocol (CLAUDE.md) — its deltas stay
+    # macro below.
+    logger.info("| Baseline | Bench | Paper metric | Paper F1 | Ours (same metric) | Delta |")
+    logger.info("|:--|:-:|:-:|:-:|:-:|:-:|")
     if cfg.benchmark == "droid_T3":
-        logger.info(f"| Fast-DetectGPT (ZS) | T3 | 64.54 | `{(macro*100 - 64.54):+.2f}` |")
-        logger.info(f"| M4 (ZS)             | T3 | 55.27 | `{(macro*100 - 55.27):+.2f}` |")
-        logger.info(f"| GPTZero             | T3 | 49.10 | `{(macro*100 - 49.10):+.2f}` |")
-        logger.info(f"| CoDet-M4 (ZS)       | T3 | 47.80 | `{(macro*100 - 47.80):+.2f}` |")
-        logger.info(f"| GPTSniffer (ZS)     | T3 | 38.95 | `{(macro*100 - 38.95):+.2f}` |")
+        ours = weighted * 100  # Droid -> Weighted-F1
+        logger.info(f"| Fast-DetectGPT (ZS) | T3 | W-F1 | 64.54 | {ours:.2f} | `{(ours - 64.54):+.2f}` |")
+        logger.info(f"| M4 (ZS)             | T3 | W-F1 | 55.27 | {ours:.2f} | `{(ours - 55.27):+.2f}` |")
+        logger.info(f"| GPTZero             | T3 | W-F1 | 49.10 | {ours:.2f} | `{(ours - 49.10):+.2f}` |")
+        logger.info(f"| CoDet-M4 (ZS)       | T3 | W-F1 | 47.80 | {ours:.2f} | `{(ours - 47.80):+.2f}` |")
+        logger.info(f"| GPTSniffer (ZS)     | T3 | W-F1 | 38.95 | {ours:.2f} | `{(ours - 38.95):+.2f}` |")
     elif cfg.benchmark == "droid_T1":
-        logger.info(f"| Fast-DetectGPT (ZS) | T1 | 67.85 | `{(macro*100 - 67.85):+.2f}` |")
-        logger.info(f"| GPTZero             | T1 | 56.91 | `{(macro*100 - 56.91):+.2f}` |")
-        logger.info(f"| M4 (ZS)             | T1 | 50.92 | `{(macro*100 - 50.92):+.2f}` |")
-        logger.info(f"| CoDet-M4 (ZS)       | T1 | 54.49 | `{(macro*100 - 54.49):+.2f}` |")
-        logger.info(f"| GPTSniffer (ZS)     | T1 | 41.07 | `{(macro*100 - 41.07):+.2f}` |")
+        ours = weighted * 100  # Droid -> Weighted-F1
+        logger.info(f"| Fast-DetectGPT (ZS) | T1 | W-F1 | 67.85 | {ours:.2f} | `{(ours - 67.85):+.2f}` |")
+        logger.info(f"| GPTZero             | T1 | W-F1 | 56.91 | {ours:.2f} | `{(ours - 56.91):+.2f}` |")
+        logger.info(f"| M4 (ZS)             | T1 | W-F1 | 50.92 | {ours:.2f} | `{(ours - 50.92):+.2f}` |")
+        logger.info(f"| CoDet-M4 (ZS)       | T1 | W-F1 | 54.49 | {ours:.2f} | `{(ours - 54.49):+.2f}` |")
+        logger.info(f"| GPTSniffer (ZS)     | T1 | W-F1 | 41.07 | {ours:.2f} | `{(ours - 41.07):+.2f}` |")
+    elif cfg.benchmark == "codet_binary":
+        ours = macro * 100  # CoDET -> Macro-F1 (CLAUDE.md)
+        logger.info(f"| Fast-DetectGPT (ZS) | CoDET bin | Macro-F1 | 62.03 | {ours:.2f} | `{(ours - 62.03):+.2f}` |")
     logger.info("")
     logger.info("=" * 72)
     logger.info("END_ZS_PAPER_TABLE")
@@ -258,26 +266,29 @@ def run_zs_oral(
         )
     logger.info("")
     logger.info("### Oral-claim checks")
-    # Claim 1: Droid T3 > Fast-DetectGPT 64.54
-    if "droid_T3" in results and "test_macro_f1" in results["droid_T3"]:
-        d = results["droid_T3"]["test_macro_f1"] * 100
+    logger.info("> Primary metric per CLAUDE.md: Droid -> **Weighted-F1**, CoDET -> **Macro-F1**.")
+    # Claim 1: Droid T3 Weighted-F1 > Fast-DetectGPT 64.54 (paper Table 3 Avg row)
+    if "droid_T3" in results and "test_weighted_f1" in results["droid_T3"]:
+        d = results["droid_T3"]["test_weighted_f1"] * 100
         delta = d - 64.54
         verdict = "PASS" if delta > 0 else "FAIL"
-        logger.info(f"- Beat Fast-DetectGPT T3 (64.54): **{d:.2f}** ({delta:+.2f}) -- **{verdict}**")
+        logger.info(f"- Beat Fast-DetectGPT T3 (W-F1 64.54): **{d:.2f}** ({delta:+.2f}) -- **{verdict}**")
     # Claim 2: Human recall >= 0.95 on both benches
     for bench, r in results.items():
         if "test_human_recall" in r:
             hr = r["test_human_recall"]
             verdict = "PASS" if hr >= 0.95 else "FAIL"
             logger.info(f"- Human recall >= 0.95 on {bench}: **{hr:.4f}** -- **{verdict}**")
-    # Claim 3: Cross-benchmark transfer (gap |Droid - CoDET| < 10 pt)
+    # Claim 3: Cross-benchmark transfer — use each bench's PRIMARY metric
+    # (Droid W-F1 vs CoDET Macro-F1). Mixing metrics is intentional: each is
+    # the paper-standard primary for that benchmark (CLAUDE.md §5).
     if "droid_T3" in results and "codet_binary" in results:
-        r1 = results["droid_T3"].get("test_macro_f1")
-        r2 = results["codet_binary"].get("test_macro_f1")
+        r1 = results["droid_T3"].get("test_weighted_f1")   # Droid primary
+        r2 = results["codet_binary"].get("test_macro_f1")  # CoDET primary
         if r1 is not None and r2 is not None:
             gap = abs(r1 - r2) * 100
             verdict = "PASS" if gap < 10 else "FAIL"
-            logger.info(f"- Cross-benchmark stability (|Droid T3 - CoDET bin| < 10 pt): **{gap:.2f}** -- **{verdict}**")
+            logger.info(f"- Cross-benchmark stability (|Droid W-F1 - CoDET Macro-F1| < 10 pt): **{gap:.2f}** -- **{verdict}**")
 
     logger.info("")
     logger.info("=" * 78)

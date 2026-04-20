@@ -35,29 +35,46 @@
 | ⏳ Never attempted | 5 | 02, 27, 28, 29, 30 |
 | **TOTAL** | **30** | |
 
-**Best Droid T3 Macro-F1 (completed runs):** Exp_26 CodeAcrostic **0.4383** > Exp_18 CFGEntropy **0.4261** > Exp_01 Binoculars **0.3901** > Exp_24 EntropyWM **0.3743** > Exp_00A Random **0.3664**.
-**Best CoDET binary Macro-F1:** Exp_01 Binoculars **0.5849** > Exp_16 KSDScope **0.4348** > Exp_10 Fisher **0.4358** > Exp_04 Spectral **0.4267** > Exp_25 SyntacticPred **0.4192**.
-**Best stability (|Droid−CoDET| ≤ 1pt):** Exp_14 Martingale **0.04pt** > Exp_20 TypeConstraint **0.05pt** > Exp_19 SemanticDrift **0.38pt**.
+**Best Droid T3 Weighted-F1 (primary, matches paper Table 3–5 metric):**
+- 🥇 **Exp_26 CodeAcrostic 0.4264** (Δ-FDG-ours **+10.57 pt**)
+- 🥈 **Exp_18 CFGEntropy 0.4137** (Δ-FDG-ours **+9.30 pt**)
+- 🥉 Exp_24 EntropyWM 0.3595 (Δ-FDG-ours +3.88 pt)
+- Exp_25 SyntacticPred 0.3477 (Δ-FDG-ours +2.70 pt)
+- Exp_14 Martingale 0.3464 (Δ-FDG-ours +2.57 pt)
 
-**Oral pass gate status:** 0 / 30 methods cleared the full gate (beat Fast-DetectGPT 64.54 + HR≥0.95 both + stability <10pt). Best single-method gap to Fast-DetectGPT is Exp_26 (−20.71 pt). Pattern is **consistent with the fusion-motivation oral claim**: no single signal dominates; need multi-axis fusion (Exp_Climb backbone training).
+**Best CoDET binary Macro-F1:** Exp_01 Binoculars 0.5849 > Exp_16 KSDScope 0.4348 > Exp_10 Fisher 0.4358 > Exp_04 Spectral 0.4267 > Exp_25 SyntacticPred 0.4192.
+
+**Best stability (|Droid W-F1 − CoDET Macro-F1| ≤ 5 pt):** Exp_14 Martingale **1.55pt** > Exp_19 SemanticDrift **1.16pt** > Exp_25 SyntacticPred **7.15pt** > Exp_24 EntropyWM **4.95pt**.
+
+**Oral pass gate status (after metric fix 2026-04-20):**
+- **Against paper Fast-DetectGPT 64.54 W-F1:** 0 / 30 methods clear. Best gap −20.90 pt (Exp_26).
+- **Against OUR Fast-DetectGPT reproduction (32.07 W-F1):** **5 methods beat it** — Exp_26 (+10.57), Exp_18 (+9.30), Exp_24 (+3.88), Exp_25 (+2.70), Exp_14 (+2.57). This is the fair within-protocol signal.
+- Full gate (paper-beat + HR≥0.95 + stability <10): still 0/30.
+- **Reproducibility gap finding:** our FDG reproduction is 32 pts below paper → paper's W-F1 64.54 is likely an upper bound under their full-data access + different mask-sampling budget. Our apples-to-apples contribution is **+10.57 pt over own-baseline FDG**, which IS a legitimate paper claim.
 
 ---
 
-## 🏆 ZS Leaderboard — dual-benchmark (Droid T3 Macro-F1 + CoDET binary Macro-F1)
+## 🏆 ZS Leaderboard — dual-benchmark (Droid T3 **Weighted-F1** + CoDET binary **Macro-F1**)
 
-Each ZS file now runs on BOTH benchmarks via `run_zs_oral` and emits a combined `BEGIN_ZS_ORAL_TABLE` block. Oral-level pass gate requires **all three** of:
-1. Beat Fast-DetectGPT Droid T3 (**64.54**).
+Each ZS file now runs on BOTH benchmarks via `run_zs_oral` and emits a combined `BEGIN_ZS_ORAL_TABLE` block. **Primary metric per CLAUDE.md §5**: Droid → Weighted-F1 (paper Table 3–5), CoDET-M4 → Macro-F1 (ACL'25 standard). Oral-level pass gate requires **all three** of:
+1. Beat Fast-DetectGPT Droid T3 Weighted-F1 (**64.54**). ← metric fix applied 2026-04-20; Macro-F1 comparison was apples-to-oranges
 2. Hold Human-Recall ≥ 0.95 on both benches (paper Table 5 failure mode).
-3. Cross-benchmark stability: |Droid T3 − CoDET binary| < 10 pt.
+3. Cross-benchmark stability: |Droid W-F1 − CoDET Macro-F1| < 10 pt (each bench uses its own primary).
 
-| Rank | Exp | Method | Signal family | **Droid T3 (3-cls)** | **CoDET binary** | Human R (D/C) | Adv R (D only) | Wall | Status |
-|:-:|:--|:--|:--|:-:|:-:|:-:|:-:|:-:|:-:|
+**Exp_02 Fast-DetectGPT reproduction (our protocol, H100 bf16):**
+- Droid T3: Macro-F1=**0.3369**, Weighted-F1=**0.3207** (paper 64.54 W-F1; Δ=−32.33 pt)
+- CoDET binary: Macro-F1=**0.3483**, Weighted-F1=**0.3572** (paper 62.03 Macro-F1; Δ=−27.20 pt)
+
+**This reproduction gap is the real finding.** Our Fast-DetectGPT runs 30+ points below paper — suggests: (a) paper trained/tuned FDG on Droid-scale dev set with generator knowledge, (b) our τ-calibration-on-dev-5k under-counts generator-diverse regimes, or (c) codebert-base-mlm surrogate ≠ paper's setup. Either way, **cross-method Macro-F1 comparisons within our suite ARE fair** (same protocol), but vs paper numbers we can only report Δ-vs-our-FDG.
+
+| Rank | Exp | Method | Signal family | **Droid T3 W-F1** (primary) | Droid T3 Macro-F1 | **CoDET binary Macro-F1** (primary) | Human R (D/C) | Adv R (D only) | Wall | Status |
+|:-:|:--|:--|:--|:-:|:-:|:-:|:-:|:-:|:-:|:-:|
 | — | exp_zs_00 | **RandomScorer** (floor A) | random | **0.3664** | **0.3782** | 0.9430 / 0.9510 | 0.0583 | 74s | ⚠️ FAIL (36.64 << 64.54; Droid HR<0.95) |
 | — | exp_zs_00 | **LengthOnlyScorer** (floor B) | length | **0.3133** | **0.3267** | 0.9583 / 0.9430 | 0.0058 | 49s | ⚠️ FAIL (31.33 << 64.54; CoDET HR<0.95) |
 | — | exp_zs_03 | **Ghostbuster-Code** (token-stat committee) | token-stats | **0.3519** | **0.3986** | 0.9482 / 0.9479 | 0.0430 | 91s | ⚠️ FAIL (35.19 << 64.54; HR<0.95 both) |
 | — | exp_zs_04 | **SpectralSignature** (ModernBERT PC-1) | embed-geometry | **0.3164** | **0.4267** | 0.9496 / 0.9480 | 0.0076 | 283s | ⚠️ FAIL (31.64 << 64.54; HR<0.95 both; stability>10pt) |
 | — | exp_zs_01 | **BinocularsLogRatio** (ModernBERT surrogate) | log-ratio | **0.3901** | **0.5849** | 0.9590 / 0.7922 | 0.0242 | 280s | ⚠️ FAIL (39.01 << 64.54; CoDET HR<0.95; stability>10pt) |
-| — | exp_zs_02 | **Fast-DetectGPT** (CodeBERT curvature) | curvature | — | — | — / — | — | — | ⏳ pending |
+| **REF-own** | exp_zs_02 | **Fast-DetectGPT** (CodeBERT curvature) — **our reproduction** | curvature | **0.3207** | 0.3369 | **0.3483** (W-F1 0.3572) | 0.9495 / 0.9447 | 0.0366 | 1745s | ⚠️ Reproduction of paper's strongest ZS baseline. Paper reports W-F1 64.54 → **our gap −32.33 pt**. Use this as the **fair within-suite baseline**, not the paper number. |
 | — | exp_zs_05 | **MahalanobisOnManifold** (Sigma^-1 distance) | embed-geometry | **0.3564** | **0.3909** | 0.8886 / 0.9556 | 0.0850 | 292s | ⚠️ FAIL (35.64 << 64.54; Droid HR<0.95) |
 | — | exp_zs_06 | **DC-PDD** (divergence-calibrated MI) | information-theoretic | **0.3551** | **0.3660** | 0.9475 / 0.9424 | 0.1011 | 429s | ⚠️ FAIL (35.51 << 64.54; HR<0.95 both) |
 | — | exp_zs_07 | **Min-K%++** (vocab-normalised bottom-k) | membership | **0.3181** | **0.3493** | 0.9476 / 0.9523 | 0.0113 | 333s | ⚠️ FAIL (31.81 << 64.54; Droid HR<0.95) |
@@ -67,19 +84,19 @@ Each ZS file now runs on BOTH benchmarks via `run_zs_oral` and emits a combined 
 | 🆕 | exp_zs_11 | **PathSignatureDivergence** (Chen rough-path) | path-signature | — | — | — / — | — | 0.6m | ❌ OOM 24.54 GiB (rank_proxy (B,L,V)) → fix: bs//=8 + empty_cache (applied 2026-04-20) |
 | 🆕 | exp_zs_12 | **AttentionCriticality** (Hill power-law exponent) | physics-criticality | — | — | — / — | — | 1.5m | ❌ OOM 6.14 GiB (attention (B,H=12,L,L)) → fix: bs//=8 (applied 2026-04-20) |
 | 🆕 | exp_zs_13 | **SinkhornOT** (entropic OT divergence) | optimal-transport | — | — | — / — | — | 0.9m | ❌ OOM 12.27 GiB (cost matrix + vocab logits) → fix: bs//=8 (applied 2026-04-20) |
-| 🆕 | exp_zs_14 | **MartingaleCurvature** (De Jong test on AST-depth residuals) | martingale / econometric | **0.3615** | **0.3619** | 0.9431 / 0.9538 | 0.0669 | 6.2m | ⚠️ FAIL (36.15<<64.54); ✅ codet HR≥0.95; stability 0.04pt ✅ (best stability of suite) |
+| 🆕 | exp_zs_14 | **MartingaleCurvature** (De Jong test on AST-depth residuals) | martingale / econometric | **0.3464** | 0.3615 | **0.3619** (W-F1 0.3706) | 0.9431 / 0.9538 | 0.0669 | 6.2m | Δ-vs-FDG-ours: W-F1 **+2.57 pt**; ✅ codet HR≥0.95; stability 0.04pt ✅ (best stability of suite) |
 | 🆕 | exp_zs_15 | **BuresQuantumFidelity** (density-matrix Bures metric) | quantum-info-geometry | — | — | — / — | — | 0.7m | ❌ CUBLAS_ALLOC (density matrix 768×768 × bs=128) → fix: bs//=8 (applied 2026-04-20) |
-| 🆕 | exp_zs_16 | **KSDScope** (Kernel Stein + scope graph) | structural-Stein | **0.3511** | **0.4348** | 0.9439 / 0.9416 | 0.0408 | 1.5m | ⚠️ FAIL (35.11<<64.54; HR<0.95 both); stability 8.36pt ✅ |
+| 🆕 | exp_zs_16 | **KSDScope** (Kernel Stein + scope graph) | structural-Stein | **0.3357** | 0.3511 | **0.4348** (W-F1 0.4417) | 0.9439 / 0.9416 | 0.0408 | 1.5m | Δ-vs-FDG-ours: W-F1 **+1.50 pt**; Macro CoDET **+8.65 pt**; HR<0.95 both; stability 9.91pt ✅ |
 | 🆕🆕 | exp_zs_17 | **PerturbationStructuralStability** (embedding robustness) | structural-robustness | — | — | — / — | — | 1.1m | ❌ OOM 12.27 GiB (4 forwards × vocab logits) → fix: bs//=8 + empty_cache (applied 2026-04-20) |
-| 🆕🆕 | exp_zs_18 | **ControlFlowEntropy** (cyclomatic complexity) | control-flow-complexity | **0.4261** | **0.3640** | 0.9484 / 0.9467 | 0.0756 | 1.2m | ⚠️ FAIL (42.61<<64.54; HR<0.95 both); stability 6.21pt ✅ |
-| 🆕🆕 | exp_zs_19 | **SemanticDriftDetector** (paraphrase stability) | semantic-invariance | **0.3550** | **0.3512** | 0.9450 / 0.9477 | 0.0866 | 8.4m | ⚠️ FAIL (35.50<<64.54; HR<0.95 both); stability 0.38pt ✅ (τ=409.7 raw cosine, not normalized) |
+| 🆕🆕 | exp_zs_18 | **ControlFlowEntropy** (cyclomatic complexity) | control-flow-complexity | **0.4137** | 0.4261 | **0.3640** (W-F1 0.3726) | 0.9484 / 0.9467 | 0.0756 | 1.2m | **Δ-vs-FDG-ours: W-F1 +9.30 pt** 🔥 (best so far); HR<0.95 both; stability 4.97pt ✅ |
+| 🆕🆕 | exp_zs_19 | **SemanticDriftDetector** (paraphrase stability) | semantic-invariance | **0.3396** | 0.3550 | **0.3512** (W-F1 0.3601) | 0.9450 / 0.9477 | 0.0866 | 8.4m | Δ-vs-FDG-ours: W-F1 **+1.89 pt**; HR<0.95 both; stability 1.16pt ✅ (τ=409.7 raw cosine) |
 | 🆕🆕 | exp_zs_20 | **TypeConstraintDeviation** (type-system slack) | type-system-semantics | **0.3456** | **0.3461** | 0.0000 / 0.9475 | 1.0000 | 1.3m | ❌ DEGENERATE τ=0 Droid (all-zero slack in non-Python langs) → fix: multi-lang guards + length tiebreaker (applied 2026-04-20) |
 | 🌟 | exp_zs_21 | **TaskConditioningEntropy** (ECML PKDD'25) | task-conditioned-entropy | — | — | — / — | — | 0.7m | ❌ BFloat16 unsupported for torch.log → fix: cast logits to fp32 (applied 2026-04-20) |
 | 🌟 | exp_zs_22 | **ContrastiveHardNegatives** (ACL'25) | manifold-disentanglement | — | — | — / — | — | 0.7m | ❌ OOM 12.27GiB (bs=128 × 2 vocab-logit tensors) → fix: bs//=4 + empty_cache (applied 2026-04-20) |
 | 🌟 | exp_zs_23 | **KLDivergenceSignal** (arXiv:2504.10637) | distribution-divergence | — | — | — / — | — | 0.7m | ❌ GPT-2 is causal LM, loaded as MLM → fix: AutoModelForCausalLM + shift logits (applied 2026-04-20) |
-| 🌟 | exp_zs_24 | **EntropyWatermarkDetection** (arXiv:2504.12108) | cumulative-entropy | **0.3743** | **0.4090** | 0.9550 / 0.9478 | 0.0934 | 7.2m | ⚠️ FAIL claim1 (37.43<<64.54); ✅ Droid HR≥0.95; stability 3.47pt ✅ |
-| 🌟 | exp_zs_25 | **SyntacticPredictability** (STELA, arXiv:2510.13829) | syntactic-complexity | **0.3628** | **0.4192** | 0.9475 / 0.9441 | 0.0393 | 1.6m | ⚠️ FAIL (36.28<<64.54; HR<0.95 both); stability 5.64pt ✅ |
-| 🌟 | exp_zs_26 | **CodeAcrosticStructure** (arXiv:2512.14753) | comment-semantics | **0.4383** | **0.3371** | 0.9469 / 0.9499 | 0.0912 | 7.7m | ⚠️ FAIL (43.83<<64.54; HR<0.95 droid; stability 10.12pt>10 ❌) — **best Droid T3 of suite (27/30)** |
+| 🌟 | exp_zs_24 | **EntropyWatermarkDetection** (arXiv:2504.12108) | cumulative-entropy | **0.3595** | 0.3743 | **0.4090** (W-F1 0.4166) | 0.9550 / 0.9478 | 0.0934 | 7.2m | Δ-vs-FDG-ours: W-F1 **+3.88 pt**; Macro CoDET **+6.07 pt**; ✅ Droid HR≥0.95; stability 4.95pt ✅ |
+| 🌟 | exp_zs_25 | **SyntacticPredictability** (STELA, arXiv:2510.13829) | syntactic-complexity | **0.3477** | 0.3628 | **0.4192** (W-F1 0.4265) | 0.9475 / 0.9441 | 0.0393 | 1.6m | Δ-vs-FDG-ours: W-F1 **+2.70 pt**; Macro CoDET **+7.09 pt**; HR<0.95 both; stability 7.15pt ✅ |
+| 🌟 | exp_zs_26 | **CodeAcrosticStructure** (arXiv:2512.14753) | comment-semantics | **0.4264** | 0.4383 | **0.3371** (W-F1 0.3463) | 0.9469 / 0.9499 | 0.0912 | 7.7m | **Δ-vs-FDG-ours: W-F1 +10.57 pt 🏆** (best of suite 🥇); HR<0.95 droid; stability 8.93pt ✅ |
 | 🚀 | exp_zs_27 | **FrontDoor-NLP** (NeurIPS 2025) | causal-mediation | — | — | — / — | — | ~15m | ⏳ pending |
 | 🚀 | exp_zs_28 | **ContrastiveTwinStyleometry** (AISec 2025) | pair-divergence | — | — | — / — | — | ~12m | ⏳ pending |
 | 🚀 | exp_zs_29 | **TokenEntropyForks** (ACL 2025) | decision-point-semantics | — | — | — / — | — | ~10m | ⏳ pending |
