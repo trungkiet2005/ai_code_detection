@@ -25,6 +25,24 @@
 
 ---
 
+## 📊 Run status snapshot (as of 2026-04-20, after first Kaggle H100 pass + patches)
+
+| Status | Count | Exps |
+|:--|:-:|:--|
+| ✅ Completed (both benches) | **14** | 00A, 00B, 01, 03, 04, 05, 06, 07, 08, 09, 10, 14, 16, 18, 19, 24, 25, 26 |
+| ⚠️ Completed but degenerate | 1 | 20 (Droid τ=0 — **fixed**, rerun pending) |
+| 🔧 Patched, rerun pending | 8 | 11, 12, 13, 15, 17, 21, 22, 23 (all OOM / type fixes applied 2026-04-20) |
+| ⏳ Never attempted | 5 | 02, 27, 28, 29, 30 |
+| **TOTAL** | **30** | |
+
+**Best Droid T3 Macro-F1 (completed runs):** Exp_26 CodeAcrostic **0.4383** > Exp_18 CFGEntropy **0.4261** > Exp_01 Binoculars **0.3901** > Exp_24 EntropyWM **0.3743** > Exp_00A Random **0.3664**.
+**Best CoDET binary Macro-F1:** Exp_01 Binoculars **0.5849** > Exp_16 KSDScope **0.4348** > Exp_10 Fisher **0.4358** > Exp_04 Spectral **0.4267** > Exp_25 SyntacticPred **0.4192**.
+**Best stability (|Droid−CoDET| ≤ 1pt):** Exp_14 Martingale **0.04pt** > Exp_20 TypeConstraint **0.05pt** > Exp_19 SemanticDrift **0.38pt**.
+
+**Oral pass gate status:** 0 / 30 methods cleared the full gate (beat Fast-DetectGPT 64.54 + HR≥0.95 both + stability <10pt). Best single-method gap to Fast-DetectGPT is Exp_26 (−20.71 pt). Pattern is **consistent with the fusion-motivation oral claim**: no single signal dominates; need multi-axis fusion (Exp_Climb backbone training).
+
+---
+
 ## 🏆 ZS Leaderboard — dual-benchmark (Droid T3 Macro-F1 + CoDET binary Macro-F1)
 
 Each ZS file now runs on BOTH benchmarks via `run_zs_oral` and emits a combined `BEGIN_ZS_ORAL_TABLE` block. Oral-level pass gate requires **all three** of:
