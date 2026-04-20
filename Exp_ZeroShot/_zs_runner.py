@@ -37,6 +37,13 @@ from _common import ZSConfig, calibrate_threshold_at_human_recall, logger, set_s
 from _zs_loaders import load_zs
 
 
+# Default benchmark set for oral-level ZS claims: Droid T3 (3-cls, headline
+# baseline Fast-DetectGPT 64.54) + CoDET binary (cross-dataset transfer check).
+# Droid T1 is optional -- binary ceiling-bound on both benches, little story.
+ORAL_BENCHMARKS = ("droid_T3", "codet_binary")
+FULL_BENCHMARKS = ("droid_T3", "droid_T1", "codet_binary")
+
+
 def _binarize(labels: np.ndarray, human_label: int = 0) -> np.ndarray:
     return (labels != human_label).astype(int)
 
@@ -195,3 +202,85 @@ def run_zs_suite(
         "breakdown": bk,
         "wall_time_s": wall,
     }
+
+
+# -----------------------------------------------------------------------------
+# Dual-benchmark driver
+# -----------------------------------------------------------------------------
+
+def run_zs_oral(
+    method_name: str,
+    exp_id: str,
+    score_fn: Callable[[List[str], ZSConfig], np.ndarray],
+    cfg: ZSConfig,
+    benchmarks=ORAL_BENCHMARKS,
+) -> Dict[str, Dict]:
+    """Run one zero-shot exp across multiple benchmarks and emit a combined
+    oral-level paper table. Default runs Droid T3 + CoDET binary.
+
+    Each benchmark uses a fresh copy of `cfg` with cfg.benchmark overridden.
+    """
+    import dataclasses as _dc
+    results: Dict[str, Dict] = {}
+
+    for bench in benchmarks:
+        logger.info("\n" + "#" * 78)
+        logger.info(f"# [ZS-ORAL] {method_name} -- benchmark={bench}")
+        logger.info("#" * 78)
+        per_cfg = _dc.replace(cfg, benchmark=bench)
+        try:
+            results[bench] = run_zs_suite(
+                method_name=method_name,
+                exp_id=exp_id,
+                score_fn=score_fn,
+                cfg=per_cfg,
+            )
+        except Exception as e:
+            logger.error(f"[ZS-ORAL] {bench} failed: {e}")
+            results[bench] = {"error": str(e)}
+
+    # Combined oral-level table
+    logger.info("\n" + "=" * 78)
+    logger.info("BEGIN_ZS_ORAL_TABLE")
+    logger.info("=" * 78)
+    logger.info(f"## {method_name} ({exp_id}) -- Dual-Benchmark Zero-Shot Summary")
+    logger.info("")
+    logger.info("| Benchmark | Macro-F1 | Weighted-F1 | Human R | Adv R | tau | Wall |")
+    logger.info("|:--|:-:|:-:|:-:|:-:|:-:|:-:|")
+    for bench, r in results.items():
+        if "error" in r:
+            logger.info(f"| {bench} | ERROR: {r['error'][:40]} | - | - | - | - | - |")
+            continue
+        logger.info(
+            f"| {bench} | {r['test_macro_f1']:.4f} | {r['test_weighted_f1']:.4f} | "
+            f"{r['test_human_recall']:.4f} | {r.get('test_adversarial_recall', float('nan')):.4f} | "
+            f"{r['tau']:.4f} | {r['wall_time_s']:.0f}s |"
+        )
+    logger.info("")
+    logger.info("### Oral-claim checks")
+    # Claim 1: Droid T3 > Fast-DetectGPT 64.54
+    if "droid_T3" in results and "test_macro_f1" in results["droid_T3"]:
+        d = results["droid_T3"]["test_macro_f1"] * 100
+        delta = d - 64.54
+        verdict = "PASS" if delta > 0 else "FAIL"
+        logger.info(f"- Beat Fast-DetectGPT T3 (64.54): **{d:.2f}** ({delta:+.2f}) -- **{verdict}**")
+    # Claim 2: Human recall >= 0.95 on both benches
+    for bench, r in results.items():
+        if "test_human_recall" in r:
+            hr = r["test_human_recall"]
+            verdict = "PASS" if hr >= 0.95 else "FAIL"
+            logger.info(f"- Human recall >= 0.95 on {bench}: **{hr:.4f}** -- **{verdict}**")
+    # Claim 3: Cross-benchmark transfer (gap |Droid - CoDET| < 10 pt)
+    if "droid_T3" in results and "codet_binary" in results:
+        r1 = results["droid_T3"].get("test_macro_f1")
+        r2 = results["codet_binary"].get("test_macro_f1")
+        if r1 is not None and r2 is not None:
+            gap = abs(r1 - r2) * 100
+            verdict = "PASS" if gap < 10 else "FAIL"
+            logger.info(f"- Cross-benchmark stability (|Droid T3 - CoDET bin| < 10 pt): **{gap:.2f}** -- **{verdict}**")
+
+    logger.info("")
+    logger.info("=" * 78)
+    logger.info("END_ZS_ORAL_TABLE")
+    logger.info("=" * 78)
+    return results

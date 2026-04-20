@@ -37,7 +37,7 @@ from typing import List
 import numpy as np
 
 from _common import ZSConfig, logger
-from _zs_runner import run_zs_suite
+from _zs_runner import run_zs_oral
 
 
 _mlm = None
@@ -137,7 +137,7 @@ def _fast_detect_gpt_score(codes: List[str], cfg: ZSConfig) -> np.ndarray:
 
 if __name__ == "__main__":
     cfg = ZSConfig(benchmark="droid_T3")
-    run_zs_suite(
+    run_zs_oral(
         method_name="FastDetectGPT",
         exp_id="exp_zs_02",
         score_fn=_fast_detect_gpt_score,

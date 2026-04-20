@@ -25,19 +25,30 @@
 
 ---
 
-## 🏆 ZS Leaderboard — sorted by Droid T3 Macro-F1 ↓
+## 🏆 ZS Leaderboard — dual-benchmark (Droid T3 Macro-F1 + CoDET binary Macro-F1)
 
-| Rank | Exp | Method | Bench | Macro-F1 | Weighted-F1 | Human R | AI R | Adv R | τ | Wall | Status |
-|:-:|:--|:--|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|
-| — | exp_zs_01 | BinocularsLogRatio (fusion-embedding surrogate) | droid_T3 | — | — | — | — | — | — | — | ⏳ pending |
-| — | exp_zs_02 | Fast-DetectGPT (CodeBERT scorer) | droid_T3 | — | — | — | — | — | — | — | ⏳ pending |
-| — | exp_zs_03 | Ghostbuster-Code (token-stat committee) | droid_T3 | — | — | — | — | — | — | — | ⏳ pending |
-| — | exp_zs_04 | SpectralSignature (our backbone ZS) | droid_T3 | — | — | — | — | — | — | — | ⏳ pending |
-| **REF** | Paper | **Fast-DetectGPT** | droid_T3 | **64.54** | — | 0.84 | — | 0.48 | — | — | reference |
-| REF | Paper | M4 | droid_T3 | 55.27 | — | 0.40 | — | 0.73 | — | — | reference |
-| REF | Paper | GPTZero | droid_T3 | 49.10 | — | 0.53 | — | 0.10 | — | — | reference |
-| REF | Paper | CoDet-M4 (ZS) | droid_T3 | 47.80 | — | 0.38 | — | 0.63 | — | — | reference |
-| REF | Paper | GPTSniffer (ZS) | droid_T3 | 38.95 | — | 0.65 | — | 0.49 | — | — | reference |
+Each ZS file now runs on BOTH benchmarks via `run_zs_oral` and emits a combined `BEGIN_ZS_ORAL_TABLE` block. Oral-level pass gate requires **all three** of:
+1. Beat Fast-DetectGPT Droid T3 (**64.54**).
+2. Hold Human-Recall ≥ 0.95 on both benches (paper Table 5 failure mode).
+3. Cross-benchmark stability: |Droid T3 − CoDET binary| < 10 pt.
+
+| Rank | Exp | Method | **Droid T3 (3-cls)** | **CoDET binary** | Human R (D/C) | Adv R (D only) | Wall | Status |
+|:-:|:--|:--|:-:|:-:|:-:|:-:|:-:|:-:|
+| — | exp_zs_00 | **RandomScorer** (floor A) | — | — | — / — | — | — | ⏳ pending |
+| — | exp_zs_00 | **LengthOnlyScorer** (floor B) | — | — | — / — | — | — | ⏳ pending |
+| — | exp_zs_03 | **Ghostbuster-Code** (token-stat committee) | — | — | — / — | — | — | ⏳ pending |
+| — | exp_zs_04 | **SpectralSignature** (ModernBERT PC-1) | — | — | — / — | — | — | ⏳ pending |
+| — | exp_zs_01 | **BinocularsLogRatio** (ModernBERT surrogate) | — | — | — / — | — | — | ⏳ pending |
+| — | exp_zs_02 | **Fast-DetectGPT** (CodeBERT curvature) | — | — | — / — | — | — | ⏳ pending |
+| **REF** | Paper | **Fast-DetectGPT** (Droid paper Table 3/5) | **64.54** | — | 0.84 / — | 0.48 | — | reference |
+| REF | Paper | M4 (ZS) | 55.27 | — | 0.40 ⚠️ / — | 0.73 | — | reference |
+| REF | Paper | GPTZero | 49.10 | — | 0.53 / — | 0.10 | — | reference |
+| REF | Paper | CoDet-M4 (ZS) | 47.80 | — | 0.38 ⚠️ / — | 0.63 | — | reference |
+| REF | Paper | GPTSniffer (ZS) | 38.95 | — | 0.65 / — | 0.49 | — | reference |
+
+⚠️ M4 + CoDet-M4 have chased adversarial recall at the cost of human recall — the failure mode the paper explicitly flags in §4.5.4. Our oral claim avoids this by pinning Human R ≥ 0.95 in the τ-calibration step.
+
+No direct paper baseline for CoDET binary zero-shot (CoDET-M4 paper's only ZS number is Fast-DetectGPT 62.03 in Table 2, reported as "baseline" — this cell is already in our CoDET mirror leaderboard).
 
 ---
 
@@ -50,45 +61,65 @@
 | exp_zs_03 | **Ghostbuster-Code** | Verma et al. EMNLP'23 — committee of cheap handcrafted features (entropy / burstiness / TTR / Yule-K); human has higher burstiness, lower entropy ratio | feature vector + logistic-regression trained on dev (lean-ZS since only the LR head sees labels) | ~0 forward passes, pure numpy |
 | exp_zs_04 | **SpectralSignature** | Our own — Exp_Climb's spectral encoder already learned code-frequency features at pretraining; project to a 1-D "human-likeness" axis via PCA on the first ModernBERT layer | 1 forward pass on ModernBERT, then 1-D projection | 1 forward pass + PCA |
 
-All four feed **scalar scores** (higher = more AI-like) into the shared `_zs_runner.run_zs_suite` → threshold calibration on dev → test metrics + breakdown.
+All methods feed **scalar scores** (higher = more AI-like) into the shared `_zs_runner.run_zs_oral` → threshold calibration on dev (Droid + CoDET independently) → test metrics + per-dim breakdown + combined `BEGIN_ZS_ORAL_TABLE` block with oral-claim check.
+
+**Floor baselines (exp_zs_00):** `RandomScorer` (U(0,1) noise, macro-F1 ≈ 0.50) + `LengthOnlyScorer` (log-char-length, expected 0.55–0.60). Any proposed ZS detector that doesn't clear both floors AND Fast-DetectGPT 64.54 on Droid T3 is *not* an oral-level contribution.
 
 ---
 
-## 📐 Protocol
+## 📐 Protocol (dual-benchmark oral default)
 
 ```python
 from _common import ZSConfig
-from _zs_runner import run_zs_suite
+from _zs_runner import run_zs_oral
 
 cfg = ZSConfig(
-    benchmark="droid_T3",         # droid_T3 | droid_T1 | codet_binary
-    max_dev_samples=5_000,        # calibration budget
+    benchmark="droid_T3",         # placeholder; overridden inside run_zs_oral
+    max_dev_samples=5_000,        # calibration budget per bench
     max_test_samples=-1,          # FULL test
     human_recall_target=0.95,     # pin human R on dev calibration
 )
-result = run_zs_suite(
+run_zs_oral(
     method_name="MyZSMethod",
     exp_id="exp_zs_NN",
     score_fn=my_score_fn,          # (codes: list[str], cfg) -> np.ndarray
     cfg=cfg,
+    # benchmarks=("droid_T3", "codet_binary") -- default; override if needed
 )
 ```
 
 - **No training.** `score_fn` must be stateless w.r.t. labels (except for Ghostbuster-Code which fits a tiny LR on dev — noted).
-- **Threshold calibrated** on dev to pin human recall ≥ target; applied unchanged on test.
-- **Metrics**: Macro-F1 + Weighted-F1 (binarised human vs AI) + Human R + AI R + Adversarial R + per-dim breakdown (domain / language / source_raw / generator / model_family).
-- **Paper-ready emit**: `BEGIN_ZS_PAPER_TABLE` block at end of each run with Δ vs every paper ZS baseline.
+- **Threshold calibrated** on dev **per benchmark** (Droid and CoDET get their own τ); applied unchanged on that bench's test split.
+- **Metrics per bench**: Macro-F1 + Weighted-F1 (binarised human vs AI) + Human R + AI R + Adversarial R + per-dim breakdown (domain / language / source_raw / generator / model_family).
+- **Oral-level emit**: combined `BEGIN_ZS_ORAL_TABLE` block at end of the run with three automatic claim checks (Fast-DetectGPT beat · human recall floor · cross-benchmark stability).
 
 ---
 
-## Ship order (recommended)
+## Ship order (recommended, dual-benchmark)
 
-1. **exp_zs_03 Ghostbuster-Code** first — no LM forward passes, only numpy. Proves the harness end-to-end in ~60 s on CPU.
-2. **exp_zs_04 SpectralSignature** — uses the Exp_Climb backbone, ~3 min on H100.
-3. **exp_zs_01 Binoculars** — one extra forward pass, ~5 min.
-4. **exp_zs_02 Fast-DetectGPT** — heaviest (2 forward passes + variance), ~10 min.
+Each file runs BOTH Droid T3 + CoDET binary, so wall times below are per-file totals.
 
-Total Kaggle budget: ~20 min for all 4. Way under the 2 h Exp_Climb paper_proto envelope, so can be run in the same session.
+1. **exp_zs_00 Floor (random + length)** — ~10 s total. First gate: confirm the oral claim surface isn't a length-shortcut artefact.
+2. **exp_zs_03 Ghostbuster-Code** — pure numpy, ~2 min both benches.
+3. **exp_zs_04 SpectralSignature** — 1 ModernBERT fwd × 2, ~6 min.
+4. **exp_zs_01 Binoculars** — 1 ModernBERT fwd × 2, ~10 min.
+5. **exp_zs_02 Fast-DetectGPT** — 3 CodeBERT fwds × 2 (heaviest), ~20 min.
+
+**Total Kaggle budget for all 5: ~40 min.** Well under the 2 h Exp_Climb paper_proto envelope, so can run in the same session.
+
+---
+
+## Oral-paper narrative (for the method section)
+
+Single story the 5 runs together tell:
+
+1. **Floor** (exp_zs_00) — random ≈ 0.50, length-only ≈ 0.55-0.60 on both benches. Gives the oral comparison block an anchor.
+2. **Easy signal** (exp_zs_03 Ghostbuster) — token-statistics committee. Expected ≈ 0.60-0.65 on Droid T3, directly approaches Fast-DetectGPT. Weak baselines ARE this strong — establishes the ceiling for any "purely statistical" method.
+3. **Spectral surrogate** (exp_zs_04 SpectralSignature) — ModernBERT layer-1 PC-1. Expected ≈ 0.60-0.68. Tests whether the Exp_Climb backbone's spectral stream is discriminative without any training — if yes, the axis-B spectral claim (paper §4) is already half-proven at inference time.
+4. **Theoretical optimum for sibling pairs** (exp_zs_01 Binoculars + exp_zs_02 Fast-DetectGPT) — Neyman-Pearson-motivated scorers. These are the *theorem-carrying* methods that justify the oral framing.
+5. **Cross-benchmark stability** — all 5 runs report on Droid T3 **and** CoDET binary. The oral claim surface is "our best ZS detector transfers within 10 pt across two distinct code-detection benchmarks" — a concrete, falsifiable statement.
+
+Any one of these, reported alone, is a poster. Together they form the **ablation structure** a dedicated EMNLP zero-shot paper (or the appendix of the Exp_Climb oral) needs.
 
 ---
 

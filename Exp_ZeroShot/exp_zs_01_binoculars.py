@@ -44,7 +44,7 @@ from typing import List
 import numpy as np
 
 from _common import ZSConfig, logger
-from _zs_runner import run_zs_suite
+from _zs_runner import run_zs_oral
 
 
 # -----------------------------------------------------------------------------
@@ -154,8 +154,9 @@ def _binoculars_score(codes: List[str], cfg: ZSConfig) -> np.ndarray:
 
 
 if __name__ == "__main__":
-    cfg = ZSConfig(benchmark="droid_T3")
-    run_zs_suite(
+    # Oral-level ZS: run on Droid T3 + CoDET binary; emit combined table.
+    cfg = ZSConfig(benchmark="droid_T3")          # placeholder; overridden by run_zs_oral
+    run_zs_oral(
         method_name="BinocularsLogRatio",
         exp_id="exp_zs_01",
         score_fn=_binoculars_score,

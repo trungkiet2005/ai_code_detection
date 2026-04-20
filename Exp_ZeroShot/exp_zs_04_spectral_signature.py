@@ -40,7 +40,7 @@ from typing import List
 import numpy as np
 
 from _common import ZSConfig, logger
-from _zs_runner import run_zs_suite
+from _zs_runner import run_zs_oral
 
 
 _encoder = None
@@ -137,7 +137,7 @@ def _spectral_signature_score(codes: List[str], cfg: ZSConfig) -> np.ndarray:
 
 if __name__ == "__main__":
     cfg = ZSConfig(benchmark="droid_T3")
-    run_zs_suite(
+    run_zs_oral(
         method_name="SpectralSignature",
         exp_id="exp_zs_04",
         score_fn=_spectral_signature_score,
