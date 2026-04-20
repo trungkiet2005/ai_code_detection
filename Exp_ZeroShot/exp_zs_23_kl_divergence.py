@@ -85,16 +85,20 @@ from _zs_runner import run_zs_oral
 def _kl_divergence_score(codes: List[str], cfg: ZSConfig) -> np.ndarray:
     """KL divergence between code-model and baseline model."""
     import torch
-    from transformers import AutoModelForMaskedLM, AutoTokenizer
+    from transformers import AutoModelForMaskedLM, AutoModelForCausalLM, AutoTokenizer
 
     logger.info(f"[ZS-23] Loading code model {cfg.scorer_lm}...")
     tokenizer_code = AutoTokenizer.from_pretrained(cfg.scorer_lm)
     model_code = AutoModelForMaskedLM.from_pretrained(cfg.scorer_lm)
     model_code.eval()
 
-    logger.info("[ZS-23] Loading baseline model (gpt2)...")
+    # GPT-2 is a CAUSAL LM, not masked — use AutoModelForCausalLM.
+    # Also add pad_token (GPT-2 tokenizer ships without one).
+    logger.info("[ZS-23] Loading baseline model (gpt2, causal LM)...")
     tokenizer_base = AutoTokenizer.from_pretrained("gpt2")
-    model_base = AutoModelForMaskedLM.from_pretrained("gpt2")
+    if tokenizer_base.pad_token is None:
+        tokenizer_base.pad_token = tokenizer_base.eos_token
+    model_base = AutoModelForCausalLM.from_pretrained("gpt2")
     model_base.eval()
 
     if cfg.device == "cuda" and torch.cuda.is_available():
@@ -138,8 +142,12 @@ def _kl_divergence_score(codes: List[str], cfg: ZSConfig) -> np.ndarray:
                 attn_base = attn_base.to("cuda")
 
             logits_base = model_base(input_ids=input_ids_base, attention_mask=attn_base).logits.float()
-            log_probs_base = torch.log_softmax(logits_base, dim=-1)
-            obs_lp_base = log_probs_base.gather(-1, input_ids_base.unsqueeze(-1)).squeeze(-1)
+            # Causal LM: logits at position t predict token t+1 — shift by one for scoring.
+            log_probs_base = torch.log_softmax(logits_base[:, :-1, :], dim=-1)
+            targets_base = input_ids_base[:, 1:]
+            obs_lp_base = log_probs_base.gather(-1, targets_base.unsqueeze(-1)).squeeze(-1)
+            # Pad to original length for compatibility with attn mask indexing
+            obs_lp_base = torch.nn.functional.pad(obs_lp_base, (0, 1), value=0.0)
 
             # KL divergence (approximate, using importance weighting)
             # For simplicity: use code tokens only, compute D_KL

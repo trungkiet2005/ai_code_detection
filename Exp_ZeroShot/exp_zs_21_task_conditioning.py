@@ -122,13 +122,13 @@ def _task_conditioned_entropy(code: str, tokenizer, model, device: str = "cpu") 
     if device == "cuda":
         input_ids = input_ids.to("cuda")
 
-    # Get baseline logits
+    # Get baseline logits (cast to fp32 for numerical stability — log/softmax unstable in bf16)
     with torch.no_grad():
         outputs = model(input_ids)
-        logits = outputs.logits[0]  # (seq_len, vocab_size)
+        logits = outputs.logits[0].float()  # (seq_len, vocab_size), force fp32
         probs = torch.softmax(logits, dim=-1)
 
-    # Compute entropy
+    # Compute entropy in fp32
     entropy = -torch.sum(probs * torch.log(probs + 1e-10), dim=-1).mean()
     return float(entropy.cpu().numpy())
 

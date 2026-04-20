@@ -120,13 +120,15 @@ def _contrastive_hard_negatives_score(codes: List[str], cfg: ZSConfig) -> np.nda
             model = model.to(torch.bfloat16)
 
     scores = np.zeros(len(codes), dtype=np.float64)
-    bs = cfg.batch_size
+    # Halve effective batch to cap VRAM — we forward TWO batches (orig + neg) per chunk.
+    # Vocab-logits at max_length=512 * vocab=50265 * bs * fp32 = ~12GB at bs=128 → OOM on shared H100.
+    bs = max(8, cfg.batch_size // 4)
 
     with torch.no_grad():
         for start in range(0, len(codes), bs):
             chunk = codes[start : start + bs]
 
-            # Encode originals
+            # Encode originals — extract CLS embedding in-GPU, release vocab logits immediately
             enc_orig = tokenizer(
                 chunk, max_length=cfg.scorer_max_length,
                 padding="max_length", truncation=True, return_tensors="pt",
@@ -137,8 +139,11 @@ def _contrastive_hard_negatives_score(codes: List[str], cfg: ZSConfig) -> np.nda
                 input_ids = input_ids.to("cuda")
                 attn = attn.to("cuda")
 
-            out_orig = model(input_ids=input_ids, attention_mask=attn).logits.float()
-            emb_orig = out_orig[:, 0, :].cpu()
+            out_orig_logits = model(input_ids=input_ids, attention_mask=attn).logits
+            emb_orig = out_orig_logits[:, 0, :].float().cpu()
+            del out_orig_logits, input_ids, attn
+            if cfg.device == "cuda":
+                torch.cuda.empty_cache()
 
             # Generate hard negatives
             hard_negs = [_generate_hard_negative(c) for c in chunk]
@@ -154,8 +159,11 @@ def _contrastive_hard_negatives_score(codes: List[str], cfg: ZSConfig) -> np.nda
                 input_ids_n = input_ids_n.to("cuda")
                 attn_n = attn_n.to("cuda")
 
-            out_neg = model(input_ids=input_ids_n, attention_mask=attn_n).logits.float()
-            emb_neg = out_neg[:, 0, :].cpu()
+            out_neg_logits = model(input_ids=input_ids_n, attention_mask=attn_n).logits
+            emb_neg = out_neg_logits[:, 0, :].float().cpu()
+            del out_neg_logits, input_ids_n, attn_n
+            if cfg.device == "cuda":
+                torch.cuda.empty_cache()
 
             # Score = L2 distance (style divergence)
             dists = torch.norm(emb_orig - emb_neg, dim=1).numpy()

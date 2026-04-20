@@ -56,12 +56,12 @@ Each ZS file now runs on BOTH benchmarks via `run_zs_oral` and emits a combined 
 | 🆕🆕 | exp_zs_18 | **ControlFlowEntropy** (cyclomatic complexity) | control-flow-complexity | — | — | — / — | — | ~8m | ⏳ pending |
 | 🆕🆕 | exp_zs_19 | **SemanticDriftDetector** (paraphrase stability) | semantic-invariance | — | — | — / — | — | ~14m | ⏳ pending |
 | 🆕🆕 | exp_zs_20 | **TypeConstraintDeviation** (type-system slack) | type-system-semantics | — | — | — / — | — | ~9m | ⏳ pending |
-| 🌟 | exp_zs_21 | **TaskConditioningEntropy** (ECML PKDD'25) | task-conditioned-entropy | — | — | — / — | — | ~12m | ⏳ pending |
-| 🌟 | exp_zs_22 | **ContrastiveHardNegatives** (ACL'25) | manifold-disentanglement | — | — | — / — | — | ~13m | ⏳ pending |
-| 🌟 | exp_zs_23 | **KLDivergenceSignal** (arXiv:2504.10637) | distribution-divergence | — | — | — / — | — | ~10m | ⏳ pending |
-| 🌟 | exp_zs_24 | **EntropyWatermarkDetection** (arXiv:2504.12108) | cumulative-entropy | — | — | — / — | — | ~9m | ⏳ pending |
-| 🌟 | exp_zs_25 | **SyntacticPredictability** (STELA, arXiv:2510.13829) | syntactic-complexity | — | — | — / — | — | ~6m | ⏳ pending |
-| 🌟 | exp_zs_26 | **CodeAcrosticStructure** (arXiv:2512.14753) | comment-semantics | — | — | — / — | — | ~7m | ⏳ pending |
+| 🌟 | exp_zs_21 | **TaskConditioningEntropy** (ECML PKDD'25) | task-conditioned-entropy | — | — | — / — | — | 0.7m | ❌ BFloat16 unsupported for torch.log → fix: cast logits to fp32 (applied 2026-04-20) |
+| 🌟 | exp_zs_22 | **ContrastiveHardNegatives** (ACL'25) | manifold-disentanglement | — | — | — / — | — | 0.7m | ❌ OOM 12.27GiB (bs=128 × 2 vocab-logit tensors) → fix: bs//=4 + empty_cache (applied 2026-04-20) |
+| 🌟 | exp_zs_23 | **KLDivergenceSignal** (arXiv:2504.10637) | distribution-divergence | — | — | — / — | — | 0.7m | ❌ GPT-2 is causal LM, loaded as MLM → fix: AutoModelForCausalLM + shift logits (applied 2026-04-20) |
+| 🌟 | exp_zs_24 | **EntropyWatermarkDetection** (arXiv:2504.12108) | cumulative-entropy | **0.3743** | **0.4090** | 0.9550 / 0.9478 | 0.0934 | 7.2m | ⚠️ FAIL claim1 (37.43<<64.54); ✅ Droid HR≥0.95; stability 3.47pt ✅ |
+| 🌟 | exp_zs_25 | **SyntacticPredictability** (STELA, arXiv:2510.13829) | syntactic-complexity | **0.3628** | **0.4192** | 0.9475 / 0.9441 | 0.0393 | 1.6m | ⚠️ FAIL (36.28<<64.54; HR<0.95 both); stability 5.64pt ✅ |
+| 🌟 | exp_zs_26 | **CodeAcrosticStructure** (arXiv:2512.14753) | comment-semantics | **0.4383** | **0.3371** | 0.9469 / 0.9499 | 0.0912 | 7.7m | ⚠️ FAIL (43.83<<64.54; HR<0.95 droid; stability 10.12pt>10 ❌) — **best Droid T3 of suite (27/30)** |
 | 🚀 | exp_zs_27 | **FrontDoor-NLP** (NeurIPS 2025) | causal-mediation | — | — | — / — | — | ~15m | ⏳ pending |
 | 🚀 | exp_zs_28 | **ContrastiveTwinStyleometry** (AISec 2025) | pair-divergence | — | — | — / — | — | ~12m | ⏳ pending |
 | 🚀 | exp_zs_29 | **TokenEntropyForks** (ACL 2025) | decision-point-semantics | — | — | — / — | — | ~10m | ⏳ pending |
