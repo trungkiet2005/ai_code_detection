@@ -31,9 +31,25 @@ from _features import (
 # Dataset
 # ---------------------------------------------------------------------------
 
+# Canonical source-id mapping consumed by exp_02 / exp_08 / exp_14 / exp_18.
+# exp_14 expects GH = 1 (see _gh_consistency_loss gh_label default).
+# Unknown / missing source → -1 sentinel; loss functions already treat None
+# or invalid as "skip this sample" so -1 routes through the same guard once
+# filtered.
+SOURCE_ID_MAP = {"cf": 0, "gh": 1, "lc": 2}
+
+
+def _source_to_id(src) -> int:
+    if src is None:
+        return -1
+    s = str(src).strip().lower()
+    return SOURCE_ID_MAP.get(s, -1)
+
+
 class AICDDataset(TorchDataset):
-    """Generic {code, label} dataset. Works for AICD, Droid, CoDET-M4 after each
-    benchmark's loader normalises rows to {"code": str, "label": int}."""
+    """Generic {code, label, source?} dataset. Works for AICD, Droid, CoDET-M4
+    after each benchmark's loader normalises rows to {"code": str, "label": int,
+    "source": str (optional)}."""
 
     def __init__(self, data, tokenizer, max_length: int = 512, ast_seq_len: int = 128):
         self.data = data
@@ -54,12 +70,14 @@ class AICDDataset(TorchDataset):
         )
         ast_seq = extract_ast_sequence(code, self.ast_seq_len)
         struct_feat = extract_structural_features(code)
+        source_id = _source_to_id(item.get("source")) if isinstance(item, dict) else -1
         return {
             "input_ids": encoding["input_ids"].squeeze(0),
             "attention_mask": encoding["attention_mask"].squeeze(0),
             "ast_seq": torch.tensor(ast_seq, dtype=torch.long),
             "struct_feat": torch.tensor(struct_feat, dtype=torch.float32),
             "label": torch.tensor(label, dtype=torch.long),
+            "source": torch.tensor(source_id, dtype=torch.long),
         }
 
 

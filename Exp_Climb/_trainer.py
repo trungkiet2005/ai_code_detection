@@ -130,6 +130,10 @@ class Trainer:
 
             with autocast(device_type=self.config.device, enabled=self.use_amp, dtype=self.amp_dtype):
                 outputs = self.model(input_ids, attention_mask, ast_seq, struct_feat, labels)
+                if "source" in batch:
+                    outputs["sources"] = batch["source"].to(
+                        self.config.device, non_blocking=self.config.non_blocking
+                    )
                 losses = self.loss_fn(self.model, outputs, labels, self.config, self.focal_loss)
                 loss = losses["total"] / self.config.grad_accum_steps
 
