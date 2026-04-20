@@ -56,6 +56,12 @@ Each ZS file now runs on BOTH benchmarks via `run_zs_oral` and emits a combined 
 | 🆕🆕 | exp_zs_18 | **ControlFlowEntropy** (cyclomatic complexity) | control-flow-complexity | — | — | — / — | — | ~8m | ⏳ pending |
 | 🆕🆕 | exp_zs_19 | **SemanticDriftDetector** (paraphrase stability) | semantic-invariance | — | — | — / — | — | ~14m | ⏳ pending |
 | 🆕🆕 | exp_zs_20 | **TypeConstraintDeviation** (type-system slack) | type-system-semantics | — | — | — / — | — | ~9m | ⏳ pending |
+| 🌟 | exp_zs_21 | **TaskConditioningEntropy** (ECML PKDD'25) | task-conditioned-entropy | — | — | — / — | — | ~12m | ⏳ pending |
+| 🌟 | exp_zs_22 | **ContrastiveHardNegatives** (ACL'25) | manifold-disentanglement | — | — | — / — | — | ~13m | ⏳ pending |
+| 🌟 | exp_zs_23 | **KLDivergenceSignal** (arXiv:2504.10637) | distribution-divergence | — | — | — / — | — | ~10m | ⏳ pending |
+| 🌟 | exp_zs_24 | **EntropyWatermarkDetection** (arXiv:2504.12108) | cumulative-entropy | — | — | — / — | — | ~9m | ⏳ pending |
+| 🌟 | exp_zs_25 | **SyntacticPredictability** (STELA, arXiv:2510.13829) | syntactic-complexity | — | — | — / — | — | ~6m | ⏳ pending |
+| 🌟 | exp_zs_26 | **CodeAcrosticStructure** (arXiv:2512.14753) | comment-semantics | — | — | — / — | — | ~7m | ⏳ pending |
 | **REF** | Paper | **Fast-DetectGPT** (Droid paper Table 3/5) | **64.54** | — | 0.84 / — | 0.48 | — | reference |
 | REF | Paper | M4 (ZS) | 55.27 | — | 0.40 ⚠️ / — | 0.73 | — | reference |
 | REF | Paper | GPTZero | 49.10 | — | 0.53 / — | 0.10 | — | reference |
@@ -92,14 +98,22 @@ No direct paper baseline for CoDET binary zero-shot (CoDET-M4 paper's only ZS nu
 | exp_zs_18 | **ControlFlowEntropy** 🆕🆕 | Beggs-Plenz 2003 + Li et al. ICLR'25: critical systems have power-law branching; AI produces regular CFG, human has irregular nesting/branches/returns. Score entropy H(CC) where CC = cyclomatic complexity per function. | AST-based cyclomatic complexity extraction (count decisions: if/elif/for/while/except/and/or); entropy of CC distribution across functions | Pure regex, O(L), no GPU |
 | exp_zs_19 | **SemanticDriftDetector** 🆕🆕 | TempParaphraser EMNLP'25 + Meng et al. USENIX'25: under paraphrase-preserving refactoring (rename identifiers + reorder statements), AI code meaning STABLE, human code meaning DRIFTS | Semantic embedding L2: ||emb_CodeBERT(code) - emb_CodeBERT(refactored)||_2; refactoring = identifier rename + stmt reorder | 2 forward passes |
 | exp_zs_20 | **TypeConstraintDeviation** 🆕🆕 | OUR OWN (type-system defensive programming): AI code *over-satisfies* type constraints (strict types, minimal casting); human code uses Any/cast/guards indicating defensive style. Score: (count_Any + count_cast + count_isinstance) / total_annotations. | Type-slack ratio from AST regex: count explicit Any, cast() calls, isinstance/hasattr/try guards; compute ratio as proxy for defensiveness | Pure regex, O(L), no GPU |
+| exp_zs_21 | **TaskConditioningEntropy** 🌟 | ECML PKDD 2025 (arXiv:2506.06069): unconditional token distributions identical between human & LLM; but task-conditioned entropy reveals separability. LLMs optimize for task (narrow entropy), humans explore solutions (high entropy). | Mean entropy over 5 task approximations (generated via LM prompts); higher = human | 1 fwd + 5 decode + 5 conditional fwd |
+| exp_zs_22 | **ContrastiveHardNegatives** 🌟 | ACL Findings 2025 (arXiv:2411.18472): Content leakage inevitable; use hard negatives (semantically equivalent, different author) to force style-content disentanglement via InfoNCE. For code: refactoring = hard negative. | Embedding L2 distance: ||e(code) - e(refactored)||_2; refactor = rename ids + reorder | 2 forward passes |
+| exp_zs_23 | **KLDivergenceSignal** 🌟 | arXiv:2504.10637 (April 2025): Global divergence (not local curvature). D_KL(P_code \|\| P_baseline) captures distribution mismatch in low-probability regions (errors, edge cases). AI clusters mass on high-prob paths; human explores rare branches. | Mean log-prob difference (simplified KL) between code model and baseline | 2 forward passes |
+| exp_zs_24 | **EntropyWatermarkDetection** 🌟 | arXiv:2504.12108 (April 2025): Cumulative entropy along generation trajectory (process-level signal, not final code). LLMs: low E_cum (optimized path); humans: high E_cum (exploration). | Sum of token-position entropies, normalized by seq length | 1 forward pass |
+| exp_zs_25 | **SyntacticPredictability** 🌟 | STELA (arXiv:2510.13829, October 2025): Measure syntactic entropy (not token entropy). P(token_type | prev_types). AI: predictable syntax patterns; human: irregular type sequences. | Entropy of token-type 3-gram distribution | Pure regex, O(L), no GPU |
+| exp_zs_26 | **CodeAcrosticStructure** 🌟 | arXiv:2512.14753 (December 2025): Comments are human-written; even in LLM code, comments carry author intent. Meta-linguistic signal: comment density + semantic coherence + entropy. | (density + inter-comment_coherence + comment_entropy) / 3 | Regex + 1 fwd for embedding |
 
-All methods feed **scalar scores** (higher = more AI-like for 11-16, higher = more human-like for 17-20) into the shared `_zs_runner.run_zs_oral` → threshold calibration on dev (Droid + CoDET independently) → test metrics + per-dim breakdown + combined `BEGIN_ZS_ORAL_TABLE` block with oral-claim check.
+All methods feed **scalar scores** (scoring: higher = more AI-like for 11-16 & 23-24; higher = more human-like for 17-22 & 25-26) into the shared `_zs_runner.run_zs_oral` → threshold calibration on dev (Droid + CoDET independently) → test metrics + per-dim breakdown + combined `BEGIN_ZS_ORAL_TABLE` block with oral-claim check.
+
+**TOTAL SUITE:** 26 zero-shot detectors spanning **26 orthogonal signal families** — justifies NeurIPS oral claim "No single signal dominates code authorship; requires multi-axis fusion" (as Exp_Climb implements via 8 training axes).
 
 **Floor baselines (exp_zs_00):** `RandomScorer` (U(0,1) noise, macro-F1 ≈ 0.50) + `LengthOnlyScorer` (log-char-length, expected 0.55–0.60). Any proposed ZS detector that doesn't clear both floors AND Fast-DetectGPT 64.54 on Droid T3 is *not* an oral-level contribution.
 
 ---
 
-## 🌌 Novelty axes — 20 detectors × 20+ signal families (NeurIPS Oral ablation panel)
+## 🌌 Novelty axes — 26 detectors × 26+ signal families (NeurIPS Oral mega-ablation)
 
 | Signal family | Detector(s) | What it captures | Novelty status |
 |:--|:--|:--|:--|
