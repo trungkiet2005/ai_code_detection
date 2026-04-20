@@ -67,6 +67,43 @@ All methods feed **scalar scores** (higher = more AI-like) into the shared `_zs_
 
 ---
 
+## 🖥️ Kaggle H100 80GB hardware profile (auto-applied by `apply_hardware_profile`)
+
+Triggered when `torch.cuda.get_device_properties(0).total_memory >= 70 GB`:
+
+| Setting | H100 80GB | A100 40GB / V100 | T4 / P100 | CPU |
+|:--|:-:|:-:|:-:|:-:|
+| `batch_size` | **128** | 64 | 32 | 8 |
+| `precision` | bf16 | bf16 / fp16 | fp16 | fp32 |
+| `num_workers` | **8** | 4 | 2 | 0 |
+| `prefetch_factor` | **4** | 2 | 2 | 2 |
+| `pin_memory` | **True** | True | False | False |
+| `fast_detect_n_samples` (Fast-DetectGPT MC mask) | **10** | 5 | 3 | 3 |
+| `binoculars_block_size` (reference pool size) | **1024** | 512 | 256 | 256 |
+
+**VRAM budget (80 GB, seq 512 · batch 128):**
+- ModernBERT-base + bf16 activations: ~6-7 GB
+- CodeBERT-base MLM (Fast-DetectGPT only): +3 GB
+- Binoculars (N × R cosine chunks, R=1024): < 1 GB
+- Peak usage across all 5 ZS exps: **~12 GB / 80 GB**. Plenty of headroom for a second model alongside (e.g. Exp_Climb in same Kaggle session).
+
+**Wall-time budget on H100 (both benches per exp):**
+
+| Exp | Droid T3 | CoDET binary | **Both** |
+|:--|:-:|:-:|:-:|
+| exp_zs_00 (random + length) | < 5 s | < 5 s | **~10 s** |
+| exp_zs_03 (Ghostbuster, pure numpy) | ~60 s | ~45 s | **~2 min** |
+| exp_zs_04 (SpectralSignature, 1 MBERT fwd + PCA) | ~3 min | ~2 min | **~5 min** |
+| exp_zs_01 (Binoculars, 1 MBERT fwd + O(N·R)) | ~5 min | ~3 min | **~8 min** |
+| exp_zs_02 (Fast-DetectGPT, 10 MLM fwds) | ~20 min | ~15 min | **~35 min** |
+| **All 5 sequentially** | — | — | **~50 min** |
+
+Well under the 2h Exp_Climb paper_proto envelope. `exp_zs_02` is the heaviest — if Kaggle session budget is tight (<90 min total for ZS), drop `fast_detect_n_samples` back to 5 via `cfg.fast_detect_n_samples = 5` before `run_zs_oral`.
+
+**Regression guard on the Binoculars O(N²) memory fix (2026-04-20):** the earlier implementation computed the cosine matrix against **all N test samples** (N² allocations), which OOMs on full Droid test (~106K × 106K floats ≈ 45 GB). The fix replaces the all-pairs softmax with a **reference-pool sketch** of size `binoculars_block_size` (1024 on H100). Memory drops from O(N²) to O(N·R). Theory unchanged — the reference pool plays the role of Binoculars' null "performer LM" population.
+
+---
+
 ## 📐 Protocol (dual-benchmark oral default)
 
 ```python

@@ -109,9 +109,14 @@ def _binoculars_score(codes: List[str], cfg: ZSConfig) -> np.ndarray:
 
     Returns s(x) = log(ppl_self(x)) - log(ppl_stat(x))
     where
-      ppl_self(x) = 1 / (1 + cos(emb(x), batch_mean_direction))   (low = typical)
-      ppl_stat(x) = softmax entropy of emb(x) fed to a linear probe fit
-                    to the batch's own centroid structure.
+      ppl_self(x) = 1 / (1 + cos(emb(x), batch_mean_direction))
+                    "how typical is x in the test distribution" (low = typical)
+      ppl_stat(x) = softmax entropy of cosine similarities to a fixed
+                    REFERENCE POOL (first R samples). This replaces the
+                    previous O(N^2) all-pairs softmax with an O(N*R) sketch
+                    so the full Droid test (~106K samples) fits comfortably
+                    in 80 GB H100 memory. R ~ binoculars_block_size (1024
+                    on H100 per apply_hardware_profile).
     """
     embs = _embed_batch(codes, cfg)                       # (N, D)
     N, D = embs.shape
@@ -123,21 +128,23 @@ def _binoculars_score(codes: List[str], cfg: ZSConfig) -> np.ndarray:
     mu = mu / (np.linalg.norm(mu) + 1e-8)
 
     # ppl_self: inverse cosine-similarity to the batch mean direction.
-    # cos ∈ [-1, 1]; ppl_self ∈ [0.5, inf).
     sim = (embs_n * mu).sum(axis=-1)
     sim = np.clip(sim, -0.999, 0.999)
     ppl_self = 1.0 / (1.0 + sim)
 
-    # ppl_stat: softmax entropy over per-sample cosine similarities to
-    # every other sample in the batch (a crude class-free entropy proxy).
-    # Computed block-wise to avoid an O(N^2) memory hit.
-    BLOCK = 256
+    # ppl_stat: softmax entropy over per-sample cosine similarities to a
+    # FIXED REFERENCE POOL. O(N*R) memory where R ~ 1024 on H100. This
+    # plays the role of Binoculars' "performer LM" (a null population the
+    # Neyman-Pearson ratio contrasts against).
+    ref_size = max(min(cfg.binoculars_block_size, N), 64)
+    ref_pool = embs_n[:ref_size]                          # (R, D)
+    # Compute per-chunk so we never allocate (N, R) on GPU memory either.
     entropies = np.zeros(N, dtype=np.float32)
-    for start in range(0, N, BLOCK):
-        end = min(start + BLOCK, N)
-        block = embs_n[start:end]                           # (b, D)
-        scores = block @ embs_n.T                           # (b, N)
-        # Softmax on each row
+    CHUNK = max(cfg.binoculars_block_size // 4, 256)
+    for start in range(0, N, CHUNK):
+        end = min(start + CHUNK, N)
+        block = embs_n[start:end]                         # (b, D)
+        scores = block @ ref_pool.T                        # (b, R)  <- bounded
         scores = scores - scores.max(axis=-1, keepdims=True)
         exp = np.exp(scores)
         p = exp / (exp.sum(axis=-1, keepdims=True) + 1e-8)
@@ -145,10 +152,14 @@ def _binoculars_score(codes: List[str], cfg: ZSConfig) -> np.ndarray:
         ent = -(p * np.log(p)).sum(axis=-1)
         entropies[start:end] = ent
     # Normalise to [1, e]
-    ent_norm = 1.0 + (entropies - entropies.min()) / (entropies.max() - entropies.min() + 1e-8)
-    ppl_stat = ent_norm
+    rng_ent = entropies.max() - entropies.min()
+    if rng_ent < 1e-8:
+        # Degenerate case: all entropies identical -> ppl_stat uniform 1.0
+        ppl_stat = np.ones_like(entropies)
+    else:
+        ppl_stat = 1.0 + (entropies - entropies.min()) / rng_ent
 
-    # Log-ratio
+    # Log-ratio (Binoculars-style)
     s = np.log(ppl_self + 1e-8) - np.log(ppl_stat + 1e-8)
     return s.astype(np.float64)
 

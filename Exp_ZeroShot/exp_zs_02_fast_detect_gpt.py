@@ -76,7 +76,12 @@ def _fast_detect_gpt_score(codes: List[str], cfg: ZSConfig) -> np.ndarray:
         raise RuntimeError(f"Scorer LM {cfg.scorer_lm} has no mask_token")
     vocab_size = mlm.config.vocab_size
 
-    N_SAMPLES = 3          # Monte-Carlo samples per example (paper uses 100; we use 3 for budget)
+    # Paper uses 100 MC mask samples. Our budget profile:
+    #   CPU:            3   (tight screening)
+    #   T4 / V100 40GB: 5
+    #   H100 / A100:   10   (tight variance, still ~10 min on Droid test)
+    # Auto-tuned by apply_hardware_profile -> cfg.fast_detect_n_samples.
+    N_SAMPLES = max(int(getattr(cfg, "fast_detect_n_samples", 3)), 1)
     MASK_RATE = 0.15
     scores = np.zeros(len(codes), dtype=np.float64)
     bs = cfg.batch_size

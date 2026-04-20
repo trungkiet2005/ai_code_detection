@@ -74,11 +74,22 @@ class ZSConfig:
     # Backbone for spectral/AST feature extraction (matches Exp_Climb).
     backbone: str = "answerdotai/ModernBERT-base"
 
-    # Hardware
+    # Hardware (defaults are CPU-safe; apply_hardware_profile auto-bumps
+    # to H100 80GB preset at runtime if the GPU is detected).
     batch_size: int = 32
-    num_workers: int = 4
+    num_workers: int = 2
+    prefetch_factor: int = 2
+    pin_memory: bool = False
     device: str = "cuda"   # auto-downgraded to cpu if unavailable
     precision: str = "bf16"
+
+    # Fast-DetectGPT curvature estimator: Monte-Carlo mask samples per code.
+    # Paper uses 100; we default to 3 on CPU and auto-bump to 10 on H100.
+    fast_detect_n_samples: int = 3
+
+    # Binoculars cosine-entropy block size (bump on GPU to limit O(N^2)
+    # memory; 256 is fine on CPU, 1024 on H100).
+    binoculars_block_size: int = 256
 
     seed: int = 42
     save_root: str = "./zs_outputs"
@@ -133,15 +144,67 @@ def calibrate_threshold_at_human_recall(
 
 
 def apply_hardware_profile(cfg: ZSConfig) -> ZSConfig:
-    """Auto-tune batch for H100."""
+    """Auto-tune ZSConfig for the detected GPU.
+
+    Presets:
+      H100 80GB / A100 80GB:
+        batch 128, bf16, 8 workers, prefetch 4, pin_memory,
+        Fast-DetectGPT MC samples bumped 3 -> 10,
+        Binoculars block 256 -> 1024 (limits O(N^2) cosine matrix footprint).
+      A100 40GB / V100 / T4:
+        batch 64, fp16 fallback if bf16 unsupported.
+      CPU:
+        batch 8, fp32, single worker.
+    """
     try:
         import torch
         if torch.cuda.is_available():
             name = torch.cuda.get_device_name(0)
-            if "H100" in name or "A100" in name:
-                cfg.batch_size = 64
+            # Detect ~80GB (H100, A100 80GB) via memory
+            total_gb = torch.cuda.get_device_properties(0).total_memory / (1024 ** 3)
+            if total_gb >= 70:
+                # H100 80GB / A100 80GB preset.
+                # ModernBERT-base @ batch 128 seq 512 bf16 ≈ 6-7 GB activations
+                # + CodeBERT-base for Fast-DetectGPT adds another ~3 GB. Both
+                # fit comfortably in 80 GB with plenty of headroom.
+                cfg.batch_size = 128
                 cfg.precision = "bf16"
-                logger.info(f"[ZS hw-profile] {name} detected → batch={cfg.batch_size} bf16")
+                cfg.num_workers = 8
+                cfg.prefetch_factor = 4
+                cfg.pin_memory = True
+                cfg.fast_detect_n_samples = 10
+                cfg.binoculars_block_size = 1024
+                logger.info(
+                    f"[ZS hw-profile] {name} ({total_gb:.0f} GB) detected -> "
+                    f"batch={cfg.batch_size} bf16 workers={cfg.num_workers} "
+                    f"prefetch={cfg.prefetch_factor} pin_memory={cfg.pin_memory} "
+                    f"FDG_samples={cfg.fast_detect_n_samples} "
+                    f"bino_block={cfg.binoculars_block_size}"
+                )
+            elif total_gb >= 30:
+                # A100 40GB / V100 32GB preset
+                cfg.batch_size = 64
+                cfg.precision = "bf16" if ("A100" in name or "H100" in name) else "fp16"
+                cfg.num_workers = 4
+                cfg.prefetch_factor = 2
+                cfg.pin_memory = True
+                cfg.fast_detect_n_samples = 5
+                cfg.binoculars_block_size = 512
+                logger.info(f"[ZS hw-profile] {name} ({total_gb:.0f} GB) -> batch=64 {cfg.precision}")
+            else:
+                # Smaller consumer / T4 / P100
+                cfg.batch_size = 32
+                cfg.precision = "fp16"
+                cfg.num_workers = 2
+                logger.info(f"[ZS hw-profile] {name} ({total_gb:.0f} GB) -> batch=32 fp16")
+        else:
+            # CPU fallback: shrink everything so laptop tests run
+            cfg.batch_size = 8
+            cfg.precision = "fp32"
+            cfg.num_workers = 0
+            cfg.prefetch_factor = 2
+            cfg.pin_memory = False
+            logger.info("[ZS hw-profile] No CUDA -> CPU preset: batch=8 fp32")
     except ImportError:
         pass
     cfg.device = resolve_device(cfg.device)
