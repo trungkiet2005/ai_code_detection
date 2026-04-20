@@ -1,11 +1,12 @@
 """
-[run_zs_17_to_20] Launch 4 new oral-level zero-shot methods in parallel on Kaggle H100 80GB.
+[run_zs_27_to_30] Launch 4 A*-level oral-grade detectors on Kaggle H100 80GB.
 
 USAGE (Kaggle H100 80GB):
-  !python Exp_ZeroShot/run_zs_17_to_20.py
+  !python Exp_ZeroShot/run_zs_27_to_30.py
 
 Optimized for H100 80GB: 2 concurrent exps (safe VRAM), total wall ~40-50min.
-4 new detectors: structural robustness, CFG entropy, semantic drift, type-constraint.
+4 breakthrough detectors: FrontDoor-NLP, Contrastive-Twin, Token-Entropy-Forks,
+Semantic-Resilience. All target oral-level theoretical novelty.
 Each exp auto-detects H100 and uses batch_size=128, bf16, pin_memory=True.
 """
 from __future__ import annotations
@@ -19,12 +20,12 @@ import psutil
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-# 4 new oral-level experiments, ordered by estimated VRAM cost (low->high)
+# 4 A*-level oral-grade experiments, ordered by estimated VRAM cost (low->high)
 EXP_FILES = [
-    ("exp_zs_18_cfg_entropy.py", "18_CFGEntropy", 8),           # ~8 min, no GPU
-    ("exp_zs_20_type_constraint.py", "20_TypeConstraint", 9),   # ~9 min, light GPU
-    ("exp_zs_19_semantic_drift.py", "19_SemanticDrift", 14),    # ~14 min, medium GPU
-    ("exp_zs_17_pife_struct.py", "17_PIFEStruct", 11),          # ~11 min, medium GPU
+    ("exp_zs_29_token_entropy_forks.py", "29_TokenEntForks", 10),      # ~10 min, light GPU
+    ("exp_zs_30_semantic_resilience.py", "30_SemanticResilient", 8),   # ~8 min, light GPU
+    ("exp_zs_28_contrastive_twin.py", "28_ContrastiveTwin", 12),       # ~12 min, medium GPU
+    ("exp_zs_27_frontdoor_nlp.py", "27_FrontDoor", 15),                # ~15 min, medium GPU (HSIC)
 ]
 
 
@@ -89,7 +90,7 @@ def run_exp(exp_file: str, exp_id: str) -> dict:
 
 if __name__ == "__main__":
     print("\n" + "="*75)
-    print("ZERO-SHOT NEW ORAL-LEVEL EXPERIMENTS RUNNER (exp_zs_17..20)")
+    print("A*-LEVEL ORAL-GRADE DETECTORS RUNNER (exp_zs_27..30)")
     print("="*75)
 
     # Clone repo if not already here
@@ -100,13 +101,17 @@ if __name__ == "__main__":
 
     gpu_vram = get_gpu_memory_gb()
     print(f"[HW] Detected GPU VRAM: {gpu_vram:.1f} GB")
-    print(f"[SUITE] 4 new detectors: structural robustness, CFG entropy, semantic drift, type-constraint")
+    print(f"[SUITE] 4 A*-level detectors:")
+    print(f"        - FrontDoor-NLP (causal identification, NeurIPS theorem)")
+    print(f"        - Contrastive-Twin (pair-divergence signal, AISec)")
+    print(f"        - Token-Entropy-Forks (decision-point semantics, ACL)")
+    print(f"        - Semantic-Resilience (robustness meta-signal, arXiv)")
     print(f"[MODE] H100 80GB -> Parallel mode: max_workers=2 (safe VRAM scheduling)")
     print("="*75)
 
     results = []
 
-    # Parallel execution: max 2 concurrent exps to stay within H100 80GB VRAM budget
+    # Parallel execution: max 2 concurrent exps
     with ThreadPoolExecutor(max_workers=2) as executor:
         futures = {}
         for exp_file, exp_id, est_min in EXP_FILES:
@@ -140,7 +145,7 @@ if __name__ == "__main__":
     print("="*75)
 
     # Save results to JSON for downstream analysis
-    with open("Exp_ZeroShot/run_zs_17_to_20_results.json", "w") as f:
+    with open("Exp_ZeroShot/run_zs_27_to_30_results.json", "w") as f:
         json.dump(results, f, indent=2)
-    print(f"\n[OK] Results saved to Exp_ZeroShot/run_zs_17_to_20_results.json")
-    print(f"[READY] Next: paste console output into tracker update script")
+    print(f"\n[OK] Results saved to Exp_ZeroShot/run_zs_27_to_30_results.json")
+    print(f"[READY] 30-detector suite complete. Paste console output into tracker update.")

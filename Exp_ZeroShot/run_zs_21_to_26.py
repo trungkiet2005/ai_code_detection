@@ -52,7 +52,7 @@ def run_exp(exp_file: str, exp_id: str) -> dict:
     mem_start = psutil.virtual_memory().percent
     try:
         result = subprocess.run(
-            [sys.executable, f"Exp_ZeroShot/{exp_file}"],
+            [sys.executable, f"ai_code_detection/Exp_ZeroShot/{exp_file}"],
             cwd=os.getcwd(),
             capture_output=False,
             text=True,
