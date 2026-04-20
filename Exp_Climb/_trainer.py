@@ -223,7 +223,10 @@ class Trainer:
                 all_labels, all_preds, digits=4, output_dict=True, zero_division=0,
             )
             self.last_eval_metrics[split_name]["classification_report"] = report_dict
-        return macro_f1
+        # Return paper-primary metric per CLAUDE.md §5:
+        # Droid -> Weighted-F1, AICD/CoDET-M4 -> Macro-F1.
+        is_droid = str(getattr(self.config, "benchmark", "")).lower().startswith("droid")
+        return weighted_f1 if is_droid else macro_f1
 
     def _ckpt_path(self, tag: str) -> str:
         os.makedirs(self.config.save_dir, exist_ok=True)
@@ -267,11 +270,19 @@ class Trainer:
                 "Epoch %d Train Summary: %s", epoch + 1,
                 " | ".join(f"{k}: {v:.4f}" for k, v in train_losses.items()),
             )
-            val_f1 = self.evaluate(self.val_loader, "Val")
+            # Paper-primary metric per CLAUDE.md §5:
+            # Droid -> Weighted-F1, AICD/CoDET-M4 -> Macro-F1.
+            # Select best checkpoint on the correct metric (fixes Droid
+            # silently optimising wrong metric — audit 2026-04-20).
+            self.evaluate(self.val_loader, "Val")
+            val_metrics = self.last_eval_metrics.get("Val", {})
+            is_droid = str(getattr(self.config, "benchmark", "")).lower().startswith("droid")
+            primary_name = "Weighted-F1" if is_droid else "Macro-F1"
+            val_f1 = float(val_metrics.get("weighted_f1" if is_droid else "macro_f1", 0.0))
             if val_f1 > self.best_f1:
                 self.best_f1 = val_f1
                 self.save_checkpoint("best")
-                logger.info(f"*** New Best Val Macro-F1: {val_f1:.4f} ***")
+                logger.info(f"*** New Best Val {primary_name}: {val_f1:.4f} ***")
             # Kaggle disk-quota friendly: skip "latest" unless user opts in
             if getattr(self.config, "save_latest_ckpt", False):
                 self.save_checkpoint("latest")
@@ -280,20 +291,28 @@ class Trainer:
         logger.info("FINAL TEST EVALUATION")
         logger.info("=" * 60)
         self.load_checkpoint("best")
-        test_f1 = self.evaluate(self.test_loader, "Test")
+        self.evaluate(self.test_loader, "Test")
         tm = self.last_eval_metrics.get("Test", {})
-        test_weighted = tm.get("weighted_f1", test_f1)
-        logger.info(f"*** Final Test Macro-F1: {test_f1:.4f} | Weighted-F1: {test_weighted:.4f} ***")
+        test_macro = float(tm.get("macro_f1", 0.0))
+        test_weighted = float(tm.get("weighted_f1", 0.0))
+        # Paper-primary: Droid -> Weighted-F1, else Macro-F1.
+        is_droid = str(getattr(self.config, "benchmark", "")).lower().startswith("droid")
+        primary = test_weighted if is_droid else test_macro
+        primary_name = "Weighted-F1" if is_droid else "Macro-F1"
+        logger.info(
+            f"*** Final Test Macro-F1: {test_macro:.4f} | Weighted-F1: {test_weighted:.4f} "
+            f"(paper-primary={primary_name}: {primary:.4f}) ***"
+        )
 
         return {
-            "test_f1": float(test_f1),
-            "test_macro_f1": float(test_f1),
+            "test_f1": float(primary),                # paper-primary under CLAUDE.md rule
+            "test_macro_f1": float(test_macro),
             "test_weighted_f1": float(test_weighted),
             "test_macro_recall": float(tm.get("macro_recall", 0.0)),
             "test_weighted_recall": float(tm.get("weighted_recall", 0.0)),
             "test_accuracy": float(tm.get("accuracy", 0.0)),
             "best_val_f1": float(self.best_f1),
-            "paper_primary_metric": "macro_f1",
+            "paper_primary_metric": "weighted_f1" if is_droid else "macro_f1",
             "num_classes": int(self.model.num_classes),
             "test_per_class": tm.get("classification_report", {}),
         }

@@ -316,8 +316,12 @@ def emit_paper_table(
         aicd_test = ", ".join(f"`{t}={_fmt(s.get('test_macro_f1'))}`" for t, s in aicd_runs)
         lines.append(f"- AICD final test Macro-F1: {aicd_test}")
     if droid_runs:
-        droid_test = ", ".join(f"`{t}={_fmt(s.get('test_macro_f1'))}`" for t, s in droid_runs)
-        lines.append(f"- Droid final test Macro-F1: {droid_test}")
+        # Droid paper-primary = Weighted-F1 (CLAUDE.md §5; Droid paper Tables 3–5
+        # column header "weighted F1-score"). Macro-F1 shown as secondary.
+        droid_test = ", ".join(f"`{t}={_fmt(s.get('test_weighted_f1'))}`" for t, s in droid_runs)
+        lines.append(f"- Droid final test Weighted-F1 (paper-primary): {droid_test}")
+        droid_macro = ", ".join(f"`{t}={_fmt(s.get('test_macro_f1'))}`" for t, s in droid_runs)
+        lines.append(f"- Droid final test Macro-F1 (secondary): {droid_macro}")
     if codet_runs:
         codet_test = ", ".join(f"`{t}={_fmt(s.get('test_macro_f1'))}`" for t, s in codet_runs)
         lines.append(f"- CoDET-M4 final test Macro-F1: {codet_test}")
