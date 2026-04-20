@@ -24,10 +24,49 @@ Cost: pure numpy + char-level length, ~5 s total on CPU for both benches.
 """
 from __future__ import annotations
 
+# ---------------------------------------------------------------------------
+# Bootstrap -- Kaggle-compatible: clones the repo if needed, adds
+# Exp_ZeroShot/ to sys.path. Works inside .py files, .ipynb cells, and
+# notebook %run magic (no dependence on __file__).
+# ---------------------------------------------------------------------------
 import os
+import shutil
+import subprocess
 import sys
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+REPO_URL = "https://github.com/trungkiet2005/ai_code_detection.git"
+REQUIRED_FILE = "_zs_runner.py"
+
+
+def _bootstrap_zs_path() -> str:
+    cwd = os.getcwd()
+    candidates = [
+        os.path.join(cwd, "Exp_ZeroShot"),
+        os.path.join(cwd, "ai_code_detection", "Exp_ZeroShot"),
+    ]
+    try:
+        here = os.path.dirname(os.path.abspath(__file__))  # noqa: F821
+        candidates.insert(0, here)
+    except NameError:
+        pass
+    for c in candidates:
+        if os.path.exists(os.path.join(c, REQUIRED_FILE)):
+            return c
+    repo_dir = os.path.join(cwd, "ai_code_detection")
+    if os.path.exists(repo_dir):
+        shutil.rmtree(repo_dir, ignore_errors=True)
+    print(f"[bootstrap] Cloning {REPO_URL} -> {repo_dir}")
+    subprocess.check_call(["git", "clone", "--depth=1", REPO_URL, repo_dir])
+    return os.path.join(repo_dir, "Exp_ZeroShot")
+
+
+_zs_dir = _bootstrap_zs_path()
+if _zs_dir not in sys.path:
+    sys.path.insert(0, _zs_dir)
+for _mod in list(sys.modules):
+    if _mod in ("_common", "_zs_loaders", "_zs_runner"):
+        del sys.modules[_mod]
+print(f"[bootstrap] Exp_ZeroShot path: {_zs_dir}")
 
 from typing import List
 

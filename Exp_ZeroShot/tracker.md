@@ -32,14 +32,20 @@ Each ZS file now runs on BOTH benchmarks via `run_zs_oral` and emits a combined 
 2. Hold Human-Recall ≥ 0.95 on both benches (paper Table 5 failure mode).
 3. Cross-benchmark stability: |Droid T3 − CoDET binary| < 10 pt.
 
-| Rank | Exp | Method | **Droid T3 (3-cls)** | **CoDET binary** | Human R (D/C) | Adv R (D only) | Wall | Status |
-|:-:|:--|:--|:-:|:-:|:-:|:-:|:-:|:-:|
-| — | exp_zs_00 | **RandomScorer** (floor A) | — | — | — / — | — | — | ⏳ pending |
-| — | exp_zs_00 | **LengthOnlyScorer** (floor B) | — | — | — / — | — | — | ⏳ pending |
-| — | exp_zs_03 | **Ghostbuster-Code** (token-stat committee) | — | — | — / — | — | — | ⏳ pending |
-| — | exp_zs_04 | **SpectralSignature** (ModernBERT PC-1) | — | — | — / — | — | — | ⏳ pending |
-| — | exp_zs_01 | **BinocularsLogRatio** (ModernBERT surrogate) | — | — | — / — | — | — | ⏳ pending |
-| — | exp_zs_02 | **Fast-DetectGPT** (CodeBERT curvature) | — | — | — / — | — | — | ⏳ pending |
+| Rank | Exp | Method | Signal family | **Droid T3 (3-cls)** | **CoDET binary** | Human R (D/C) | Adv R (D only) | Wall | Status |
+|:-:|:--|:--|:--|:-:|:-:|:-:|:-:|:-:|:-:|
+| — | exp_zs_00 | **RandomScorer** (floor A) | random | — | — | — / — | — | — | ⏳ pending |
+| — | exp_zs_00 | **LengthOnlyScorer** (floor B) | length | — | — | — / — | — | — | ⏳ pending |
+| — | exp_zs_03 | **Ghostbuster-Code** (token-stat committee) | token-stats | — | — | — / — | — | — | ⏳ pending |
+| — | exp_zs_04 | **SpectralSignature** (ModernBERT PC-1) | embed-geometry | — | — | — / — | — | — | ⏳ pending |
+| — | exp_zs_01 | **BinocularsLogRatio** (ModernBERT surrogate) | log-ratio | — | — | — / — | — | — | ⏳ pending |
+| — | exp_zs_02 | **Fast-DetectGPT** (CodeBERT curvature) | curvature | — | — | — / — | — | — | ⏳ pending |
+| — | exp_zs_05 | **MahalanobisOnManifold** (Sigma^-1 distance) | embed-geometry | — | — | — / — | — | — | ⏳ pending |
+| — | exp_zs_06 | **DC-PDD** (divergence-calibrated MI) | information-theoretic | — | — | — / — | — | — | ⏳ pending |
+| — | exp_zs_07 | **Min-K%++** (vocab-normalised bottom-k) | membership | — | — | — / — | — | — | ⏳ pending |
+| — | exp_zs_08 | **EnergyScore** (free-energy) | likelihood-margin | — | — | — / — | — | — | ⏳ pending |
+| — | exp_zs_09 | **LZ77Complexity** (gzip NCD) | compression | — | — | — / — | — | — | ⏳ pending |
+| — | exp_zs_10 | **FisherDivergence** (Hutchinson trace) | curvature-gen | — | — | — / — | — | — | ⏳ pending |
 | **REF** | Paper | **Fast-DetectGPT** (Droid paper Table 3/5) | **64.54** | — | 0.84 / — | 0.48 | — | reference |
 | REF | Paper | M4 (ZS) | 55.27 | — | 0.40 ⚠️ / — | 0.73 | — | reference |
 | REF | Paper | GPTZero | 49.10 | — | 0.53 / — | 0.10 | — | reference |
@@ -60,6 +66,12 @@ No direct paper baseline for CoDET binary zero-shot (CoDET-M4 paper's only ZS nu
 | exp_zs_02 | **Fast-DetectGPT** | Bao et al. ICLR'24 — local curvature of conditional log-prob; higher curvature ⇒ on-manifold ⇒ likely LM-generated | masked-LM log-prob from CodeBERT as proxy; curvature approximated by variance under 15% mask sampling | 2 forward passes on CodeBERT |
 | exp_zs_03 | **Ghostbuster-Code** | Verma et al. EMNLP'23 — committee of cheap handcrafted features (entropy / burstiness / TTR / Yule-K); human has higher burstiness, lower entropy ratio | feature vector + logistic-regression trained on dev (lean-ZS since only the LR head sees labels) | ~0 forward passes, pure numpy |
 | exp_zs_04 | **SpectralSignature** | Our own — Exp_Climb's spectral encoder already learned code-frequency features at pretraining; project to a 1-D "human-likeness" axis via PCA on the first ModernBERT layer | 1 forward pass on ModernBERT, then 1-D projection | 1 forward pass + PCA |
+| exp_zs_05 | **MahalanobisOnManifold** | Singh et al. TMLR'25 (arXiv:2504.07734) — minimax-optimal test for "phi(x) ∈ reference dist" under local Gaussianity | Ledoit-Wolf shrinkage Σ⁻¹ on ModernBERT CLS; fit on dev, apply on test | 1 forward pass + O(D²) inverse |
+| exp_zs_06 | **DC-PDD** | Zhang et al. arXiv:2409.14781 — divergence-calibrated pretraining-data detection; cleaner MI than Min-K% by subtracting reference token marginal | CodeBERT MLM log-prob minus Laplace-smoothed unigram reference (dev-built) | 1 MLM forward pass |
+| exp_zs_07 | **Min-K%++** | Zhang et al. ICLR'25 (arXiv:2404.02936) — token is training-data-like iff log-prob is a LOCAL MAXIMUM along vocab axis (not just high absolute value) | z-score over vocab at each position, mean bottom 20% | 1 MLM forward pass |
+| exp_zs_08 | **EnergyScore** | Liu et al. ICLR'25 (arXiv:2501.15492) — free energy `-T · logsumexp(logits/T)` is CONSISTENT estimator of log marginal density; calibration-free | mean free energy per token position, CodeBERT MLM | 1 MLM forward pass |
+| exp_zs_09 | **LZ77Complexity** | Jiang ACL'23 + Rao et al. arXiv:2507.02233 — Solomonoff prior: AI code has lower Kolmogorov complexity than human code; gzip ratio approximates it | pure-numpy gzip byte ratio per sample | ~3 min on CPU, no GPU |
+| exp_zs_10 | **FisherDivergence** | Mitchell et al. ICML'25 (arXiv:2503.07091) — Fisher divergence between model score and true data score is MINIMUM-VARIANCE UNBIASED statistic; trace of Hessian is sufficient | Hutchinson trace via K=3 finite-difference embedding perturbations | 3K+1 MLM forward passes |
 
 All methods feed **scalar scores** (higher = more AI-like) into the shared `_zs_runner.run_zs_oral` → threshold calibration on dev (Droid + CoDET independently) → test metrics + per-dim breakdown + combined `BEGIN_ZS_ORAL_TABLE` block with oral-claim check.
 
@@ -127,6 +139,25 @@ Same harness, slower forward pass (~6-8× H100). T4-preset bumps `num_workers` t
 | A100 40GB / V100 32GB | 64 | bf16 / fp16 | 4 | 5 | 512 | ~1 h 30 min |
 | **Kaggle T4 / P100 15-16GB** | **32** | **fp16** | **4** | **3** | **256** | **~3 h 45 min** |
 | CPU | 8 | fp32 | 0 | 3 | 256 | day-scale, smoke only |
+
+---
+
+## 🚀 Kaggle workflow (copy-paste into a cell)
+
+Every `exp_zs_NN_*.py` is **self-contained** — upload the file alone to Kaggle (or paste into a `%%writefile` cell and `%run`). The file's bootstrap block:
+
+1. Searches `cwd`, `cwd/Exp_ZeroShot`, and `cwd/ai_code_detection/Exp_ZeroShot` for `_zs_runner.py`.
+2. If none found, clones `https://github.com/trungkiet2005/ai_code_detection.git` into `./ai_code_detection`.
+3. Adds the correct `Exp_ZeroShot/` to `sys.path` and drops stale cached modules.
+4. Imports `_common` / `_zs_runner` / `_zs_loaders` from the cloned copy.
+
+**No dependence on `__file__`** — works inside Kaggle notebook cells, Colab cells, `%run` magic, and plain `python exp_zs_NN.py` invocations. Verified against the `NameError: name '__file__' is not defined` failure mode.
+
+```python
+# Kaggle cell (T4 or H100 — auto-detected)
+!python Exp_ZeroShot/exp_zs_06_dc_pdd.py
+# OR paste the file into a cell and run it directly
+```
 
 ---
 
