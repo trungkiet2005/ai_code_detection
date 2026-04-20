@@ -176,7 +176,24 @@ class SpectralConfig:
 
 
 def apply_hardware_profile(config: SpectralConfig) -> SpectralConfig:
-    """Tune batch size / workers / precision automatically for H100."""
+    """Auto-tune batch size / workers / precision / LR based on detected GPU.
+
+    Presets (triggered by total VRAM on GPU 0):
+      >= 70 GB  -- H100 80GB / A100 80GB: batch 128 bf16 workers 8 LR*sqrt(2)
+      30-70 GB  -- A100 40GB / V100 32GB: batch 64 bf16/fp16 workers 4
+      10-30 GB  -- T4 15GB / P100 16GB / L4 24GB (Kaggle/Colab free): batch 32
+                   fp16 workers 4 grad_accum 2 (preserves effective batch 64)
+      < 10 GB   -- consumer GPU (3060 / 4070): batch 16 fp16 workers 2 grad_accum 4
+      CPU       -- unchanged (caller config wins)
+
+    For tiers < H100 we INCREASE grad_accum_steps so the effective batch
+    matches the H100 128-sample target. This keeps the optimization
+    trajectory (and therefore hyperparams like LR) comparable across GPUs.
+
+    Honours `auto_h100_profile` flag name for back-compat (set to False
+    to skip auto-tuning entirely). Device-agnostic TF32 / cuDNN benchmark
+    flags are always applied on CUDA.
+    """
     if config.device == "cuda":
         torch.backends.cuda.matmul.allow_tf32 = True
         torch.backends.cudnn.allow_tf32 = True
@@ -189,33 +206,77 @@ def apply_hardware_profile(config: SpectralConfig) -> SpectralConfig:
     if not (config.auto_h100_profile and config.device == "cuda"):
         return config
 
-    gpu_name = get_gpu_name().upper()
-    if "H100" not in gpu_name:
+    try:
+        total_gb = torch.cuda.get_device_properties(0).total_memory / (1024 ** 3)
+        gpu_name = torch.cuda.get_device_name(0)
+    except Exception:
         return config
 
-    # H100 80GB profile: target ~40 GB utilization. Empirically safe under
-    # ModernBERT-base + bidirectional attention + RoPE buffers:
-    #   - batch 128 (2x vs old 64): ~40 GB forward + backward fits
-    #   - seq 512 (same as paper baseline): keeps direct comparability
-    #   - seq 1024 OOMs at batch 128 -- attention + RoPE blow 80 GB
-    #   - LR scaled sqrt(2) = 1.4x to match 2x batch
-    # If user wants seq 1024, they must drop batch to 64 (set explicitly).
-    config.precision = "bf16" if config.precision == "auto" else config.precision
-    config.batch_size = max(config.batch_size, 128)
-    # Note: max_length is NOT auto-bumped. Keeping 512 as safe default under
-    # batch 128. Override manually in your Config if you want seq 1024+batch 64.
-    config.grad_accum_steps = 1
-    config.num_workers = max(config.num_workers, 8)
-    config.prefetch_factor = max(config.prefetch_factor, 4)
-    config.log_every = max(config.log_every, 200)
-    config.eval_every = max(config.eval_every, 2000)
-    # Scale learning rate for 2x batch (sqrt rule): 2e-5 -> ~2.8e-5
-    config.lr_encoder = max(config.lr_encoder, 2.8e-5)
-    config.lr_heads = max(config.lr_heads, 1.4e-4)
+    name_upper = gpu_name.upper()
+    supports_bf16 = ("H100" in name_upper) or ("A100" in name_upper) or ("L4" in name_upper) or ("L40" in name_upper)
+
+    if total_gb >= 70:
+        # H100 80GB / A100 80GB. Empirically safe under ModernBERT-base +
+        # bidirectional attention + RoPE at batch 128 seq 512 bf16.
+        config.precision = "bf16" if config.precision == "auto" else config.precision
+        config.batch_size = max(config.batch_size, 128)
+        config.grad_accum_steps = 1
+        config.num_workers = max(config.num_workers, 8)
+        config.prefetch_factor = max(config.prefetch_factor, 4)
+        config.log_every = max(config.log_every, 200)
+        config.eval_every = max(config.eval_every, 2000)
+        # Scale LR sqrt(2) for 2x batch vs the 64-baseline from earlier climb runs.
+        config.lr_encoder = max(config.lr_encoder, 2.8e-5)
+        config.lr_heads = max(config.lr_heads, 1.4e-4)
+        tier = "H100/A100-80GB"
+    elif total_gb >= 30:
+        # A100 40GB / V100 32GB. Halve batch vs H100, keep bf16 where the
+        # GPU supports it (A100); V100 falls back to fp16.
+        config.precision = ("bf16" if supports_bf16 else "fp16") if config.precision == "auto" else config.precision
+        config.batch_size = max(config.batch_size, 64)
+        # Effective batch 128 via grad_accum = 2.
+        config.grad_accum_steps = max(config.grad_accum_steps, 2)
+        config.num_workers = max(config.num_workers, 4)
+        config.prefetch_factor = max(config.prefetch_factor, 2)
+        config.log_every = max(config.log_every, 100)
+        config.eval_every = max(config.eval_every, 1000)
+        # Same effective batch -> same LR scaling as H100.
+        config.lr_encoder = max(config.lr_encoder, 2.8e-5)
+        config.lr_heads = max(config.lr_heads, 1.4e-4)
+        tier = f"{name_upper.split()[-1]}-30-70GB"
+    elif total_gb >= 10:
+        # Kaggle free-tier T4 15GB / P100 16GB / Colab L4 24GB.
+        # T4 lacks bf16 -> fp16 fallback. Batch 32 fits ModernBERT-base
+        # with seq 512 fp16 at ~6-7 GB activation; grad_accum=4 maintains
+        # effective batch 128 so the optim trajectory matches H100 runs.
+        config.precision = ("bf16" if supports_bf16 else "fp16") if config.precision == "auto" else config.precision
+        config.batch_size = max(config.batch_size, 32)
+        config.grad_accum_steps = max(config.grad_accum_steps, 4)
+        config.num_workers = max(config.num_workers, 4)
+        config.prefetch_factor = max(config.prefetch_factor, 2)
+        config.log_every = max(config.log_every, 100)
+        config.eval_every = max(config.eval_every, 1000)
+        # Same effective batch 128 -> same LR.
+        config.lr_encoder = max(config.lr_encoder, 2.8e-5)
+        config.lr_heads = max(config.lr_heads, 1.4e-4)
+        tier = "Kaggle-T4/P100-tier"
+    else:
+        # Consumer GPU (3060 12GB, 4070 12GB). Tiny batch + more accum.
+        config.precision = "fp16" if config.precision == "auto" else config.precision
+        config.batch_size = max(config.batch_size, 16)
+        config.grad_accum_steps = max(config.grad_accum_steps, 8)
+        config.num_workers = max(config.num_workers, 2)
+        config.prefetch_factor = max(config.prefetch_factor, 2)
+        config.lr_encoder = max(config.lr_encoder, 2.8e-5)
+        config.lr_heads = max(config.lr_heads, 1.4e-4)
+        tier = "consumer-<10GB"
+
+    effective = config.batch_size * config.grad_accum_steps
     logger.info(
-        "Applied H100 80GB profile | precision=%s | batch=%d | seq=%d | "
-        "lr_enc=%.2e | lr_heads=%.2e | workers=%d",
-        config.precision, config.batch_size, config.max_length,
-        config.lr_encoder, config.lr_heads, config.num_workers,
+        "Applied %s profile | gpu=%s (%.0f GB) | precision=%s | batch=%d x grad_accum=%d "
+        "(eff=%d) | seq=%d | lr_enc=%.2e | lr_heads=%.2e | workers=%d",
+        tier, gpu_name, total_gb, config.precision,
+        config.batch_size, config.grad_accum_steps, effective,
+        config.max_length, config.lr_encoder, config.lr_heads, config.num_workers,
     )
     return config

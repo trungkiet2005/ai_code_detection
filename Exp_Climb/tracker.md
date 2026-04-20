@@ -701,11 +701,40 @@ Exp_Climb/
 
 ---
 
-## 🖥️ Kaggle / H100 80GB setup
+## 🖥️ Hardware auto-detect (`_common.apply_hardware_profile`)
 
-### Auto-applied H100 profile (`_common.apply_hardware_profile`)
+### 4-tier GPU preset (2026-04-20, bumped from H100-only)
 
-Triggers when `torch.cuda.get_device_name()` contains "H100":
+`apply_hardware_profile` now auto-detects the GPU via `torch.cuda.get_device_properties(0).total_memory` and applies one of four presets. **Effective batch is 128 across H100 / A100 / V100 / T4 / P100 / L4 via grad-accumulation** so the optimization trajectory (and therefore hyperparams like LR) is comparable across GPUs — a run on Kaggle T4 produces numbers you can compare directly to a run on Kaggle H100.
+
+| Tier | Trigger (total VRAM) | `batch_size` | `grad_accum` | **Effective batch** | `precision` | `workers` | `prefetch` | GPUs |
+|:--|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:--|
+| **H100 / A100-80GB** | ≥ 70 GB | **128** | 1 | 128 | bf16 | 8 | 4 | H100 80GB, A100 80GB |
+| **A100-40GB / V100** | 30–70 GB | 64 | 2 | 128 | bf16 / fp16 | 4 | 2 | A100 40GB, V100 32GB |
+| **Kaggle T4 / P100 / L4** | 10–30 GB | 32 | 4 | 128 | fp16 (bf16 if L4) | 4 | 2 | **T4 15GB, P100 16GB, L4 24GB** |
+| **Consumer <10GB** | < 10 GB | 16 | 8 | 128 | fp16 | 2 | 2 | RTX 3060 Ti 8GB, etc. |
+
+All tiers use `lr_encoder=2.8e-5`, `lr_heads=1.4e-4` (the sqrt(2) scaling for 2× batch over the 64-baseline; since effective batch = 128 everywhere, the LR is uniform across tiers).
+
+**bf16 availability**: only Hopper (H100), Ampere (A100, RTX 30-series), and Ada (L4, L40, RTX 40-series) support bf16 natively. T4 / V100 / P100 fall back to fp16 automatically.
+
+### Wall-time per climb run (paper_proto v2 task, 60K train · 2 epochs · seq 512)
+
+| Tier | Per run | × 6 runs (paper_proto) | Notes |
+|:--|:-:|:-:|:--|
+| H100 / A100-80GB | ~11–13 min | **~1h 35m** | tight, under 2 h ceiling |
+| A100-40GB / V100 | ~20–25 min | ~2h 30m | exceeds paper_proto 2 h ceiling — drop runs 6 or use `lean` instead |
+| **Kaggle T4 / P100** | ~50–60 min | **~5h 30m** | exceeds 2 h; use `run_mode="single"` on exp 20/23/24 only, or split across 2 Kaggle sessions |
+| Consumer <10GB | varies | — | local smoke only |
+
+**Kaggle T4 shipping advice**: single-GPU Kaggle T4 is too slow for a full 6-run paper_proto in one session. Recommended workflow:
+- Session 1: `paper_proto` runs 1+2+3 (Droid T3 + CoDET author + Droid T4) — ~3 h.
+- Session 2: `paper_proto` runs 4+5+6 (OOD-SRC-gh + OOD-LANG-py + Droid T1) — ~3 h.
+- Ablation suite runs on CoDET IID author single-task anyway; add it to Session 1 (~1 h).
+
+For T4-free workflows, prefer `run_mode="single"` on the 1 specific task a given exp targets (e.g. exp_20 DFR cares about OOD-SRC-gh → `single_task="binary"` + LOO-gh manually).
+
+### H100 80GB details (kept from v1 for tracker continuity)
 
 | Setting | H100 value | Base default | Why |
 |---|---|---|---|
