@@ -187,9 +187,9 @@ def preflight_full_climb(
 
     need_codet = run_mode in ("full", "codet_only", "codet_iid", "single", "lean", "paper_proto")
     need_droid = run_mode in ("full", "droid_only", "lean", "paper_proto")
-    # paper_proto only needs T3 (not T1/T4) -- lighter preflight.
+    # paper_proto v2: Droid T3 + T4 + T1; CoDET author + OOD-SRC-gh + OOD-LANG-py.
     if run_mode == "paper_proto":
-        droid_tasks = ["T3"]
+        droid_tasks = ["T3", "T4", "T1"]
 
     _print_full_run_plan(
         run_mode=run_mode,
@@ -231,8 +231,9 @@ RUN_MODES = ("full", "codet_only", "droid_only", "codet_iid", "single", "lean", 
 # the exp files to force a fresh clone.
 #     _PAPER_BASELINES     -- added 2026-04-19 (per-subgroup breakdown + delta row)
 #     lean                 -- added 2026-04-18 (8-run screening mode)
-#     paper_proto          -- added 2026-04-20 (3-run paper-protocol mode, <=2h H100)
-_RUNNER_API_TOKENS = ("lean", "_PAPER_BASELINES", "paper_proto")
+#     paper_proto          -- added 2026-04-20 (paper-protocol mode, <=2h H100)
+#     paper_proto_v2       -- bumped 2026-04-20 (6 runs: Droid T3/T4/T1 + CoDET author + OOD-SRC-gh + OOD-LANG-py)
+_RUNNER_API_TOKENS = ("lean", "_PAPER_BASELINES", "paper_proto", "paper_proto_v2")
 
 # OOD representatives for lean mode: one hardest held-out per OOD type.
 # gh = hardest OOD-SRC (GH macro ~0.28 universally); python = largest OOD-LANG
@@ -375,17 +376,32 @@ def run_full_climb(
             codet_results = {f"iid_{single_task}": r}
 
         elif run_mode == "paper_proto":
-            # Paper-protocol lean: 3 training runs that surface as many paper
-            # baseline cells as possible with a SHARED model per bench.
-            #   1) CoDET IID binary -> Table 2 + Table 3 (per-lang) + Table 4 (per-src)
-            #   2) CoDET IID author -> Table 7 + Figure 2 confusion matrix
-            #   3) Droid T3         -> Table 3 (per-domain) + Table 4 (per-lang)
-            #                          + Table 5 (human recall, adversarial recall)
-            # Budget target: <= 2 h total on H100.  We shrink train-set to
-            # 60K and run 2 epochs per task -> ~13 min/run x 3 = ~40 min
-            # training + ~15 min dataset loading/eval = ~1 h end-to-end.
-            # The lean-climb LOO probes (OOD-SRC / OOD-LANG / OOD-GEN) are
-            # NOT in this mode -- they live in run_mode="lean".
+            # ==================================================================
+            # paper_proto (v2, 2026-04-20): 6 runs, story-driven, <= 2h on H100.
+            #
+            # Story arc (each run contributes one oral-section claim):
+            #   1) Droid T3  -- 🥇 RDS 80.42 + 🥈 Human/Adv recall + 6 langs
+            #                   -> paper Table 3 per-domain + Table 4 per-lang
+            #                      + Table 5 recall pair
+            #   2) CoDET author 6-class
+            #                   -> 🥉 Qwen↔Nxcode sibling pair (paper Table 7
+            #                      + Figure 2 confusion matrix)
+            #   3) Droid T4  -- 4-class adversarial split
+            #                   -> paper Table 6 DroidDetect 94.30 (paper's own novelty)
+            #   4) CoDET OOD-SRC held-out=gh (binary LOO)
+            #                   -> climb-board's hardest unsolved subgroup (best 35.56)
+            #   5) CoDET OOD-LANG held-out=python (binary LOO)
+            #                   -> largest OOD-LANG test (17K); axis-C transfer check
+            #   6) Droid T1  -- 2-class IID (sanity + paper Table 3 2-Cls Avg)
+            #
+            # CoDET IID binary aggregate is NOT in this mode (ceiling-bound 99%,
+            # zero oral story). OOD-GEN LOO also NOT in (degenerate macro~0.5).
+            # To run those, use run_mode="lean" or "full".
+            #
+            # Budget on H100 BF16 batch 128 x seq 512 (60K train / 10K val /
+            # FULL test, 2 epochs): ~11-13 min training per run. Estimated
+            # wall clock: ~1h20m-1h40m end-to-end with cache misses.
+            # ==================================================================
             import dataclasses as _dc
             proto_codet = _dc.replace(
                 codet_cfg,
@@ -399,8 +415,6 @@ def run_full_climb(
                 max_val_samples=min(getattr(droid_cfg, "max_val_samples", 10_000), 10_000),
             )
 
-            # Shared 2-epoch override: patched on the SpectralConfig inside
-            # run_iid / run_droid_iid via the helper below.
             original_build_codet = None
             original_build_droid = None
             try:
@@ -422,47 +436,75 @@ def run_full_climb(
                 _dc_mod.build_codet_config = _proto_build_codet
                 _dd_mod.build_droid_config = _proto_build_droid
 
-                logger.info("\n" + "#" * 72)
-                logger.info(f"# [{method_name}] PAPER_PROTO 1/3: CoDET IID binary + breakdown")
-                logger.info("#" * 72)
-                r_bin = run_codet_iid(
-                    "binary", proto_codet, loss_fn=loss_fn,
-                    run_preflight=inner_preflight,
-                    checkpoint_tag_prefix=checkpoint_tag_prefix,
-                )
-
-                if torch.cuda.is_available():
-                    torch.cuda.empty_cache()
-                gc.collect()
-
-                logger.info("\n" + "#" * 72)
-                logger.info(f"# [{method_name}] PAPER_PROTO 2/3: CoDET IID author + breakdown")
-                logger.info("#" * 72)
-                r_auth = run_codet_iid(
-                    "author", proto_codet, loss_fn=loss_fn,
-                    run_preflight=False,
-                    checkpoint_tag_prefix=checkpoint_tag_prefix,
-                )
-                codet_results = {"iid_binary": r_bin, "iid_author": r_auth}
-
-                if torch.cuda.is_available():
-                    torch.cuda.empty_cache()
-                gc.collect()
-
-                logger.info("\n" + "#" * 72)
-                logger.info(f"# [{method_name}] PAPER_PROTO 3/3: Droid T3 + breakdown")
-                logger.info("#" * 72)
                 from _data_droid import run_droid_iid as _run_droid_iid
-                r_t3 = _run_droid_iid(
-                    "T3", proto_droid, loss_fn=loss_fn,
-                    checkpoint_tag_prefix=checkpoint_tag_prefix,
-                    eval_breakdown=True,
-                )
-                droid_results = {"droid_T3": r_t3}
+
+                codet_results = {}
+                droid_results = {}
+
+                def _step(idx, total, title, fn):
+                    logger.info("\n" + "#" * 72)
+                    logger.info(f"# [{method_name}] PAPER_PROTO {idx}/{total}: {title}")
+                    logger.info("#" * 72)
+                    result = fn()
+                    if torch.cuda.is_available():
+                        torch.cuda.empty_cache()
+                    gc.collect()
+                    return result
+
+                TOTAL = 6
+
+                # --- Run 1: Droid T3 (headline OOD story) -------------------
+                r_t3 = _step(1, TOTAL, "Droid T3 (3-class) + per-domain + per-lang + recall",
+                    lambda: _run_droid_iid(
+                        "T3", proto_droid, loss_fn=loss_fn,
+                        checkpoint_tag_prefix=checkpoint_tag_prefix,
+                        eval_breakdown=True,
+                    ))
+                droid_results["droid_T3"] = r_t3
+
+                # --- Run 2: CoDET author 6-class (sibling pair story) -------
+                r_auth = _step(2, TOTAL, "CoDET author 6-class + confusion matrix",
+                    lambda: run_codet_iid(
+                        "author", proto_codet, loss_fn=loss_fn,
+                        run_preflight=inner_preflight,
+                        checkpoint_tag_prefix=checkpoint_tag_prefix,
+                    ))
+                codet_results["iid_author"] = r_auth
+
+                # --- Run 3: Droid T4 (4-class adversarial, paper Table 6) ---
+                r_t4 = _step(3, TOTAL, "Droid T4 (4-class adversarial) + breakdown",
+                    lambda: _run_droid_iid(
+                        "T4", proto_droid, loss_fn=loss_fn,
+                        checkpoint_tag_prefix=checkpoint_tag_prefix,
+                        eval_breakdown=True,
+                    ))
+                droid_results["droid_T4"] = r_t4
+
+                # --- Run 4: CoDET OOD-SRC held-out=gh (axis-C headline) -----
+                r_ood_gh = _step(4, TOTAL, "CoDET OOD-SRC held-out=gh (binary LOO)",
+                    lambda: _run_single_loo(
+                        "source", "gh", proto_codet, loss_fn=loss_fn,
+                        checkpoint_tag_prefix=checkpoint_tag_prefix,
+                    ))
+                codet_results.setdefault("ood_source", {})["gh"] = r_ood_gh
+
+                # --- Run 5: CoDET OOD-LANG held-out=python (transfer check) -
+                r_ood_py = _step(5, TOTAL, "CoDET OOD-LANG held-out=python (binary LOO)",
+                    lambda: _run_single_loo(
+                        "language", "python", proto_codet, loss_fn=loss_fn,
+                        checkpoint_tag_prefix=checkpoint_tag_prefix,
+                    ))
+                codet_results.setdefault("ood_language", {})["python"] = r_ood_py
+
+                # --- Run 6: Droid T1 (2-class binary sanity) ----------------
+                r_t1 = _step(6, TOTAL, "Droid T1 (2-class binary) + breakdown",
+                    lambda: _run_droid_iid(
+                        "T1", proto_droid, loss_fn=loss_fn,
+                        checkpoint_tag_prefix=checkpoint_tag_prefix,
+                        eval_breakdown=True,
+                    ))
+                droid_results["droid_T1"] = r_t1
             finally:
-                # Restore the real builders so subsequent runs in the same
-                # Python session (e.g. when paper_proto is followed by an
-                # ablation suite) aren't stuck at 2 epochs.
                 if original_build_codet is not None:
                     _dc_mod.build_codet_config = original_build_codet
                 if original_build_droid is not None:

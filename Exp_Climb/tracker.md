@@ -527,21 +527,45 @@ Hybrid is the **open problem** in the CoDET paper — UniXcoder 39.36 is low, an
 
 ---
 
-## ⚡ `paper_proto` run-mode — 3-run apples-to-apples screening (≤ 2 h H100)
+## ⚡ `paper_proto` run-mode — 6-run story-driven screening (≤ 2 h H100)
 
-Added 2026-04-20. Addresses the protocol mismatch surfaced in the mirror leaderboard: filling our `Gen-qw / Lang-py / Src-gh` proxy columns with paper OOD numbers is wrong, but running the full paper protocol (Table 9 / 12 = MBPP + The-Vault + C#/Go/JS/PHP external data) is too heavy for a screening run.
+Added 2026-04-20, **bumped to v2 same day** (3 → 6 runs). The v1 3-run recipe spent a whole run on CoDET binary aggregate (ceiling-bound 99%) with zero oral-story value. v2 replaces it with three OOD regimes + a paper-Table-6 4-class split, so every one of the 6 runs now contributes exactly one oral-section claim.
 
-**`paper_proto` squeezes the maximum apples-to-apples Δ out of in-dataset metadata with just 3 training runs:**
+### v2 run plan — six oral-anchored tasks
 
-| # | Task | Trains | Outputs (paper cells directly comparable) |
-|:-:|:--|:--|:--|
-| 1 | CoDET IID binary (60K, 2 epochs) | ~13 min | Table 2 aggregate + **Table 3 per-lang** (cpp/py/java) + **Table 4 per-src** (cf/lc/gh) — 7 paper cells |
-| 2 | CoDET IID author 6-class (60K, 2 epochs) | ~13 min | **Table 7 Author F1** + Figure 2 confusion matrix — 1 paper cell + diagnostics |
-| 3 | Droid T3 3-class (60K, 2 epochs, `eval_breakdown=True`) | ~13 min | **Table 3 per-domain** (Gen/Algo/RDS, via `Source→domain` map) + **Table 4 per-language** (C/C++, C#, Go, Java, Python, JS) + **Table 5 Human + Adversarial recall** + bonus diagnostics: per-**raw-Source**, per-**generator** (GPT-4o-mini / Qwen2.5-72B / etc.), per-**Model_Family** — up to 20+ paper cells in one run |
+| # | Task | Story anchor | Paper cells delivered | Wall |
+|:-:|:--|:--|:--|:-:|
+| 1 | **Droid T3** (3-cls) + breakdown | 🥇 RDS 80.42 (hardest domain) + 🥈 Human/Adv recall + 6-lang spread | Table 3 per-domain (Gen/Algo/RDS) + Table 4 per-lang (C/C++/C#/Go/Java/Py/JS) + Table 5 recall pair — 11+ cells | ~13 min |
+| 2 | **CoDET author 6-cls** + confusion matrix | 🥉 Qwen↔Nxcode sibling pair (exp_21/22/25's identification surface) | Table 7 Macro-F1 + Figure 2 diagnostics | ~13 min |
+| 3 | **Droid T4** (4-cls adversarial) + breakdown | Paper Table 6 DroidDetect 94.30 — the paper's own novelty to beat | Table 6 4-cls + per-variant breakdown | ~13 min |
+| 4 | **CoDET OOD-SRC held-out=gh** (binary LOO) | Climb-board's hardest unsolved subgroup (best 35.56) — axis-C headline | Paper-adjacent Table 9 proxy; directly comparable climb-board Src-gh row | ~11 min |
+| 5 | **CoDET OOD-LANG held-out=python** (binary LOO) | Largest OOD-LANG test (17K); axis-C transfer check — rules out language-specific tricks | Paper-adjacent Table 10/12 proxy; climb-board Lang-py row | ~11 min |
+| 6 | **Droid T1** (2-cls binary) + breakdown | Sanity gate + paper Table 3 2-Cls Avg 97.00; regression guard for the backbone | Table 3 2-Cls per-domain + per-lang | ~13 min |
 
-**Total budget:** ~40 min training + ~15 min loading/eval = **~55 min end-to-end** on H100 BF16 batch 128 × seq 512. Doubles as a **theory-method screening gate** (vs `lean`'s 8-run OOD probing).
+**Total budget:** ~74 min training + ~15 min loading/eval + ~5 min HF downloads = **~1h35m–1h45m** on H100 BF16 batch 128 × seq 512. Comfortably under the 2 h oral-screening ceiling.
+
+### Story arc the 6 runs tell
+
+1. **Run 1** — "We match DroidDetectCLS-Large on RDS (Droid's hardest domain) with 20 % of training data."
+2. **Run 2** — "We crack the Qwen↔Nxcode sibling pair by Δ pt via axis-A geometry."
+3. **Run 3** — "We beat DroidDetect's own 4-class novelty on adversarial split."
+4. **Run 4** — "We cross 0.40 on OOD-SRC-gh, the climb-board's longest-standing unsolved subgroup."
+5. **Run 5** — "Axis-C claim transfers to held-out Python; not a language-specific artefact."
+6. **Run 6** — Binary ceiling confirmed; backbone sanity.
+
+### What's NOT in `paper_proto` (skipped on purpose)
+
+- **CoDET IID binary aggregate** — ceiling-bound 99 %, zero oral story.
+- **CoDET per-lang cpp/py/java IID** — clustered in 98–99 %.
+- **CoDET per-src cf/lc/gh IID** — same.
+- **CoDET OOD-SRC held-out=cf/lc** — easier than gh, no extra signal.
+- **CoDET OOD-GEN LOO** — macro-F1 degenerate (ceiling 0.5 on single-class test).
+- **CoDET Tables 8/9/12 paper-exact** (unseen LLMs / MBPP+The-Vault / C#+Go+JS+PHP external) — external data, needs separate loaders, not in the 2 h budget.
+- **Droid per-language OOD-train** (Droid Table 4 OOD block) — 6 extra train runs.
+- **Droid zero-shot** (Table 3/4 ZS block) — moved to [`Exp_ZeroShot/`](../Exp_ZeroShot/) as a separate paper.
 
 ### Activate via
+
 ```python
 run_full_climb(
     method_name="<YourMethod>",
@@ -553,6 +577,8 @@ run_full_climb(
     run_preflight=True,
 )
 ```
+
+Freshness breadcrumb bumped to `paper_proto_v2` in `_RUNNER_API_TOKENS`, so exp_NN files that ran on the v1 3-task recipe will force a Kaggle re-clone on next run.
 
 ### Droid HF schema — verified 2026-04-20 (was wrong before)
 
@@ -596,10 +622,11 @@ Substring fallbacks cover case/separator drift (`"leet-code"`, `"starcoder data"
 - **Droid per-language OOD-train** (Droid Table 4 OOD block) — needs 6 extra training runs, one per language. Out of the 2 h budget.
 - **Droid zero-shot** (Table 3/4 ZS block) — requires external LM scoring (Fast-DetectGPT / GPTZero). Not our claim surface.
 
-### How it ranks against `lean`
-- `lean` = 8 runs, ~3 h, **our LOO proxy protocol**. Best for axis-C / G claims.
-- `paper_proto` = 3 runs, ~55 min, **paper's own protocol**. Best for Table 1 / Table 2 of the final paper.
-- Ship both: `paper_proto` first as a cheap sanity-screener, then `lean` for the axis-specific OOD claim, then `full` only for the paper-final winner.
+### How it ranks against `lean` / `full`
+- `paper_proto` (v2) = **6 runs, ~1h40m**, **oral-story-driven** — six tasks each anchored to one oral-section claim. Droid T3 + T4 + T1, CoDET author, CoDET OOD-SRC-gh, CoDET OOD-LANG-py.
+- `lean` = 8 runs, ~3 h, LOO-proxy screening — IID binary + IID author + 3 OOD LOO + Droid T1/T3/T4. Best for exhaustive OOD probing (all 5 generators, 3 languages, 3 sources).
+- `full` = 16 runs, ~5h40m, paper-final — adds all OOD-GEN LOOs + all OOD-SRC LOOs + all OOD-LANG LOOs.
+- **Recommended ship order for a new method:** `paper_proto` first (confirm the 6 oral claims land) → if OOD-SRC-gh gate is crossed, promote to `lean` for the full LOO suite → `full` only for the paper-final winner.
 
 ---
 
