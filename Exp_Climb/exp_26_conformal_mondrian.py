@@ -52,7 +52,8 @@ Success gate (lean):
   * Droid human-class recall >= 0.95 (core Droid Table 5 target)
   * Droid T4 >= 88.0
 
-Kaggle: upload only this file; run_mode="lean" = 8 runs ~3h.
+Kaggle: upload only this file; run_mode="paper_proto" = 6 runs ~1h45m on H100.
+(Ship order: paper_proto -> lean -> full, see exp_20 docstring.)
 """
 from __future__ import annotations
 
@@ -317,11 +318,11 @@ def conformal_compute_losses(model, outputs, labels, config,
 
 if __name__ == "__main__":
     codet_cfg = CoDETM4Config(
-        max_train_samples=100_000, max_val_samples=20_000,
+        max_train_samples=60_000, max_val_samples=10_000,
         max_test_samples=-1, eval_breakdown=True,
     )
     droid_cfg = DroidConfig(
-        max_train_samples=100_000, max_val_samples=20_000,
+        max_train_samples=60_000, max_val_samples=10_000,
         max_test_samples=-1,
     )
 
@@ -330,7 +331,7 @@ if __name__ == "__main__":
         exp_id="exp_26",
         loss_fn=conformal_compute_losses,
         codet_cfg=codet_cfg, droid_cfg=droid_cfg,
-        run_mode="lean",
+        run_mode="paper_proto",
         run_preflight=True,
         checkpoint_tag_prefix="exp_26_cfm",
     )

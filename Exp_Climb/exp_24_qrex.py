@@ -36,7 +36,8 @@ Success gate (lean):
   * CoDET Author IID >= 70.0
   * No NaN for lambda_qrex up to 10 (stability vs Exp_06)
 
-Kaggle: upload only this file; run_mode="lean" = 8 runs ~3h.
+Kaggle: upload only this file; run_mode="paper_proto" = 6 runs ~1h45m on H100.
+(Ship order: paper_proto -> lean -> full, see exp_20 docstring.)
 """
 from __future__ import annotations
 
@@ -274,11 +275,11 @@ def qrex_compute_losses(model, outputs, labels, config,
 
 if __name__ == "__main__":
     codet_cfg = CoDETM4Config(
-        max_train_samples=100_000, max_val_samples=20_000,
+        max_train_samples=60_000, max_val_samples=10_000,
         max_test_samples=-1, eval_breakdown=True,
     )
     droid_cfg = DroidConfig(
-        max_train_samples=100_000, max_val_samples=20_000,
+        max_train_samples=60_000, max_val_samples=10_000,
         max_test_samples=-1,
     )
 
@@ -287,7 +288,7 @@ if __name__ == "__main__":
         exp_id="exp_24",
         loss_fn=qrex_compute_losses,
         codet_cfg=codet_cfg, droid_cfg=droid_cfg,
-        run_mode="lean",
+        run_mode="paper_proto",
         run_preflight=True,
         checkpoint_tag_prefix="exp_24_qrex",
     )

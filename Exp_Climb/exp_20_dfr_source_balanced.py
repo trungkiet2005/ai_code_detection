@@ -46,7 +46,10 @@ Success gate (lean):
   * CoDET Author IID >= 70.0 (no regression)
   * val-test gap on OOD-gh < 0.50 (structural diagnostic)
 
-Kaggle workflow: upload only this file; run_mode="lean" = 8 runs ~3h.
+Kaggle workflow: upload only this file; run_mode="paper_proto" = 6 runs ~1h45m on H100.
+(Ship order: run_mode="paper_proto" first to check 6 oral claims; if
+OOD-SRC-gh gate crossed, promote to run_mode="lean" for full 8-task LOO
+screening; then run_mode="full" only for paper-final.)
 """
 from __future__ import annotations
 
@@ -285,11 +288,11 @@ def dfr_compute_losses(model, outputs, labels, config,
 
 if __name__ == "__main__":
     codet_cfg = CoDETM4Config(
-        max_train_samples=100_000, max_val_samples=20_000,
+        max_train_samples=60_000, max_val_samples=10_000,
         max_test_samples=-1, eval_breakdown=True,
     )
     droid_cfg = DroidConfig(
-        max_train_samples=100_000, max_val_samples=20_000,
+        max_train_samples=60_000, max_val_samples=10_000,
         max_test_samples=-1,
     )
 
@@ -298,7 +301,7 @@ if __name__ == "__main__":
         exp_id="exp_20",
         loss_fn=dfr_compute_losses,
         codet_cfg=codet_cfg, droid_cfg=droid_cfg,
-        run_mode="lean",
+        run_mode="paper_proto",
         run_preflight=True,
         checkpoint_tag_prefix="exp_20_dfr",
     )
