@@ -106,13 +106,13 @@ if __name__ == "__main__":
     print(f"        - Contrastive-Twin (pair-divergence signal, AISec)")
     print(f"        - Token-Entropy-Forks (decision-point semantics, ACL)")
     print(f"        - Semantic-Resilience (robustness meta-signal, arXiv)")
-    print(f"[MODE] H100 80GB -> Parallel mode: max_workers=2 (safe VRAM scheduling)")
+    print(f"[MODE] H100 80GB -> Sequential (max_workers=1) — parallel OOMed on vocab-logit tensors in prior runs")
     print("="*75)
 
     results = []
 
-    # Parallel execution: max 2 concurrent exps
-    with ThreadPoolExecutor(max_workers=2) as executor:
+    # Sequential (workers=1): prevents vocab-logit tensor stacking OOM
+    with ThreadPoolExecutor(max_workers=1) as executor:
         futures = {}
         for exp_file, exp_id, est_min in EXP_FILES:
             future = executor.submit(run_exp, exp_file, exp_id)
