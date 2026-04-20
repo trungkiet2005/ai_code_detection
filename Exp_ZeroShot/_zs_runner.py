@@ -294,4 +294,52 @@ def run_zs_oral(
     logger.info("=" * 78)
     logger.info("END_ZS_ORAL_TABLE")
     logger.info("=" * 78)
+
+    # Persist per-exp result to JSON so `aggregate_results.py` can rebuild
+    # the full cross-exp leaderboard even if each exp was launched separately
+    # (user runs files individually, not via a single runner script).
+    try:
+        import json as _json
+        import os as _os
+
+        # Find a writeable results dir; prefer repo-local Exp_ZeroShot/results/
+        candidates = []
+        try:
+            here = _os.path.dirname(_os.path.abspath(__file__))
+            candidates.append(_os.path.join(here, "results"))
+        except NameError:
+            pass
+        candidates.append(_os.path.join(_os.getcwd(), "Exp_ZeroShot", "results"))
+        candidates.append(_os.path.join(_os.getcwd(), "ai_code_detection", "Exp_ZeroShot", "results"))
+
+        out_dir = None
+        for c in candidates:
+            try:
+                _os.makedirs(c, exist_ok=True)
+                out_dir = c
+                break
+            except OSError:
+                continue
+        if out_dir is not None:
+            payload = {"method": method_name, "exp_id": exp_id, "results": {}}
+            for bench, r in results.items():
+                if not isinstance(r, dict) or "error" in r:
+                    payload["results"][bench] = {"error": r.get("error", "unknown") if isinstance(r, dict) else "no_dict"}
+                    continue
+                payload["results"][bench] = {
+                    "test_macro_f1": r.get("test_macro_f1"),
+                    "test_weighted_f1": r.get("test_weighted_f1"),
+                    "test_human_recall": r.get("test_human_recall"),
+                    "test_ai_recall": r.get("test_ai_recall"),
+                    "test_adversarial_recall": r.get("test_adversarial_recall"),
+                    "tau": r.get("tau"),
+                    "wall_time_s": r.get("wall_time_s"),
+                }
+            out_path = _os.path.join(out_dir, f"{exp_id}.json")
+            with open(out_path, "w") as _f:
+                _json.dump(payload, _f, indent=2)
+            logger.info(f"[persist] Saved {out_path}")
+    except Exception as _e:
+        logger.warning(f"[persist] Failed to save result JSON: {_e}")
+
     return results
