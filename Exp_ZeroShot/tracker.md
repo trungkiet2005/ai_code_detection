@@ -29,9 +29,9 @@
 
 | Status | Count | Exps |
 |:--|:-:|:--|
-| ✅ Completed (both benches) | **15** | 00A, 00B, 01, 02, 03, 04, 05, 06, 07, 08, 09, 10, 14, 16, 18, 19, 24, 25, 26 |
-| ⚠️ Completed but degenerate | 1 | 20 (Droid τ=0 — **fixed**, rerun pending) |
-| 🔧 Patched, rerun pending | **11** | 11, 12, 13, 15, 17, 21, 22, 23 (OOM/type fixes 2026-04-20) + 27, 29, 30 (`backbone_lm` + model-class fixes 2026-04-21) |
+| ✅ Completed (both benches) | **17** | 00A, 00B, 01, 02, 03, 04, 05, 06, 07, 08, 09, 10, 14, 16, **17**, 18, 19, 24, 25, 26 |
+| ⚠️ Completed but degenerate | 1 | **20** (Droid τ=0 — **3 runs in a row**, multi-lang fix insufficient, needs v2 fallback logic) |
+| 🔧 Patched, rerun pending | **10** | 11, 12, 13, 15, 21, 22, 23 (OOM/type fixes 2026-04-20) + 27, 29, 30 (`backbone_lm` + model-class fixes 2026-04-21) |
 | ⏳ Never attempted | 1 | 28 |
 | **TOTAL** | **30** | |
 
@@ -41,15 +41,27 @@
 - 🥉 Exp_24 EntropyWM 0.3595 (Δ-FDG-ours +3.88 pt)
 - Exp_25 SyntacticPred 0.3477 (Δ-FDG-ours +2.70 pt)
 - Exp_14 Martingale 0.3464 (Δ-FDG-ours +2.57 pt)
+- Exp_19 SemanticDrift 0.3396 (+1.89 pt)
+- Exp_17 PIFE 0.3216 (+0.09 pt) — **but see claim-pass ranking below**
 
 **Best CoDET binary Macro-F1:** Exp_01 Binoculars 0.5849 > Exp_16 KSDScope 0.4348 > Exp_10 Fisher 0.4358 > Exp_04 Spectral 0.4267 > Exp_25 SyntacticPred 0.4192.
 
-**Best stability (|Droid W-F1 − CoDET Macro-F1| ≤ 5 pt):** Exp_14 Martingale **1.55pt** > Exp_19 SemanticDrift **1.16pt** > Exp_25 SyntacticPred **7.15pt** > Exp_24 EntropyWM **4.95pt**.
+**Best stability (|Droid W-F1 − CoDET Macro-F1|, lower = more stable):**
+- 🥇 Exp_19 SemanticDrift **1.16 pt**
+- 🥈 Exp_14 Martingale **1.55 pt**
+- 🥉 Exp_17 PIFE **2.29 pt** 🆕
+- Exp_24 EntropyWM **4.95 pt**
 
-**Oral pass gate status (after metric fix 2026-04-20):**
-- **Against paper Fast-DetectGPT 64.54 W-F1:** 0 / 30 methods clear. Best gap −20.90 pt (Exp_26).
-- **Against OUR Fast-DetectGPT reproduction (32.07 W-F1):** **5 methods beat it** — Exp_26 (+10.57), Exp_18 (+9.30), Exp_24 (+3.88), Exp_25 (+2.70), Exp_14 (+2.57). This is the fair within-protocol signal.
-- Full gate (paper-beat + HR≥0.95 + stability <10): still 0/30.
+**🏆 Best claim-pass profile (out of 4 oral claims):**
+- 🥇 **Exp_17 PIFE 3/4 PASS** (HR-D 0.9521 ✅ + HR-C 0.9503 ✅ + stability 2.29pt ✅; only beat-FDG claim fails)
+- 🥈 Exp_24 EntropyWM 2/4 PASS (HR-D ✅ + stability ✅)
+- 🥈 Exp_14 Martingale 2/4 PASS (HR-C ✅ + stability ✅)
+- All others: ≤1/4 PASS
+
+**Oral pass gate status (after metric fix 2026-04-20 + rerun 2026-04-21):**
+- **Against paper Fast-DetectGPT 64.54 W-F1:** 0 / 30 methods clear full gate. Best gap −20.90 pt (Exp_26).
+- **Against OUR Fast-DetectGPT reproduction (32.07 W-F1):** **7 methods beat it** — Exp_26 (+10.57), Exp_18 (+9.30), Exp_24 (+3.88), Exp_25 (+2.70), Exp_14 (+2.57), Exp_19 (+1.89), Exp_17 (+0.09). This is the fair within-protocol signal.
+- Full gate (paper-beat + HR≥0.95 + stability <10): still **0/30**, but Exp_17 now clears 3/4 sub-claims (only claim-1 fails) → strongest oral candidate if we fuse it with a W-F1 booster.
 - **Reproducibility gap finding:** our FDG reproduction is 32 pts below paper → paper's W-F1 64.54 is likely an upper bound under their full-data access + different mask-sampling budget. Our apples-to-apples contribution is **+10.57 pt over own-baseline FDG**, which IS a legitimate paper claim.
 
 ---
@@ -87,10 +99,10 @@ Each ZS file now runs on BOTH benchmarks via `run_zs_oral` and emits a combined 
 | 🆕 | exp_zs_14 | **MartingaleCurvature** (De Jong test on AST-depth residuals) | martingale / econometric | **0.3464** | 0.3615 | **0.3619** (W-F1 0.3706) | 0.9431 / 0.9538 | 0.0669 | 6.2m | Δ-vs-FDG-ours: W-F1 **+2.57 pt**; ✅ codet HR≥0.95; stability 0.04pt ✅ (best stability of suite) |
 | 🆕 | exp_zs_15 | **BuresQuantumFidelity** (density-matrix Bures metric) | quantum-info-geometry | — | — | — / — | — | 0.7m | ❌ CUBLAS_ALLOC (density matrix 768×768 × bs=128) → fix: bs//=8 (applied 2026-04-20) |
 | 🆕 | exp_zs_16 | **KSDScope** (Kernel Stein + scope graph) | structural-Stein | **0.3357** | 0.3511 | **0.4348** (W-F1 0.4417) | 0.9439 / 0.9416 | 0.0408 | 1.5m | Δ-vs-FDG-ours: W-F1 **+1.50 pt**; Macro CoDET **+8.65 pt**; HR<0.95 both; stability 9.91pt ✅ |
-| 🆕🆕 | exp_zs_17 | **PerturbationStructuralStability** (embedding robustness) | structural-robustness | — | — | — / — | — | 1.1m | ❌ OOM 12.27 GiB (4 forwards × vocab logits) → fix: bs//=8 + empty_cache (applied 2026-04-20) |
+| 🆕🆕 | exp_zs_17 | **PerturbationStructuralStability** (embedding robustness) | structural-robustness | **0.3216** | 0.3378 | **0.3445** (W-F1 0.3536) | **0.9521** / **0.9503** | 0.0500 | 14.6m | **🌟 3/4 CLAIMS PASS** (HR both ✅ + stability 2.29pt ✅); Δ-FDG-ours W-F1 **+0.09 pt**; only claim-1 fails. **Best claim-pass profile of suite** — cùng với Exp_24 EntropyWM là 2 methods duy nhất có HR ≥ 0.95 trên cả 2 bench. |
 | 🆕🆕 | exp_zs_18 | **ControlFlowEntropy** (cyclomatic complexity) | control-flow-complexity | **0.4137** | 0.4261 | **0.3640** (W-F1 0.3726) | 0.9484 / 0.9467 | 0.0756 | 1.2m | **Δ-vs-FDG-ours: W-F1 +9.30 pt** 🔥 (best so far); HR<0.95 both; stability 4.97pt ✅ |
 | 🆕🆕 | exp_zs_19 | **SemanticDriftDetector** (paraphrase stability) | semantic-invariance | **0.3396** | 0.3550 | **0.3512** (W-F1 0.3601) | 0.9450 / 0.9477 | 0.0866 | 8.4m | Δ-vs-FDG-ours: W-F1 **+1.89 pt**; HR<0.95 both; stability 1.16pt ✅ (τ=409.7 raw cosine) |
-| 🆕🆕 | exp_zs_20 | **TypeConstraintDeviation** (type-system slack) | type-system-semantics | **0.3456** | **0.3461** | 0.0000 / 0.9475 | 1.0000 | 1.3m | ❌ DEGENERATE τ=0 Droid (all-zero slack in non-Python langs) → fix: multi-lang guards + length tiebreaker (applied 2026-04-20) |
+| 🆕🆕 | exp_zs_20 | **TypeConstraintDeviation** (type-system slack) | type-system-semantics | **0.3651** | 0.3456 | **0.3461** (W-F1 0.3551) | 0.0000 / 0.9475 | 1.0000 | 1.0m | ❌ **DEGENERATE τ=0 Droid (3 RUNS IN A ROW) — systemic, not random.** Root cause: DROID_PERSONAHUB (n=10841, Python-heavy) returns empty type-annotation set for most samples → score collapses to 0 → calibration picks τ=0 → predicts AI for all. codet_binary OK (C++/Java/Python with denser annotations, τ=0.0909). **Fix v2 needed**: fallback to structural complexity when slack=0 (not just multi-lang guards). |
 | 🌟 | exp_zs_21 | **TaskConditioningEntropy** (ECML PKDD'25) | task-conditioned-entropy | — | — | — / — | — | 0.7m | ❌ BFloat16 unsupported for torch.log → fix: cast logits to fp32 (applied 2026-04-20) |
 | 🌟 | exp_zs_22 | **ContrastiveHardNegatives** (ACL'25) | manifold-disentanglement | — | — | — / — | — | 0.7m | ❌ OOM 12.27GiB (bs=128 × 2 vocab-logit tensors) → fix: bs//=4 + empty_cache (applied 2026-04-20) |
 | 🌟 | exp_zs_23 | **KLDivergenceSignal** (arXiv:2504.10637) | distribution-divergence | — | — | — / — | — | 0.7m | ❌ GPT-2 is causal LM, loaded as MLM → fix: AutoModelForCausalLM + shift logits (applied 2026-04-20) |
@@ -120,7 +132,7 @@ Each ZS file now runs on BOTH benchmarks via `run_zs_oral` and emits a combined 
 | **13 Sinkhorn** | OOM 12.27 GiB | Cost matrix + vocab logits stacked | `bs //= 8` |
 | **15 Bures** | CUBLAS_ALLOC | Density matrix 768×768 + scipy sqrtm at bs=128 | `bs //= 8` → ~1 GB peak |
 | **17 PIFE** | OOM 12.27 GiB × 2 bench | 4 forward passes × vocab logits at bs=128 | `bs //= 8` + `del logits; empty_cache` per forward |
-| **20 TypeConstraint** | τ=0 Droid (degenerate) | All-zero slack on JS/C/Go/Rust → no calibration | Multi-lang guards (`instanceof`/`typeof`/`catch`) + length tiebreaker |
+| **20 TypeConstraint** | τ=0 Droid — **3 runs in a row (systemic)** | Diagnosis deeper after 2nd rerun: not just multi-lang — DROID_PERSONAHUB (n=10841 Python-heavy, 2nd biggest Droid source) returns empty annotation set despite Python typing availability, because most samples lack `typing` imports or annotations. Multi-lang guards (v1 fix) + length tiebreaker insufficient. | **v2 pending**: fallback to structural-complexity score when slack==0 (OR) mixture score = α·slack + (1-α)·gzip_ratio |
 | **21 TaskCond** | BFloat16 unsupported for torch.log | `torch.log` not implemented for bf16 | `logits.float()` before softmax |
 | **22 ContrastiveHN** | OOM 12.27 GiB | 2 forwards × vocab logits at bs=128 | `bs //= 4` + `empty_cache` |
 | **23 KLDiv** | GPT-2 MLM mismatch | GPT-2 is causal, loaded as MLM | `AutoModelForCausalLM` + shift logits `[:,:-1]` |
