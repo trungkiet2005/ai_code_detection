@@ -128,6 +128,7 @@ Each ZS file now runs on BOTH benchmarks via `run_zs_oral` and emits a combined 
 | 🚀 | exp_zs_28 | **ContrastiveTwinStyleometry** (AISec 2025) | pair-divergence | — | — | — | — / — | — | ~12m | ⏳ pending |
 | 🚀 | exp_zs_29 | **TokenEntropyForks** (ACL 2025) | decision-point-semantics | — | — | — | — / — | — | 0.7m | ❌ `cfg.backbone_lm` missing + `AutoModelForCausalLM` on MLM checkpoint → fix: `scorer_lm` + `AutoModelForMaskedLM` (applied 2026-04-21) |
 | 🚀 | exp_zs_30 | **SemanticResilience** (arXiv:2512.19215) | robustness-meta-signal | — | — | — | — / — | — | 0.7m | ❌ `cfg.backbone_lm` missing + random classifier head would produce noise → fix: `scorer_lm` + `AutoModel` CLS-embedding distance (applied 2026-04-21) |
+| 🎯 | **exp_zs_31** | **Fast-DetectGPT OFFICIAL** (Bao et al. ICLR'24 — **paper-exact repo vendored**) | curvature (causal, 2-LM) | — | — | — | — / — | — | ~30-60m | ⏳ **Paper-exact reproduction** (not surrogate). Vendored MIT subset of github.com/baoguangsheng/fast-detect-gpt. Model pair selectable via `FDG_PAIR` env var: `gpt-neo-2.7B_gpt-neo-2.7B` (default, T4-safe) \| `falcon-7b_falcon-7b-instruct` (paper BB best) \| `llama3-8b_llama3-8b-instruct` (paper 2026 best). **Target:** close the 32-pt gap between Exp_02 surrogate (32.07 W-F1) and paper's 64.54 W-F1 headline. |
 | **REF** | Paper | **Fast-DetectGPT** (Droid paper Table 3/5) | **64.54** | — | 0.84 / — | 0.48 | — | reference |
 | REF | Paper | M4 (ZS) | 55.27 | — | 0.40 ⚠️ / — | 0.73 | — | reference |
 | REF | Paper | GPTZero | 49.10 | — | 0.53 / — | 0.10 | — | reference |

@@ -24,3 +24,10 @@ logs/
 temp/
 tmp/
 Exp_ZeroShot/run_zs_*_results.json
+
+# Upstream Fast-DetectGPT clone (we vendor the minimal subset under
+# Exp_ZeroShot/fast_detect_gpt/ instead). Kept locally for reference.
+third_party/
+fast-detect-gpt/
+fdg_cache/
+cache/
