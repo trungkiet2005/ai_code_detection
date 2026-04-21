@@ -105,13 +105,16 @@ if __name__ == "__main__":
     print(f"[HW] Detected GPU VRAM: {gpu_vram:.1f} GB")
     print(f"[SUITE] 6 SOTA-driven detectors: task-conditioning, contrastive, KL-div,")
     print(f"        entropy-watermark, syntactic-pred, code-acrostic")
-    print(f"[MODE] H100 80GB -> Parallel mode: max_workers=3 (safe VRAM scheduling)")
+    print(f"[MODE] H100 80GB -> Sequential (max_workers=1) — workers=3 caused 4/6 TIMEOUT in rerun 2 (2026-04-21)")
     print("="*75)
 
     results = []
 
     # Parallel execution: max 3 concurrent exps
-    with ThreadPoolExecutor(max_workers=3) as executor:
+    # Sequential: workers=3 caused 4/6 TIMEOUT in rerun 2 (2026-04-21)
+    # when 4 processes (24,26,22,23) contended for VRAM on 106k-sample test set.
+    # Even exps that PASSED in run 1 (24@7.2m, 26@7.7m) TIMEOUT >30m in run 2.
+    with ThreadPoolExecutor(max_workers=1) as executor:
         futures = {}
         for exp_file, exp_id, est_min in EXP_FILES:
             future = executor.submit(run_exp, exp_file, exp_id)

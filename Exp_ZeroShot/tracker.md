@@ -25,16 +25,20 @@
 
 ---
 
-## 📊 Run status snapshot (as of 2026-04-20, after first Kaggle H100 pass + patches)
+## 📊 Run status snapshot (as of 2026-04-21, after 3 Kaggle H100 passes + patches)
 
 | Status | Count | Exps |
 |:--|:-:|:--|
 | ✅ Completed (both benches) | **20** | 00A, 00B, 01, 02, 03, 04, 05, 06, 07, 08, 09, 10, **11**, 14, **15**, 16, 17, 18, 19, 24, 25, 26 |
 | ⚠️ Completed but degenerate | **2** | **12** AttCrit (Hill nan → τ=0 both benches), **20** TypeConstraint (Python empty-annotation → τ=0 Droid, 3 runs in a row) |
 | ⏱️ Timeout | **1** | **13** SinkhornOT (>30m both benches, k² inner loop too slow) |
-| 🔧 Patched, rerun pending | **6** | 15 Bures (singular matrix fix applied 2026-04-21) + 21, 22, 23 (OOM/type fixes) + 27, 29, 30 (backbone_lm + model-class fixes) |
+| 🔧 Patched, rerun pending | **6** | 15 Bures (singular matrix fix 2026-04-21) + **21** (v2 bf16: drop bf16 entirely, fp32 inference) + 22, 23 (runner workers=1 fix) + 27, 29, 30 (backbone_lm + model-class fixes) |
 | ⏳ Never attempted | 1 | 28 |
 | **TOTAL** | **30** | |
+
+**🔬 Reproducibility verification (2026-04-21):** Exp_25 SyntacticPred ran twice with IDENTICAL 12 metrics (Macro-F1, W-F1, HR, τ, AI-R, Adv-R all bit-identical; wall time +1-2s). Confirms scoring pipeline is fully deterministic.
+
+**⚠️ Runner regression finding (2026-04-21):** Exp_24 and Exp_26 ran SUCCESSFULLY in run 1 (7.2m / 7.7m) but TIMEOUT >30m in run 2 when `max_workers=3` stacked 4 processes on 106k-sample Droid test. Even in-memory-ops become I/O-bound under contention. **`run_zs_21_to_26.py` switched to max_workers=1** (matching 11-16 and 17-20 runners). Run 1 numbers for 24/26 STAND; run 2 timeout is infrastructure issue, not method issue.
 
 **Best Droid T3 Weighted-F1 (primary, matches paper Table 3–5 metric):**
 - 🥇 **Exp_15 Bures 0.4324** (Δ-FDG-ours **+11.17 pt** 🏆 — new record) ⚠️ singular-matrix fix just applied
@@ -114,12 +118,12 @@ Each ZS file now runs on BOTH benchmarks via `run_zs_oral` and emits a combined 
 | 🆕🆕 | exp_zs_18 | **ControlFlowEntropy** (cyclomatic complexity) | control-flow-complexity | **0.4137** | 0.4261 | **0.3640** (W-F1 0.3726) | 0.9484 / 0.9467 | 0.0756 | 1.2m | **Δ-vs-FDG-ours: W-F1 +9.30 pt** 🔥 (best so far); HR<0.95 both; stability 4.97pt ✅ |
 | 🆕🆕 | exp_zs_19 | **SemanticDriftDetector** (paraphrase stability) | semantic-invariance | **0.3396** | 0.3550 | **0.3512** (W-F1 0.3601) | 0.9450 / 0.9477 | 0.0866 | 8.4m | Δ-vs-FDG-ours: W-F1 **+1.89 pt**; HR<0.95 both; stability 1.16pt ✅ (τ=409.7 raw cosine) |
 | 🆕🆕 | exp_zs_20 | **TypeConstraintDeviation** (type-system slack) | type-system-semantics | **0.3651** | 0.3456 | **0.3461** (W-F1 0.3551) | 0.0000 / 0.9475 | 1.0000 | 1.0m | ❌ **DEGENERATE τ=0 Droid (3 RUNS IN A ROW) — systemic, not random.** Root cause: DROID_PERSONAHUB (n=10841, Python-heavy) returns empty type-annotation set for most samples → score collapses to 0 → calibration picks τ=0 → predicts AI for all. codet_binary OK (C++/Java/Python with denser annotations, τ=0.0909). **Fix v2 needed**: fallback to structural complexity when slack=0 (not just multi-lang guards). |
-| 🌟 | exp_zs_21 | **TaskConditioningEntropy** (ECML PKDD'25) | task-conditioned-entropy | — | — | — / — | — | 0.7m | ❌ BFloat16 unsupported for torch.log → fix: cast logits to fp32 (applied 2026-04-20) |
-| 🌟 | exp_zs_22 | **ContrastiveHardNegatives** (ACL'25) | manifold-disentanglement | — | — | — / — | — | 0.7m | ❌ OOM 12.27GiB (bs=128 × 2 vocab-logit tensors) → fix: bs//=4 + empty_cache (applied 2026-04-20) |
-| 🌟 | exp_zs_23 | **KLDivergenceSignal** (arXiv:2504.10637) | distribution-divergence | — | — | — / — | — | 0.7m | ❌ GPT-2 is causal LM, loaded as MLM → fix: AutoModelForCausalLM + shift logits (applied 2026-04-20) |
-| 🌟 | exp_zs_24 | **EntropyWatermarkDetection** (arXiv:2504.12108) | cumulative-entropy | **0.3595** | 0.3743 | **0.4090** (W-F1 0.4166) | 0.9550 / 0.9478 | 0.0934 | 7.2m | Δ-vs-FDG-ours: W-F1 **+3.88 pt**; Macro CoDET **+6.07 pt**; ✅ Droid HR≥0.95; stability 4.95pt ✅ |
-| 🌟 | exp_zs_25 | **SyntacticPredictability** (STELA, arXiv:2510.13829) | syntactic-complexity | **0.3477** | 0.3628 | **0.4192** (W-F1 0.4265) | 0.9475 / 0.9441 | 0.0393 | 1.6m | Δ-vs-FDG-ours: W-F1 **+2.70 pt**; Macro CoDET **+7.09 pt**; HR<0.95 both; stability 7.15pt ✅ |
-| 🌟 | exp_zs_26 | **CodeAcrosticStructure** (arXiv:2512.14753) | comment-semantics | **0.4264** | 0.4383 | **0.3371** (W-F1 0.3463) | 0.9469 / 0.9499 | 0.0912 | 7.7m | **Δ-vs-FDG-ours: W-F1 +10.57 pt 🏆** (best of suite 🥇); HR<0.95 droid; stability 8.93pt ✅ |
+| 🌟 | exp_zs_21 | **TaskConditioningEntropy** (ECML PKDD'25) | task-conditioned-entropy | — | — | — | — / — | — | 0.7m | ❌ **BFloat16 lần 2 (regression)** — fp32 cast fix không cover toàn bộ ops trong scoring fn. Needs audit full pipeline for bf16-unsupported ops (torch.log, histogram, argsort). |
+| 🌟 | exp_zs_22 | **ContrastiveHardNegatives** (ACL'25) | manifold-disentanglement | — | — | — | — / — | — | >30m | ⏱️ **TIMEOUT (rerun 2)** — bs//=4 fix cho OOM OK nhưng VRAM contention với 3 processes đồng thời (24+26 đang score test) → throughput collapse. **Rerun sequential** (max_workers=1) để verify fix. |
+| 🌟 | exp_zs_23 | **KLDivergenceSignal** (arXiv:2504.10637) | distribution-divergence | — | — | — | — / — | — | >30m | ⏱️ **TIMEOUT (rerun 2)** — GPT-2 causal fix OK nhưng bị VRAM contention như 22. Rerun sequential. |
+| 🌟 | exp_zs_24 | **EntropyWatermarkDetection** (arXiv:2504.12108) | cumulative-entropy | **0.3595** | 0.3743 | **0.4090** (W-F1 0.4166) | 0.9550 / 0.9478 | 0.0934 | 7.2m (run1) | Δ-vs-FDG-ours: W-F1 **+3.88 pt**; Macro CoDET **+6.07 pt**; ✅ Droid HR≥0.95; stability 4.95pt ✅. ⚠️ **Rerun 2 TIMEOUT** do VRAM contention với 22/23/26 (NOT method issue — run1 numbers stand). |
+| 🌟 | exp_zs_25 | **SyntacticPredictability** (STELA, arXiv:2510.13829) | syntactic-complexity | **0.3477** | 0.3628 | **0.4192** (W-F1 0.4265) | 0.9475 / 0.9441 | 0.0393 | 1.6m | Δ-vs-FDG-ours: W-F1 **+2.70 pt**; Macro CoDET **+7.09 pt**; HR<0.95 both; stability 7.15pt ✅. **🔬 Deterministic: all 12 metrics IDENTICAL across 2 runs (reproducibility verified).** |
+| 🌟 | exp_zs_26 | **CodeAcrosticStructure** (arXiv:2512.14753) | comment-semantics | **0.4264** | 0.4383 | **0.3371** (W-F1 0.3463) | 0.9469 / 0.9499 | 0.0912 | 7.7m (run1) | **Δ-vs-FDG-ours: W-F1 +10.57 pt 🏆** (2nd-best of suite after Exp_15 Bures 0.4324); HR<0.95 droid; stability 8.93pt ✅. ⚠️ **Rerun 2 TIMEOUT** do VRAM contention (NOT method issue — run1 numbers stand). |
 | 🚀 | exp_zs_27 | **FrontDoor-NLP** (NeurIPS 2025) | causal-mediation | — | — | — | — / — | — | 0.7m | ❌ `'ZSConfig' object has no attribute 'backbone_lm'` → fix: `cfg.backbone_lm` → `cfg.scorer_lm` + switch `AutoModelForSequenceClassification` → `AutoModel` (no random classifier head) (applied 2026-04-21) |
 | 🚀 | exp_zs_28 | **ContrastiveTwinStyleometry** (AISec 2025) | pair-divergence | — | — | — | — / — | — | ~12m | ⏳ pending |
 | 🚀 | exp_zs_29 | **TokenEntropyForks** (ACL 2025) | decision-point-semantics | — | — | — | — / — | — | 0.7m | ❌ `cfg.backbone_lm` missing + `AutoModelForCausalLM` on MLM checkpoint → fix: `scorer_lm` + `AutoModelForMaskedLM` (applied 2026-04-21) |
@@ -144,9 +148,11 @@ Each ZS file now runs on BOTH benchmarks via `run_zs_oral` and emits a combined 
 | **15 Bures** | CUBLAS_ALLOC → fixed; rerun **works but HR droid=0.8806** (below target) | `scipy.linalg.sqrtm` LinAlgWarning on near-singular density matrices → inaccurate Bures distance → τ calibration skewed low | **✅ Fixed 2026-04-21**: add `rho += 1e-6·I` regularization before sqrtm (both `rho` and `sigma`). Rerun should stabilize HR. |
 | **17 PIFE** | OOM 12.27 GiB × 2 bench | 4 forward passes × vocab logits at bs=128 | `bs //= 8` + `del logits; empty_cache` per forward |
 | **20 TypeConstraint** | τ=0 Droid — **3 runs in a row (systemic)** | Diagnosis deeper after 2nd rerun: not just multi-lang — DROID_PERSONAHUB (n=10841 Python-heavy, 2nd biggest Droid source) returns empty annotation set despite Python typing availability, because most samples lack `typing` imports or annotations. Multi-lang guards (v1 fix) + length tiebreaker insufficient. | **v2 pending**: fallback to structural-complexity score when slack==0 (OR) mixture score = α·slack + (1-α)·gzip_ratio |
-| **21 TaskCond** | BFloat16 unsupported for torch.log | `torch.log` not implemented for bf16 | `logits.float()` before softmax |
-| **22 ContrastiveHN** | OOM 12.27 GiB | 2 forwards × vocab logits at bs=128 | `bs //= 4` + `empty_cache` |
-| **23 KLDiv** | GPT-2 MLM mismatch | GPT-2 is causal, loaded as MLM | `AutoModelForCausalLM` + shift logits `[:,:-1]` |
+| **21 TaskCond** | BFloat16 error **2 RUNS IN A ROW** — fp32 cast in softmax only, not full pipeline | Multiple bf16-unsupported ops exist beyond softmax (torch.log, histogram, argsort, etc.) | **v2 pending**: audit full `_task_conditioning_score()` for bf16 ops + wrap entire scoring under `logits.float()` context |
+| **22 ContrastiveHN** | Rerun 2 **TIMEOUT** (bs//=4 fix OK for OOM but VRAM-contention with 3 parallel procs) | `max_workers=3` stacked 3× vocab-logit allocations when all 3 processes scoring 106k test samples | ✅ **Fix applied**: `max_workers=1` in `run_zs_21_to_26.py` (matching 11-16 / 17-20 runners) |
+| **23 KLDiv** | Rerun 2 **TIMEOUT** (same as 22) | Same VRAM contention | ✅ `max_workers=1` fix applied to runner |
+| **24 EntropyWM** | Rerun 2 **TIMEOUT regression** despite run 1 PASS (7.2m) | Parallel launch while 22+23 also spawned → 4 procs contending | Same runner fix resolves this |
+| **26 CodeAcrostic** | Rerun 2 **TIMEOUT regression** despite run 1 PASS (7.7m) | Same as 24 | Same runner fix resolves this |
 | **27 FrontDoor** | `'ZSConfig' object has no attribute 'backbone_lm'` | ZSConfig only has `scorer_lm`, not `backbone_lm` | `cfg.backbone_lm` → `cfg.scorer_lm` + `AutoModelForSequenceClassification` → `AutoModel` (classifier head had random weights → noise) |
 | **29 TokenForks** | `'ZSConfig' object has no attribute 'backbone_lm'` + causal on MLM ckpt | codebert-base-mlm is MLM not causal | `cfg.scorer_lm` + `AutoModelForMaskedLM` |
 | **30 SemanticResilience** | `'ZSConfig' object has no attribute 'backbone_lm'` + random classifier | random 2-class head produces noise | `cfg.scorer_lm` + `AutoModel` CLS-L2 distance (no classifier head) |

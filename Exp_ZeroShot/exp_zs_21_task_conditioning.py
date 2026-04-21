@@ -138,14 +138,15 @@ def _task_conditioning_score(codes: List[str], cfg: ZSConfig) -> np.ndarray:
     import torch
     from transformers import AutoModelForMaskedLM, AutoTokenizer
 
-    logger.info(f"[ZS-21] Loading encoder {cfg.scorer_lm}...")
+    logger.info(f"[ZS-21] Loading encoder {cfg.scorer_lm} (FP32 — entropy computation needs full precision)...")
     tokenizer = AutoTokenizer.from_pretrained(cfg.scorer_lm)
     model = AutoModelForMaskedLM.from_pretrained(cfg.scorer_lm)
     model.eval()
     if cfg.device == "cuda" and torch.cuda.is_available():
         model = model.to("cuda")
-        if cfg.precision == "bf16":
-            model = model.to(torch.bfloat16)
+    # NOTE: deliberately skip bf16 cast — bf16 regressions observed 2 runs in a
+    # row (torch.log, softmax, gather, etc. flaky in bf16 depending on kernel).
+    # Entropy computation is O(L*V) — fp32 overhead negligible on H100.
 
     scores = np.zeros(len(codes), dtype=np.float64)
 
