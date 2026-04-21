@@ -29,10 +29,10 @@
 
 | Status | Count | Exps |
 |:--|:-:|:--|
-| ✅ Completed (both benches) | **14** | 00A, 00B, 01, 03, 04, 05, 06, 07, 08, 09, 10, 14, 16, 18, 19, 24, 25, 26 |
+| ✅ Completed (both benches) | **15** | 00A, 00B, 01, 02, 03, 04, 05, 06, 07, 08, 09, 10, 14, 16, 18, 19, 24, 25, 26 |
 | ⚠️ Completed but degenerate | 1 | 20 (Droid τ=0 — **fixed**, rerun pending) |
-| 🔧 Patched, rerun pending | 8 | 11, 12, 13, 15, 17, 21, 22, 23 (all OOM / type fixes applied 2026-04-20) |
-| ⏳ Never attempted | 5 | 02, 27, 28, 29, 30 |
+| 🔧 Patched, rerun pending | **11** | 11, 12, 13, 15, 17, 21, 22, 23 (OOM/type fixes 2026-04-20) + 27, 29, 30 (`backbone_lm` + model-class fixes 2026-04-21) |
+| ⏳ Never attempted | 1 | 28 |
 | **TOTAL** | **30** | |
 
 **Best Droid T3 Weighted-F1 (primary, matches paper Table 3–5 metric):**
@@ -97,10 +97,10 @@ Each ZS file now runs on BOTH benchmarks via `run_zs_oral` and emits a combined 
 | 🌟 | exp_zs_24 | **EntropyWatermarkDetection** (arXiv:2504.12108) | cumulative-entropy | **0.3595** | 0.3743 | **0.4090** (W-F1 0.4166) | 0.9550 / 0.9478 | 0.0934 | 7.2m | Δ-vs-FDG-ours: W-F1 **+3.88 pt**; Macro CoDET **+6.07 pt**; ✅ Droid HR≥0.95; stability 4.95pt ✅ |
 | 🌟 | exp_zs_25 | **SyntacticPredictability** (STELA, arXiv:2510.13829) | syntactic-complexity | **0.3477** | 0.3628 | **0.4192** (W-F1 0.4265) | 0.9475 / 0.9441 | 0.0393 | 1.6m | Δ-vs-FDG-ours: W-F1 **+2.70 pt**; Macro CoDET **+7.09 pt**; HR<0.95 both; stability 7.15pt ✅ |
 | 🌟 | exp_zs_26 | **CodeAcrosticStructure** (arXiv:2512.14753) | comment-semantics | **0.4264** | 0.4383 | **0.3371** (W-F1 0.3463) | 0.9469 / 0.9499 | 0.0912 | 7.7m | **Δ-vs-FDG-ours: W-F1 +10.57 pt 🏆** (best of suite 🥇); HR<0.95 droid; stability 8.93pt ✅ |
-| 🚀 | exp_zs_27 | **FrontDoor-NLP** (NeurIPS 2025) | causal-mediation | — | — | — / — | — | ~15m | ⏳ pending |
-| 🚀 | exp_zs_28 | **ContrastiveTwinStyleometry** (AISec 2025) | pair-divergence | — | — | — / — | — | ~12m | ⏳ pending |
-| 🚀 | exp_zs_29 | **TokenEntropyForks** (ACL 2025) | decision-point-semantics | — | — | — / — | — | ~10m | ⏳ pending |
-| 🚀 | exp_zs_30 | **SemanticResilience** (arXiv:2512.19215) | robustness-meta-signal | — | — | — / — | — | ~8m | ⏳ pending |
+| 🚀 | exp_zs_27 | **FrontDoor-NLP** (NeurIPS 2025) | causal-mediation | — | — | — | — / — | — | 0.7m | ❌ `'ZSConfig' object has no attribute 'backbone_lm'` → fix: `cfg.backbone_lm` → `cfg.scorer_lm` + switch `AutoModelForSequenceClassification` → `AutoModel` (no random classifier head) (applied 2026-04-21) |
+| 🚀 | exp_zs_28 | **ContrastiveTwinStyleometry** (AISec 2025) | pair-divergence | — | — | — | — / — | — | ~12m | ⏳ pending |
+| 🚀 | exp_zs_29 | **TokenEntropyForks** (ACL 2025) | decision-point-semantics | — | — | — | — / — | — | 0.7m | ❌ `cfg.backbone_lm` missing + `AutoModelForCausalLM` on MLM checkpoint → fix: `scorer_lm` + `AutoModelForMaskedLM` (applied 2026-04-21) |
+| 🚀 | exp_zs_30 | **SemanticResilience** (arXiv:2512.19215) | robustness-meta-signal | — | — | — | — / — | — | 0.7m | ❌ `cfg.backbone_lm` missing + random classifier head would produce noise → fix: `scorer_lm` + `AutoModel` CLS-embedding distance (applied 2026-04-21) |
 | **REF** | Paper | **Fast-DetectGPT** (Droid paper Table 3/5) | **64.54** | — | 0.84 / — | 0.48 | — | reference |
 | REF | Paper | M4 (ZS) | 55.27 | — | 0.40 ⚠️ / — | 0.73 | — | reference |
 | REF | Paper | GPTZero | 49.10 | — | 0.53 / — | 0.10 | — | reference |
@@ -124,6 +124,9 @@ Each ZS file now runs on BOTH benchmarks via `run_zs_oral` and emits a combined 
 | **21 TaskCond** | BFloat16 unsupported for torch.log | `torch.log` not implemented for bf16 | `logits.float()` before softmax |
 | **22 ContrastiveHN** | OOM 12.27 GiB | 2 forwards × vocab logits at bs=128 | `bs //= 4` + `empty_cache` |
 | **23 KLDiv** | GPT-2 MLM mismatch | GPT-2 is causal, loaded as MLM | `AutoModelForCausalLM` + shift logits `[:,:-1]` |
+| **27 FrontDoor** | `'ZSConfig' object has no attribute 'backbone_lm'` | ZSConfig only has `scorer_lm`, not `backbone_lm` | `cfg.backbone_lm` → `cfg.scorer_lm` + `AutoModelForSequenceClassification` → `AutoModel` (classifier head had random weights → noise) |
+| **29 TokenForks** | `'ZSConfig' object has no attribute 'backbone_lm'` + causal on MLM ckpt | codebert-base-mlm is MLM not causal | `cfg.scorer_lm` + `AutoModelForMaskedLM` |
+| **30 SemanticResilience** | `'ZSConfig' object has no attribute 'backbone_lm'` + random classifier | random 2-class head produces noise | `cfg.scorer_lm` + `AutoModel` CLS-L2 distance (no classifier head) |
 
 **Systemic pattern:** all OOMs came from **vocab-logit tensors `(B, L, V)` at `bs=128`**. Our H100 profile chose bs=128 assuming only CLS embedding survives to CPU, but most methods hold vocab logits for `log_softmax`/`topk`. **Canonical fix going forward:** cap `bs = cfg.batch_size // 8` (= 16 on H100) in any method that keeps vocab-size logits in memory, and call `empty_cache()` between chained forwards.
 

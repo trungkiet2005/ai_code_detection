@@ -131,11 +131,14 @@ def _classify_fork_context(code: str, fork_idx: int, window: int = 5) -> str:
 
 def _token_entropy_fork_score(codes: List[str], cfg: ZSConfig) -> np.ndarray:
     """Decision-point semantics via token-entropy forks."""
-    from transformers import AutoTokenizer, AutoModelForCausalLM
+    from transformers import AutoTokenizer, AutoModelForMaskedLM
 
-    logger.info(f"[ZS-29] Loading decoder {cfg.backbone_lm}...")
-    tokenizer = AutoTokenizer.from_pretrained(cfg.backbone_lm)
-    model = AutoModelForCausalLM.from_pretrained(cfg.backbone_lm)
+    # cfg.scorer_lm defaults to codebert-base-mlm (MaskedLM checkpoint). Load as
+    # MLM and read per-position entropy from the unmasked logits — this gives
+    # the "token surprise" signal the fork-detector relies on.
+    logger.info(f"[ZS-29] Loading MLM {cfg.scorer_lm}...")
+    tokenizer = AutoTokenizer.from_pretrained(cfg.scorer_lm)
+    model = AutoModelForMaskedLM.from_pretrained(cfg.scorer_lm)
     model.eval()
     if cfg.device == "cuda" and torch.cuda.is_available():
         model = model.to("cuda")

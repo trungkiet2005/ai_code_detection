@@ -123,11 +123,13 @@ def _hsic_penalty(s: torch.Tensor, source_labels: torch.Tensor, y_labels: torch.
 
 def _frontdoor_score(codes: List[str], cfg: ZSConfig) -> np.ndarray:
     """Front-door causal identification via style bottleneck + marginalisation."""
-    from transformers import AutoTokenizer, AutoModelForSequenceClassification
+    from transformers import AutoTokenizer, AutoModel
 
-    logger.info(f"[ZS-27] Loading genealogy backbone {cfg.backbone_lm}...")
-    tokenizer = AutoTokenizer.from_pretrained(cfg.backbone_lm)
-    model = AutoModelForSequenceClassification.from_pretrained(cfg.backbone_lm, num_labels=6)
+    # Load backbone encoder only (no random classifier head); we need hidden
+    # states for the style bottleneck, not classification logits.
+    logger.info(f"[ZS-27] Loading backbone encoder {cfg.scorer_lm}...")
+    tokenizer = AutoTokenizer.from_pretrained(cfg.scorer_lm)
+    model = AutoModel.from_pretrained(cfg.scorer_lm)
     model.eval()
 
     bottleneck = StyleBottleneck(input_dim=768, style_dim=64)
@@ -151,8 +153,8 @@ def _frontdoor_score(codes: List[str], cfg: ZSConfig) -> np.ndarray:
                              return_tensors="pt", padding="max_length")
             if cfg.device == "cuda":
                 inputs = {k: v.to("cuda") for k, v in inputs.items()}
-            outputs = model(**inputs, output_hidden_states=True)
-            emb = outputs.hidden_states[-1][:, 0, :].cpu()  # CLS token
+            outputs = model(**inputs)
+            emb = outputs.last_hidden_state[:, 0, :].float().cpu()  # CLS token (fp32)
             embeddings.append(emb)
 
     # Apply style bottleneck

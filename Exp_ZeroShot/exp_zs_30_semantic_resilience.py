@@ -179,57 +179,54 @@ def _generate_semantic_equivalents(code: str, num_variants: int = 5) -> List[str
 
 
 def _semantic_resilience_score(codes: List[str], cfg: ZSConfig) -> np.ndarray:
-    """Robustness under semantic-equivalence transforms."""
-    from transformers import AutoTokenizer, AutoModelForSequenceClassification
+    """Robustness under semantic-equivalence transforms.
 
-    logger.info(f"[ZS-30] Loading detector backbone {cfg.backbone_lm}...")
-    tokenizer = AutoTokenizer.from_pretrained(cfg.backbone_lm)
-    model = AutoModelForSequenceClassification.from_pretrained(cfg.backbone_lm, num_labels=2)
+    Uses CLS-embedding L2-distance (not a classifier head, which would have
+    random weights and produce noise). Score = embedding stability under 4
+    semantic-preserving transforms. Higher stability -> more human-like per
+    theory hook.
+    """
+    import torch
+    from transformers import AutoTokenizer, AutoModel
+
+    logger.info(f"[ZS-30] Loading encoder backbone {cfg.scorer_lm}...")
+    tokenizer = AutoTokenizer.from_pretrained(cfg.scorer_lm)
+    model = AutoModel.from_pretrained(cfg.scorer_lm)
     model.eval()
 
     if cfg.device == "cuda":
-        import torch
         model = model.to("cuda")
         if cfg.precision == "bf16":
             model = model.to(torch.bfloat16)
 
+    def _embed(texts: List[str]) -> torch.Tensor:
+        inputs = tokenizer(texts, max_length=cfg.scorer_max_length, truncation=True,
+                          return_tensors="pt", padding="max_length")
+        if cfg.device == "cuda":
+            inputs = {k: v.to("cuda") for k, v in inputs.items()}
+        with torch.no_grad():
+            out = model(**inputs)
+            cls = out.last_hidden_state[:, 0, :].float().cpu()
+        # L2-normalise for stable cosine / distance comparisons
+        return cls / (torch.norm(cls, dim=1, keepdim=True) + 1e-8)
+
     scores = np.zeros(len(codes), dtype=np.float64)
 
+    # Cap batch to avoid VRAM issues (we embed each sample's 5 variants together).
     for i, code in enumerate(codes):
         if not code or not code.strip():
             scores[i] = 0.0
             continue
 
-        # Generate semantic variants
         variants = _generate_semantic_equivalents(code, num_variants=4)
-
-        # Score all variants
-        variant_scores = []
-        for variant in variants:
-            try:
-                inputs = tokenizer(variant, max_length=512, truncation=True,
-                                 return_tensors="pt", padding="max_length")
-                if cfg.device == "cuda":
-                    inputs = {k: v.to("cuda") for k, v in inputs.items()}
-
-                import torch
-                with torch.no_grad():
-                    outputs = model(**inputs)
-                    logits = outputs.logits[0]
-                    probs = torch.softmax(logits, dim=-1)
-                    score = float(probs[1].cpu().item())  # P(AI)
-                variant_scores.append(score)
-            except:
-                variant_scores.append(0.5)
-
-        # Consistency = how stable is the score across transforms
-        if len(variant_scores) > 1:
-            original_score = variant_scores[0]
-            transform_scores = variant_scores[1:]
-            consistency_delta = np.mean([abs(s - original_score) for s in transform_scores])
-            # Human code: low delta (robust), LLM code: high delta (fragile)
+        try:
+            emb = _embed(variants)  # (k, D), L2-normalised
+            # Deltas vs original (variants[0])
+            orig = emb[0:1]
+            dists = torch.norm(emb[1:] - orig, dim=1).numpy()
+            consistency_delta = float(np.mean(dists)) if len(dists) > 0 else 0.0
             robustness = 1.0 / (1.0 + consistency_delta)
-        else:
+        except Exception:
             robustness = 0.5
 
         scores[i] = float(np.clip(robustness, 0.0, 1.0))
