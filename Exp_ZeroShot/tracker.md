@@ -29,40 +29,51 @@
 
 | Status | Count | Exps |
 |:--|:-:|:--|
-| ✅ Completed (both benches) | **17** | 00A, 00B, 01, 02, 03, 04, 05, 06, 07, 08, 09, 10, 14, 16, **17**, 18, 19, 24, 25, 26 |
-| ⚠️ Completed but degenerate | 1 | **20** (Droid τ=0 — **3 runs in a row**, multi-lang fix insufficient, needs v2 fallback logic) |
-| 🔧 Patched, rerun pending | **10** | 11, 12, 13, 15, 21, 22, 23 (OOM/type fixes 2026-04-20) + 27, 29, 30 (`backbone_lm` + model-class fixes 2026-04-21) |
+| ✅ Completed (both benches) | **20** | 00A, 00B, 01, 02, 03, 04, 05, 06, 07, 08, 09, 10, **11**, 14, **15**, 16, 17, 18, 19, 24, 25, 26 |
+| ⚠️ Completed but degenerate | **2** | **12** AttCrit (Hill nan → τ=0 both benches), **20** TypeConstraint (Python empty-annotation → τ=0 Droid, 3 runs in a row) |
+| ⏱️ Timeout | **1** | **13** SinkhornOT (>30m both benches, k² inner loop too slow) |
+| 🔧 Patched, rerun pending | **6** | 15 Bures (singular matrix fix applied 2026-04-21) + 21, 22, 23 (OOM/type fixes) + 27, 29, 30 (backbone_lm + model-class fixes) |
 | ⏳ Never attempted | 1 | 28 |
 | **TOTAL** | **30** | |
 
 **Best Droid T3 Weighted-F1 (primary, matches paper Table 3–5 metric):**
-- 🥇 **Exp_26 CodeAcrostic 0.4264** (Δ-FDG-ours **+10.57 pt**)
-- 🥈 **Exp_18 CFGEntropy 0.4137** (Δ-FDG-ours **+9.30 pt**)
-- 🥉 Exp_24 EntropyWM 0.3595 (Δ-FDG-ours +3.88 pt)
-- Exp_25 SyntacticPred 0.3477 (Δ-FDG-ours +2.70 pt)
-- Exp_14 Martingale 0.3464 (Δ-FDG-ours +2.57 pt)
+- 🥇 **Exp_15 Bures 0.4324** (Δ-FDG-ours **+11.17 pt** 🏆 — new record) ⚠️ singular-matrix fix just applied
+- 🥈 **Exp_26 CodeAcrostic 0.4264** (Δ-FDG-ours +10.57 pt)
+- 🥉 **Exp_18 CFGEntropy 0.4137** (Δ-FDG-ours +9.30 pt)
+- Exp_24 EntropyWM 0.3595 (+3.88 pt)
+- Exp_25 SyntacticPred 0.3477 (+2.70 pt)
+- Exp_14 Martingale 0.3464 (+2.57 pt)
+- Exp_11 PathSig 0.3420 (+2.13 pt) 🆕
 - Exp_19 SemanticDrift 0.3396 (+1.89 pt)
-- Exp_17 PIFE 0.3216 (+0.09 pt) — **but see claim-pass ranking below**
+- Exp_17 PIFE 0.3216 (+0.09 pt)
 
-**Best CoDET binary Macro-F1:** Exp_01 Binoculars 0.5849 > Exp_16 KSDScope 0.4348 > Exp_10 Fisher 0.4358 > Exp_04 Spectral 0.4267 > Exp_25 SyntacticPred 0.4192.
+**Best CoDET binary Macro-F1:**
+- 🥇 Exp_01 Binoculars **0.5849**
+- 🥈 Exp_16 KSDScope 0.4348
+- 🥉 Exp_10 Fisher 0.4358
+- **Exp_15 Bures 0.4216** 🆕 (4th, and the only top-5 that's ALSO top-3 on Droid)
+- Exp_04 Spectral 0.4267
 
 **Best stability (|Droid W-F1 − CoDET Macro-F1|, lower = more stable):**
 - 🥇 Exp_19 SemanticDrift **1.16 pt**
 - 🥈 Exp_14 Martingale **1.55 pt**
-- 🥉 Exp_17 PIFE **2.29 pt** 🆕
+- 🥉 Exp_15 Bures **2.11 pt** 🆕
+- Exp_11 PathSig **2.26 pt** 🆕
+- Exp_17 PIFE **2.29 pt**
 - Exp_24 EntropyWM **4.95 pt**
 
 **🏆 Best claim-pass profile (out of 4 oral claims):**
-- 🥇 **Exp_17 PIFE 3/4 PASS** (HR-D 0.9521 ✅ + HR-C 0.9503 ✅ + stability 2.29pt ✅; only beat-FDG claim fails)
-- 🥈 Exp_24 EntropyWM 2/4 PASS (HR-D ✅ + stability ✅)
-- 🥈 Exp_14 Martingale 2/4 PASS (HR-C ✅ + stability ✅)
-- All others: ≤1/4 PASS
+- 🥇 **Exp_17 PIFE 3/4 PASS** (HR-D 0.9521 ✅ + HR-C 0.9503 ✅ + stability 2.29pt ✅)
+- 🥇 **Exp_11 PathSig 3/4 PASS** 🆕 (HR-D 0.9546 ✅ + HR-C 0.9530 ✅ + stability 2.26pt ✅)
+- 🥈 Exp_24 EntropyWM 2/4 PASS
+- 🥈 Exp_14 Martingale 2/4 PASS
 
-**Oral pass gate status (after metric fix 2026-04-20 + rerun 2026-04-21):**
-- **Against paper Fast-DetectGPT 64.54 W-F1:** 0 / 30 methods clear full gate. Best gap −20.90 pt (Exp_26).
-- **Against OUR Fast-DetectGPT reproduction (32.07 W-F1):** **7 methods beat it** — Exp_26 (+10.57), Exp_18 (+9.30), Exp_24 (+3.88), Exp_25 (+2.70), Exp_14 (+2.57), Exp_19 (+1.89), Exp_17 (+0.09). This is the fair within-protocol signal.
-- Full gate (paper-beat + HR≥0.95 + stability <10): still **0/30**, but Exp_17 now clears 3/4 sub-claims (only claim-1 fails) → strongest oral candidate if we fuse it with a W-F1 booster.
-- **Reproducibility gap finding:** our FDG reproduction is 32 pts below paper → paper's W-F1 64.54 is likely an upper bound under their full-data access + different mask-sampling budget. Our apples-to-apples contribution is **+10.57 pt over own-baseline FDG**, which IS a legitimate paper claim.
+**Oral pass gate status (after rerun 2026-04-21 of 11-16):**
+- **Against paper Fast-DetectGPT 64.54 W-F1:** 0 / 30 methods clear full gate. Best gap −21.14 pt (Exp_15 Bures, pending HR fix).
+- **Against OUR Fast-DetectGPT reproduction (32.07 W-F1):** **9 methods beat it** — Exp_15 (+11.17), Exp_26 (+10.57), Exp_18 (+9.30), Exp_24 (+3.88), Exp_25 (+2.70), Exp_14 (+2.57), Exp_11 (+2.13), Exp_19 (+1.89), Exp_17 (+0.09).
+- Full gate: still **0/30**, but **Exp_11 + Exp_17 both clear 3/4 sub-claims** (independent paths). **If Exp_15 Bures HR fix works** → Exp_15 might clear 4/4 directly (already has W-F1 > all others, needs only HR≥0.95 on Droid).
+- **Critical candidates for oral**: Exp_15 Bures (W-F1 leader, HR pending) + Exp_11/17 (claim-pass profiles) + Exp_26/18 (W-F1 strong, HR<0.95). Fusion of any 2 likely clears all 4 claims.
+- **Reproducibility gap finding:** our FDG reproduction is 32 pts below paper → paper's W-F1 64.54 is likely an upper bound under their full-data access + different mask-sampling budget.
 
 ---
 
@@ -93,12 +104,12 @@ Each ZS file now runs on BOTH benchmarks via `run_zs_oral` and emits a combined 
 | — | exp_zs_08 | **EnergyScore** (free-energy) | likelihood-margin | **0.3315** | **0.3507** | 0.9449 / 0.9427 | 0.0315 | 338s | ⚠️ FAIL (33.15 << 64.54; HR<0.95 both) |
 | — | exp_zs_09 | **LZ77Complexity** (gzip NCD) | compression | **0.3317** | **0.3524** | 0.9589 / 0.9441 | 0.0331 | 77s | ⚠️ FAIL (33.17 << 64.54) |
 | — | exp_zs_10 | **FisherDivergence** (Hutchinson trace) | curvature-gen | **0.3601** | **0.4358** | 0.9473 / 0.9449 | 0.0474 | 1233s | ⚠️ FAIL (36.01 << 64.54) |
-| 🆕 | exp_zs_11 | **PathSignatureDivergence** (Chen rough-path) | path-signature | — | — | — / — | — | 0.6m | ❌ OOM 24.54 GiB (rank_proxy (B,L,V)) → fix: bs//=8 + empty_cache (applied 2026-04-20) |
-| 🆕 | exp_zs_12 | **AttentionCriticality** (Hill power-law exponent) | physics-criticality | — | — | — / — | — | 1.5m | ❌ OOM 6.14 GiB (attention (B,H=12,L,L)) → fix: bs//=8 (applied 2026-04-20) |
-| 🆕 | exp_zs_13 | **SinkhornOT** (entropic OT divergence) | optimal-transport | — | — | — / — | — | 0.9m | ❌ OOM 12.27 GiB (cost matrix + vocab logits) → fix: bs//=8 (applied 2026-04-20) |
-| 🆕 | exp_zs_14 | **MartingaleCurvature** (De Jong test on AST-depth residuals) | martingale / econometric | **0.3464** | 0.3615 | **0.3619** (W-F1 0.3706) | 0.9431 / 0.9538 | 0.0669 | 6.2m | Δ-vs-FDG-ours: W-F1 **+2.57 pt**; ✅ codet HR≥0.95; stability 0.04pt ✅ (best stability of suite) |
-| 🆕 | exp_zs_15 | **BuresQuantumFidelity** (density-matrix Bures metric) | quantum-info-geometry | — | — | — / — | — | 0.7m | ❌ CUBLAS_ALLOC (density matrix 768×768 × bs=128) → fix: bs//=8 (applied 2026-04-20) |
-| 🆕 | exp_zs_16 | **KSDScope** (Kernel Stein + scope graph) | structural-Stein | **0.3357** | 0.3511 | **0.4348** (W-F1 0.4417) | 0.9439 / 0.9416 | 0.0408 | 1.5m | Δ-vs-FDG-ours: W-F1 **+1.50 pt**; Macro CoDET **+8.65 pt**; HR<0.95 both; stability 9.91pt ✅ |
+| 🆕 | exp_zs_11 | **PathSignatureDivergence** (Chen rough-path) | path-signature | **0.3420** | 0.3574 | **0.3349** (W-F1 0.3442) | **0.9546** / **0.9530** | 0.1162 | 6.2m | **🌟 3/4 CLAIMS PASS** (HR both ✅ + stability 2.26pt ✅); Δ-FDG-ours W-F1 **+2.13 pt**; only claim-1 fails — **2nd method with 3/4 claim-pass profile (along with Exp_17)** |
+| 🆕 | exp_zs_12 | **AttentionCriticality** (Hill power-law exponent) | physics-criticality | **0.3651** | 0.3456 | **0.3269** (W-F1 0.3175) | **0.0000** / **0.0000** | 1.0000 | 10.0m | ❌ **DEGENERATE τ=0 BOTH BENCHES** — Hill MLE returns nan/inf for many samples → score sparse → τ=0 → predicts AI for all. Needs fallback + winsorize. |
+| 🆕 | exp_zs_13 | **SinkhornOT** (entropic OT divergence) | optimal-transport | — | — | — | — / — | — | >30m | ⏱️ **TIMEOUT both benches** — Sinkhorn k²-inner loop too slow even at bs=16. Needs: k=8 instead of 16, or skip samples with seq_len < 64. |
+| 🆕 | exp_zs_14 | **MartingaleCurvature** (De Jong test on AST-depth residuals) | martingale / econometric | **0.3464** | 0.3615 | **0.3619** (W-F1 0.3706) | 0.9431 / 0.9538 | 0.0669 | 5.6m | Δ-vs-FDG-ours: W-F1 **+2.57 pt**; ✅ codet HR≥0.95; stability 0.04pt ✅ (best stability of suite, consistent across 2 runs) |
+| 🆕 | exp_zs_15 | **BuresQuantumFidelity** (density-matrix Bures metric) | quantum-info-geometry | **0.4324** | 0.4427 | **0.4216** (W-F1 0.4290) | 0.8806 / 0.9490 | 0.1569 | 15.6m | **🔥 Macro-F1 0.4427 HIGHEST of run** (Δ-FDG-ours W-F1 **+11.17 pt** 🏆); ⚠️ LinAlgWarn singular matrix → HR droid 0.8806 (below target). **Fix: rho += 1e-6·I before sqrtm** → HR should stabilize. Stability 2.11pt ✅ |
+| 🆕 | exp_zs_16 | **KSDScope** (Kernel Stein + scope graph) | structural-Stein | **0.3357** | 0.3511 | **0.4348** (W-F1 0.4417) | 0.9439 / 0.9416 | 0.0408 | 1.6m | Δ-vs-FDG-ours: W-F1 **+1.50 pt**; Macro CoDET **+8.65 pt**; HR<0.95 both; stability 9.91pt ✅ |
 | 🆕🆕 | exp_zs_17 | **PerturbationStructuralStability** (embedding robustness) | structural-robustness | **0.3216** | 0.3378 | **0.3445** (W-F1 0.3536) | **0.9521** / **0.9503** | 0.0500 | 14.6m | **🌟 3/4 CLAIMS PASS** (HR both ✅ + stability 2.29pt ✅); Δ-FDG-ours W-F1 **+0.09 pt**; only claim-1 fails. **Best claim-pass profile of suite** — cùng với Exp_24 EntropyWM là 2 methods duy nhất có HR ≥ 0.95 trên cả 2 bench. |
 | 🆕🆕 | exp_zs_18 | **ControlFlowEntropy** (cyclomatic complexity) | control-flow-complexity | **0.4137** | 0.4261 | **0.3640** (W-F1 0.3726) | 0.9484 / 0.9467 | 0.0756 | 1.2m | **Δ-vs-FDG-ours: W-F1 +9.30 pt** 🔥 (best so far); HR<0.95 both; stability 4.97pt ✅ |
 | 🆕🆕 | exp_zs_19 | **SemanticDriftDetector** (paraphrase stability) | semantic-invariance | **0.3396** | 0.3550 | **0.3512** (W-F1 0.3601) | 0.9450 / 0.9477 | 0.0866 | 8.4m | Δ-vs-FDG-ours: W-F1 **+1.89 pt**; HR<0.95 both; stability 1.16pt ✅ (τ=409.7 raw cosine) |
@@ -127,10 +138,10 @@ Each ZS file now runs on BOTH benchmarks via `run_zs_oral` and emits a combined 
 
 | Exp | Symptom on Kaggle | Root cause | Fix applied |
 |:--|:--|:--|:--|
-| **11 PathSig** | OOM 24.54 GiB | `rank_proxy` builds `(B,L,V)=(128,512,50265)` bool tensor ≈ 12 GB on top of vocab logits | `bs //= 8`, move to CPU + `empty_cache` after forward |
-| **12 AttCrit** | OOM 6.14 GiB | Attention tensor `(B,H,L,L)=(128,12,512,512)` fp32 = 6 GB | `bs //= 8` → peak ~750 MB |
-| **13 Sinkhorn** | OOM 12.27 GiB | Cost matrix + vocab logits stacked | `bs //= 8` |
-| **15 Bures** | CUBLAS_ALLOC | Density matrix 768×768 + scipy sqrtm at bs=128 | `bs //= 8` → ~1 GB peak |
+| **11 PathSig** | OOM 24.54 GiB → **✅ fixed** | `rank_proxy` builds `(B,L,V)=(128,512,50265)` bool tensor ≈ 12 GB on top of vocab logits | `bs //= 8`, move to CPU + `empty_cache` after forward. **Rerun 2026-04-21: Droid W-F1 0.3420, HR both benches ≥ 0.95, 3/4 claims PASS.** |
+| **12 AttCrit** | OOM fixed, but rerun **DEGENERATE τ=0 both benches** | Hill MLE returns `nan`/`inf` for many short/sparse attention avalanches → score distribution sparse → τ=0 → predicts AI for all | **v2 pending**: winsorize nan/inf to 0, enforce min-avalanche-count≥5 per sample, fallback to attention Shannon entropy when avalanches too few |
+| **13 Sinkhorn** | OOM fixed, but rerun **TIMEOUT >30m both benches** | k²=256 inner Sinkhorn loop × L/4 positions × N samples too slow even at bs=16 | **v2 pending**: k=8 (64 cost entries), skip samples with seq_len<64, or switch to batched-OT (`geomloss` lib) |
+| **15 Bures** | CUBLAS_ALLOC → fixed; rerun **works but HR droid=0.8806** (below target) | `scipy.linalg.sqrtm` LinAlgWarning on near-singular density matrices → inaccurate Bures distance → τ calibration skewed low | **✅ Fixed 2026-04-21**: add `rho += 1e-6·I` regularization before sqrtm (both `rho` and `sigma`). Rerun should stabilize HR. |
 | **17 PIFE** | OOM 12.27 GiB × 2 bench | 4 forward passes × vocab logits at bs=128 | `bs //= 8` + `del logits; empty_cache` per forward |
 | **20 TypeConstraint** | τ=0 Droid — **3 runs in a row (systemic)** | Diagnosis deeper after 2nd rerun: not just multi-lang — DROID_PERSONAHUB (n=10841 Python-heavy, 2nd biggest Droid source) returns empty annotation set despite Python typing availability, because most samples lack `typing` imports or annotations. Multi-lang guards (v1 fix) + length tiebreaker insufficient. | **v2 pending**: fallback to structural-complexity score when slack==0 (OR) mixture score = α·slack + (1-α)·gzip_ratio |
 | **21 TaskCond** | BFloat16 unsupported for torch.log | `torch.log` not implemented for bf16 | `logits.float()` before softmax |

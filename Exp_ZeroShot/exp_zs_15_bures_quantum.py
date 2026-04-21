@@ -119,11 +119,20 @@ def _von_neumann_entropy(rho: np.ndarray) -> float:
 
 
 def _bures_distance(rho: np.ndarray, sigma: np.ndarray) -> float:
-    """d_B = sqrt(1 - F), F = Tr(sqrt(sqrt(rho) sigma sqrt(rho)))."""
+    """d_B = sqrt(1 - F), F = Tr(sqrt(sqrt(rho) sigma sqrt(rho))).
+
+    Regularise both density matrices with 1e-6·I to avoid scipy.linalg.sqrtm
+    LinAlgWarning on singular matrices (fix after 2026-04-21 rerun:
+    singular density matrices caused HR on droid to drop to 0.8806).
+    """
     from scipy.linalg import sqrtm
     try:
-        sr = sqrtm(rho).real
-        inner = sr @ sigma @ sr
+        eps = 1e-6
+        L = rho.shape[0]
+        rho_reg = rho + eps * np.eye(L)
+        sigma_reg = sigma + eps * np.eye(L)
+        sr = sqrtm(rho_reg).real
+        inner = sr @ sigma_reg @ sr
         inner_sqrt = sqrtm(inner).real
         F = float(np.trace(inner_sqrt).clip(0.0, 1.0))
         return float(np.sqrt(max(1.0 - F, 0.0)))
