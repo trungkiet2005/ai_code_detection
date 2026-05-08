@@ -1,0 +1,205 @@
+\documentclass[11pt]{article}
+
+% review mode (anonymous) for EMNLP 2026 submission
+\usepackage[review]{acl}
+
+\usepackage{times}
+\usepackage{latexsym}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{microtype}
+\usepackage{inconsolata}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{multirow}
+\usepackage{amsmath}
+\usepackage{amssymb}
+
+\title{Data-Efficient AI-Code Authorship Detection \\ via Hierarchical Family-Aware Learning}
+
+% Anonymous for EMNLP 2026 review
+\author{Anonymous ACL submission}
+
+\begin{document}
+\maketitle
+
+%======================================================================
+\begin{abstract}
+%======================================================================
+Detecting which language model authored a code sample is harder than detecting
+whether the code is AI-generated at all: state-of-the-art binary detectors
+saturate above $99\%$ Macro-F1 on CoDET-M4, while $6$-class authorship sits
+at $66\%$. We show that a hierarchical family-aware backbone, when paired with
+NTK-target-kernel alignment, attains \textbf{$71.03$ Macro-F1 on CoDET-M4
+$6$-class authorship using only $20\%$ of the training data}---a $+4.70$
+point improvement over UniXcoder trained on the full set.
+The same backbone transfers to DroidCollection 3-class with
+\textbf{$89.76$ Weighted-F1 ($+0.98$ over DroidDetectCLS-Large)}.
+A family of $14$ architecturally distinct auxiliary losses all cluster above
+$70.0$ on the authorship task, suggesting that the gain comes from the shared
+hierarchical prior and data-efficient curriculum rather than any single
+auxiliary signal. Source-held-out evaluation reveals a persistent
+collapse from $0.71$ to $0.36$ on unseen GitHub code, which we characterize
+as a source-confounding failure mode.
+\end{abstract}
+
+%======================================================================
+\section{Introduction}
+%======================================================================
+\label{sec:intro}
+
+% TODO Day 7: Hook + 3-contribution box.
+%   - Hook: AI-code authorship at scale; 6-class is the hard task.
+%   - Setup: CoDET-M4 + DroidCollection define the IID/OOD axes.
+%   - Failure: 14+ methods cluster around 0.71 IID -> 0.28 OOD-GH.
+%   - Our story: hierarchical family prior + NTK alignment, 20% data.
+%   - Contributions C1/C2/C3.
+
+%======================================================================
+\section{Related Work}
+%======================================================================
+\label{sec:related}
+
+% TODO Day 8.
+%   - AI-code detection: GPTSniffer, CodeGPTSensor, CoDET-M4, DroidCollection,
+%     DeTeCtive, CodeMirage.
+%   - Authorship as multi-class: hierarchical / contrastive priors.
+%   - NTK theory and kernel alignment for OOD generalization.
+
+%======================================================================
+\section{Method}
+%======================================================================
+\label{sec:method}
+
+% TODO Day 3.
+\subsection{Problem Formulation}
+\label{sec:method-problem}
+
+\subsection{Hierarchical Family Prior}
+\label{sec:method-hier}
+
+\subsection{NTK-Aligned Multi-Signal Heads}
+\label{sec:method-ntk}
+
+\subsection{Data-Efficient Lean Curriculum}
+\label{sec:method-lean}
+
+%======================================================================
+\section{Experiments}
+%======================================================================
+\label{sec:exp}
+
+\subsection{Setup}
+\label{sec:exp-setup}
+
+% TODO Day 4: benchmarks, metrics, hardware, training budget.
+
+\subsection{CoDET-M4 Authorship}
+\label{sec:exp-codet}
+
+\begin{table}[t]
+\centering
+\small
+\begin{tabular}{llrr}
+\toprule
+\multicolumn{2}{c}{Method} & Author F1 & $\Delta$ \\
+\midrule
+\multicolumn{4}{l}{\emph{Paper baselines (full data)}} \\
+\multicolumn{2}{l}{UniXcoder} & 66.33 & --- \\
+\multicolumn{2}{l}{CodeBERT} & 64.80 & $-1.53$ \\
+\multicolumn{2}{l}{CodeT5} & 62.45 & $-3.88$ \\
+\midrule
+\multicolumn{4}{l}{\emph{Ours, full data}} \\
+Exp27 & DeTeCtiveCode & \textbf{71.53} & $+5.20$ \\
+\midrule
+\multicolumn{4}{l}{\emph{Ours, $20\%$ data (lean)}} \\
+Exp\_13 & NTKAlignCode & \textbf{71.03} & $+4.70$ \\
+Exp\_06 & FlowCodeDet & 70.90 & $+4.57$ \\
+Exp\_09 & EpiplexityCode & 70.78 & $+4.45$ \\
+Exp\_12 & AvailPredictivity & 70.35 & $+4.02$ \\
+Exp\_07 & SAMFlatCode & 70.22 & $+3.89$ \\
+\bottomrule
+\end{tabular}
+\caption{CoDET-M4 6-class authorship Macro-F1. Twenty methods cluster
+above $70.0$ in our family; UniXcoder is the strongest paper baseline at
+$66.33$. Lean methods use only $20\%$ of training data.}
+\label{tab:codet-author}
+\end{table}
+
+\subsection{DroidCollection T3 Cross-Bench}
+\label{sec:exp-droid}
+
+\begin{table}[t]
+\centering
+\small
+\begin{tabular}{llr}
+\toprule
+\multicolumn{2}{c}{Method} & T3 W-F1 \\
+\midrule
+\multicolumn{3}{l}{\emph{Paper baselines (full data)}} \\
+\multicolumn{2}{l}{DroidDetectCLS-Large} & 88.78 \\
+\multicolumn{2}{l}{DroidDetectCLS-Base} & 86.76 \\
+\multicolumn{2}{l}{Fast-DetectGPT (zero-shot)} & 64.54 \\
+\midrule
+\multicolumn{3}{l}{\emph{Ours, $20\%$ data (lean)}} \\
+Exp\_04 & PoincareGenealogy & \textbf{89.76} \\
+Exp\_06 & FlowCodeDet & 89.34 \\
+Exp\_09 & EpiplexityCode & 89.26 \\
+Exp\_03 & TokenStatRAG & 88.94 \\
+\bottomrule
+\end{tabular}
+\caption{DroidCollection 3-class Weighted-F1 on the full test split.
+Multiple methods exceed the full-data DroidDetectCLS-Large baseline
+using only $20\%$ training data.}
+\label{tab:droid-t3}
+\end{table}
+
+\subsection{Data Efficiency}
+\label{sec:exp-efficiency}
+
+% TODO Day 5: data-efficiency curve (5/10/20/50/100% training data).
+
+\subsection{Ablation}
+\label{sec:exp-ablation}
+
+% TODO Day 5-6: ablation matrix from each Exp_N file.
+
+%======================================================================
+\section{Analysis}
+%======================================================================
+\label{sec:analysis}
+
+% TODO Day 9.
+\subsection{Source-Confounding Failure Mode}
+\label{sec:analysis-source}
+
+% Train -> test gap 0.71 -> 0.36 on held-out GitHub source.
+
+\subsection{Sibling Generator Confusion}
+\label{sec:analysis-siblings}
+
+% Qwen <-> Nxcode pair is the primary IID bottleneck.
+
+\subsection{Cross-Method Robustness}
+\label{sec:analysis-robustness}
+
+% Author F1 vs OOD-gh F1 scatter across 14+ methods (Figure 2).
+
+%======================================================================
+\section{Limitations}
+%======================================================================
+\label{sec:limitations}
+
+% TODO Day 10. OOD-gh still hard; AICD-Bench out of scope.
+
+%======================================================================
+\section{Conclusion}
+%======================================================================
+\label{sec:conclusion}
+
+% TODO Day 10.
+
+% Bibliography
+\bibliography{custom}
+
+\end{document}

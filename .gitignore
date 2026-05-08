@@ -28,6 +28,29 @@ Exp_ZeroShot/run_zs_*_results.json
 # Upstream Fast-DetectGPT clone (we vendor the minimal subset under
 # Exp_ZeroShot/fast_detect_gpt/ instead). Kept locally for reference.
 third_party/
+
+# LaTeX build artifacts
+*.aux
+*.log
+*.out
+*.toc
+*.nav
+*.snm
+*.vrb
+*.fls
+*.fdb_latexmk
+*.synctex.gz
+*.bbl
+*.blg
+Paper/latex/main.pdf
+Slide/progress_report.aux
+Slide/progress_report.log
+Slide/progress_report.nav
+Slide/progress_report.out
+Slide/progress_report.snm
+Slide/progress_report.toc
+Slide/progress_report.tex
+Slide/progress_report.pdf
 fast-detect-gpt/
 fdg_cache/
 cache/
