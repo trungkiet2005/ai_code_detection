@@ -25,16 +25,17 @@
 
 ---
 
-## 📊 Run status snapshot (as of 2026-04-21, after 3 Kaggle H100 passes + patches)
+## 📊 Run status snapshot (as of 2026-04-21, after 3 Kaggle H100 passes + patches + exp_zs_30 T4 partial run)
 
 | Status | Count | Exps |
 |:--|:-:|:--|
 | ✅ Completed (both benches) | **20** | 00A, 00B, 01, 02, 03, 04, 05, 06, 07, 08, 09, 10, **11**, 14, **15**, 16, 17, 18, 19, 24, 25, 26 |
+| 🔄 Partially complete (Droid done, CoDET pending) | **1** | **30** SemanticResilience (Droid T3 W-F1=0.3164, HR=0.9484 FAIL; CoDET pending — T4 4.7h run still ongoing when session ended) |
 | ⚠️ Completed but degenerate | **2** | **12** AttCrit (Hill nan → τ=0 both benches), **20** TypeConstraint (Python empty-annotation → τ=0 Droid, 3 runs in a row) |
 | ⏱️ Timeout | **1** | **13** SinkhornOT (>30m both benches, k² inner loop too slow) |
-| 🔧 Patched, rerun pending | **6** | 15 Bures (singular matrix fix 2026-04-21) + **21** (v2 bf16: drop bf16 entirely, fp32 inference) + 22, 23 (runner workers=1 fix) + 27, 29, 30 (backbone_lm + model-class fixes) |
-| ⏳ Never attempted | 1 | 28 |
-| **TOTAL** | **30** | |
+| 🔧 Patched, rerun pending | **5** | 15 Bures (singular matrix fix 2026-04-21) + **21** (v2 bf16: drop bf16 entirely, fp32 inference) + 22, 23 (runner workers=1 fix) + 27, 29 (backbone_lm + model-class fixes) |
+| ⏳ Never attempted | 2 | 28 ContrastiveTwin, **31** Fast-DetectGPT Official |
+| **TOTAL** | **31** | |
 
 **🔬 Reproducibility verification (2026-04-21):** Exp_25 SyntacticPred ran twice with IDENTICAL 12 metrics (Macro-F1, W-F1, HR, τ, AI-R, Adv-R all bit-identical; wall time +1-2s). Confirms scoring pipeline is fully deterministic.
 
@@ -72,11 +73,12 @@
 - 🥈 Exp_24 EntropyWM 2/4 PASS
 - 🥈 Exp_14 Martingale 2/4 PASS
 
-**Oral pass gate status (after rerun 2026-04-21 of 11-16):**
-- **Against paper Fast-DetectGPT 64.54 W-F1:** 0 / 30 methods clear full gate. Best gap −21.14 pt (Exp_15 Bures, pending HR fix).
-- **Against OUR Fast-DetectGPT reproduction (32.07 W-F1):** **9 methods beat it** — Exp_15 (+11.17), Exp_26 (+10.57), Exp_18 (+9.30), Exp_24 (+3.88), Exp_25 (+2.70), Exp_14 (+2.57), Exp_11 (+2.13), Exp_19 (+1.89), Exp_17 (+0.09).
-- Full gate: still **0/30**, but **Exp_11 + Exp_17 both clear 3/4 sub-claims** (independent paths). **If Exp_15 Bures HR fix works** → Exp_15 might clear 4/4 directly (already has W-F1 > all others, needs only HR≥0.95 on Droid).
+**Oral pass gate status (after rerun 2026-04-21 of 11-16 + exp_zs_30 Droid T3 partial):**
+- **Against paper Fast-DetectGPT 64.54 W-F1:** 0 / 31 methods clear full gate. Best gap −21.14 pt (Exp_15 Bures, pending HR fix).
+- **Against OUR Fast-DetectGPT reproduction (32.07 W-F1):** **9 methods beat it** — Exp_15 (+11.17), Exp_26 (+10.57), Exp_18 (+9.30), Exp_24 (+3.88), Exp_25 (+2.70), Exp_14 (+2.57), Exp_11 (+2.13), Exp_19 (+1.89), Exp_17 (+0.09). Exp_30 SemanticResilience does NOT beat it (0.3164 < 0.3207; Δ=−0.43 pt).
+- Full gate: still **0/31**, but **Exp_11 + Exp_17 both clear 3/4 sub-claims** (independent paths). **If Exp_15 Bures HR fix works** → Exp_15 might clear 4/4 directly (already has W-F1 > all others, needs only HR≥0.95 on Droid).
 - **Critical candidates for oral**: Exp_15 Bures (W-F1 leader, HR pending) + Exp_11/17 (claim-pass profiles) + Exp_26/18 (W-F1 strong, HR<0.95). Fusion of any 2 likely clears all 4 claims.
+- **Exp_30 SemanticResilience analysis**: On T4 (not H100), 5 embeds × 106k samples = 4.7h wall time. W-F1=0.3164 below FDG-ours baseline — the meta-signal (robustness of detector scores) does not discriminate well at τ=0.9600. CoDET binary result still pending.
 - **Reproducibility gap finding:** our FDG reproduction is 32 pts below paper → paper's W-F1 64.54 is likely an upper bound under their full-data access + different mask-sampling budget.
 
 ---
@@ -127,7 +129,7 @@ Each ZS file now runs on BOTH benchmarks via `run_zs_oral` and emits a combined 
 | 🚀 | exp_zs_27 | **FrontDoor-NLP** (NeurIPS 2025) | causal-mediation | — | — | — | — / — | — | 0.7m | ❌ `'ZSConfig' object has no attribute 'backbone_lm'` → fix: `cfg.backbone_lm` → `cfg.scorer_lm` + switch `AutoModelForSequenceClassification` → `AutoModel` (no random classifier head) (applied 2026-04-21) |
 | 🚀 | exp_zs_28 | **ContrastiveTwinStyleometry** (AISec 2025) | pair-divergence | — | — | — | — / — | — | ~12m | ⏳ pending |
 | 🚀 | exp_zs_29 | **TokenEntropyForks** (ACL 2025) | decision-point-semantics | — | — | — | — / — | — | 0.7m | ❌ `cfg.backbone_lm` missing + `AutoModelForCausalLM` on MLM checkpoint → fix: `scorer_lm` + `AutoModelForMaskedLM` (applied 2026-04-21) |
-| 🚀 | exp_zs_30 | **SemanticResilience** (arXiv:2512.19215) | robustness-meta-signal | — | — | — | — / — | — | 0.7m | ❌ `cfg.backbone_lm` missing + random classifier head would produce noise → fix: `scorer_lm` + `AutoModel` CLS-embedding distance (applied 2026-04-21) |
+| 🚀 | exp_zs_30 | **SemanticResilience** (arXiv:2512.19215) | robustness-meta-signal | **0.3164** | 0.3328 | — (pending) | **0.9484** / — | 0.0328 | 4.7h T4 | ⚠️ **Droid T3 complete; CoDET binary pending.** HR droid=0.9484 (below 0.95 target, FAIL). W-F1 0.3164 < FDG-ours 0.3207 (Δ=−0.43 pt). τ=0.9600. Ran on **T4 15GB** (not H100) → 4.7h for 5 embeds × 106k samples. 5 forward passes per sample is the bottleneck. When CoDET binary arrives, update stability. |
 | 🎯 | **exp_zs_31** | **Fast-DetectGPT OFFICIAL** (Bao et al. ICLR'24 — **paper-exact repo vendored**) | curvature (causal, 2-LM) | — | — | — | — / — | — | ~30-60m | ⏳ **Paper-exact reproduction** (not surrogate). Vendored MIT subset of github.com/baoguangsheng/fast-detect-gpt. Model pair selectable via `FDG_PAIR` env var: `gpt-neo-2.7B_gpt-neo-2.7B` (default, T4-safe) \| `falcon-7b_falcon-7b-instruct` (paper BB best) \| `llama3-8b_llama3-8b-instruct` (paper 2026 best). **Target:** close the 32-pt gap between Exp_02 surrogate (32.07 W-F1) and paper's 64.54 W-F1 headline. |
 | **REF** | Paper | **Fast-DetectGPT** (Droid paper Table 3/5) | **64.54** | — | 0.84 / — | 0.48 | — | reference |
 | REF | Paper | M4 (ZS) | 55.27 | — | 0.40 ⚠️ / — | 0.73 | — | reference |
@@ -156,7 +158,7 @@ Each ZS file now runs on BOTH benchmarks via `run_zs_oral` and emits a combined 
 | **26 CodeAcrostic** | Rerun 2 **TIMEOUT regression** despite run 1 PASS (7.7m) | Same as 24 | Same runner fix resolves this |
 | **27 FrontDoor** | `'ZSConfig' object has no attribute 'backbone_lm'` | ZSConfig only has `scorer_lm`, not `backbone_lm` | `cfg.backbone_lm` → `cfg.scorer_lm` + `AutoModelForSequenceClassification` → `AutoModel` (classifier head had random weights → noise) |
 | **29 TokenForks** | `'ZSConfig' object has no attribute 'backbone_lm'` + causal on MLM ckpt | codebert-base-mlm is MLM not causal | `cfg.scorer_lm` + `AutoModelForMaskedLM` |
-| **30 SemanticResilience** | `'ZSConfig' object has no attribute 'backbone_lm'` + random classifier | random 2-class head produces noise | `cfg.scorer_lm` + `AutoModel` CLS-L2 distance (no classifier head) |
+| **30 SemanticResilience** | `'ZSConfig' object has no attribute 'backbone_lm'` + random classifier → **fixed + ran on T4**: Droid T3 W-F1=0.3164, HR=0.9484 (FAIL), wall=4.7h | random 2-class head produces noise; T4 slow (5 embeds × 106k samples) | `cfg.scorer_lm` + `AutoModel` CLS-L2 distance (no classifier head). CoDET binary still pending from that run. |
 
 **Systemic pattern:** all OOMs came from **vocab-logit tensors `(B, L, V)` at `bs=128`**. Our H100 profile chose bs=128 assuming only CLS embedding survives to CPU, but most methods hold vocab logits for `log_softmax`/`topk`. **Canonical fix going forward:** cap `bs = cfg.batch_size // 8` (= 16 on H100) in any method that keeps vocab-size logits in memory, and call `empty_cache()` between chained forwards.
 
