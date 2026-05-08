@@ -1,252 +1,270 @@
-# Script Thuyết Trình - Beyond Binary: AI Code Detection
+# Script Thuyết Trình — Progress Report: AI Code Detection
 
-**Nhóm**: Đào Sỹ Duy Minh, Huỳnh Trung Kiệt, Trần Chí Nguyên và cộng sự (HCMUS_TheFangs)
-
----
-
-## Slide 1: Title
-
-Xin chào thầy, hôm nay nhóm em xin trình bày đề tài "Beyond Binary: Unified Detection and Attribution of AI-Generated Code via Hierarchical Family-Aware Learning." Đây là hướng nghiên cứu về phát hiện và truy nguồn code được tạo bởi AI, với mục tiêu NeurIPS 2026.
+> Thời lượng ước tính: ~20–25 phút. Mỗi slide ~1–1.5 phút.
 
 ---
 
-## Slide 2: Outline
+## Slide 1: Title Page
 
-Bài trình bày gồm 7 phần: từ vấn đề đặt ra, 3 benchmark sử dụng, method SpectralCode đã hoàn thành, HierTreeCode đang phát triển, kết quả trên 3 benchmark, và các insight từ 16+ thí nghiệm đã chạy.
-
----
-
-## Slide 3: Existing Benchmarks are Binary-Only and Limited
-
-Đầu tiên, hãy nhìn vào các benchmark hiện có. GPTSniffer chỉ có 7.4 nghìn mẫu, 1 ngôn ngữ, 1 model (ChatGPT). Whodunit còn nhỏ hơn --- 1.6 nghìn mẫu. CodeGPTSensor tuy lớn (1.1 triệu) nhưng chỉ cover 2 ngôn ngữ và 1 model. CodeMirage có 10 ngôn ngữ nhưng vẫn chỉ là binary classification.
-
-TẤT CẢ các benchmark cổ điển này đều có chung hạn chế: BINARY ONLY, không có authorship attribution, không có OOD evaluation, không có adversarial data. Và quan trọng --- chúng đã BÃO HÒA, fine-tuned models đạt 98%+ F1.
-
-Do đó nhóm chọn 3 benchmark mới: CoDET-M4 (ACL Findings 2025) có authorship 6 lớp, DroidCollection (EMNLP 2025) có adversarial DPO-tuned, và AICDBench (EACL 2026) có OOD 4-split progressive evaluation. Đây là 3 benchmark mà các benchmark cổ điển KHÔNG THỂ ĐO LƯỜNG ĐƯỢC.
+Dạ chào thầy, hôm nay em xin báo cáo tiến độ nghiên cứu về đề tài phát hiện và gán nhãn mã nguồn sinh bởi AI. Đây là bản cập nhật toàn bộ những gì nhóm đã làm thêm kể từ lần báo cáo trước, bao gồm các thí nghiệm mới, phương pháp mới, và các insight quan trọng rút ra được.
 
 ---
 
-## Slide 4: The Real Challenges Remain
+## Slide 2: Outline — What's New
 
-3 vấn đề mở mà benchmark cổ điển không thể đánh giá:
+Nội dung báo cáo gồm 7 phần chính:
 
-1. AUTHORSHIP ATTRIBUTION: UniXcoder chỉ đạt 66.33% F1 trên 6 lớp --- giảm 32 điểm so với binary. Benchmark cổ điển không có nhãn đa lớp nên không thể evaluate bài toán này.
-
-2. OOD GENERALIZATION: AICD T1 cho thấy val 99.5% nhưng test 29.8% --- SỤP ĐỔ thảm hại khi đổi ngôn ngữ. Benchmark cổ điển train và test trên cùng ngôn ngữ nên OOD là "vô hình."
-
-3. ADVERSARIAL ROBUSTNESS: DROID có 157K mẫu adversarial DPO-tuned. DroidDetect recall giảm từ 98% xuống 92% trên adversarial code. Không benchmark cổ điển nào có dữ liệu adversarial.
-
----
-
-## Slide 5: The Bigger Picture
-
-Slide này trình bày sự tiến hóa của vấn đề theo thời gian:
-- 2023: "Code này AI viết hay người viết?" --- ĐÃ GIẢI QUYẾT
-- 2024: "Model nào viết?" --- Author attribution chỉ đạt 66% F1 với SOTA
-- 2025: "Model có đánh lừa được detector không?" --- DPO-tuned adversarial code xuất hiện (DROID, EMNLP 2025)
-- 2026: "Có generalize được sang ngôn ngữ mới không?" --- OOD collapse từ 99% xuống 30% (AICDBench, EACL 2026)
-
-TẠI SAO attribution khó? Vì các LLM hình thành "cây gia phả." Nxcode là phiên bản fine-tune từ Qwen1.5, CodeLlama là fine-tune từ Llama. Các cặp cha-con này chia sẻ "DNA phong cách" gần như giống nhau --- dẫn đến 40% confusion giữa Qwen và Nxcode.
-
-INSIGHT CỦA NHÓM: Cây gia phả của LLM không phải vấn đề --- mà là PRIOR KNOWLEDGE có cấu trúc. Models cùng family nên gần nhau nhưng vẫn phân biệt được trong embedding space.
+1. Phương pháp mới đạt SOTA — DeTeCtiveCode
+2. Mở rộng lên 22 phương pháp trên CoDET-M4
+3. Đánh giá OOD đầy đủ trên CoDET-M4
+4. Bộ thí nghiệm Exp_Climb — train chỉ 20% data mà vẫn match paper baselines
+5. Bộ Zero-Shot — 31 phương pháp không cần training
+6. Kết quả cross-benchmark trên AICD và DROID
+7. Tổng hợp insight — cái gì hoạt động, cái gì thất bại, và các bước tiếp theo
 
 ---
 
-## Slide 6: Three Benchmarks
+## Slide 3: DeTeCtiveCode — New Best Method (Author F1 = 71.53)
 
-Nhóm sử dụng 3 benchmark bổ sung cho nhau, tổng cộng 3.6 triệu mẫu code:
+Đây là kết quả quan trọng nhất. DeTeCtiveCode là phương pháp mới đạt SOTA trên bài toán author attribution 6 lớp với F1 = 71.53, vượt UniXcoder của paper gốc 5.20 điểm.
 
-1. **CoDET-M4** (Orel et al., ACL Findings 2025): 500K mẫu, 3 ngôn ngữ, 5 generator. Mạnh nhất cho bài toán authorship attribution 6 lớp. Đây là nơi vấn đề Nxcode/Qwen confusion rõ nhất.
+Kiến trúc vẫn dựa trên backbone SpectralCode — tức là ModernBERT kết hợp AST, structural features và FFT spectral. Trên nền đó, em thêm 3 thành phần mới:
 
-2. **DroidCollection** (Orel et al., EMNLP 2025): 1.06 triệu mẫu, 7 ngôn ngữ, 43 models. Đặc biệt có machine-refined code (code người được AI viết lại) và 157K mẫu adversarial DPO-tuned. Đây là benchmark duy nhất có dữ liệu adversarial thực sự.
+- **HierTree loss** từ Exp18 — ép các model cùng "gia đình" (ví dụ Nxcode và Qwen1.5) lại gần nhau trong embedding space nhưng vẫn phân biệt được.
+- **Multi-level Supervised Contrastive** — áp dụng SupCon trên cả hai nhánh neural và spectral, lấy cảm hứng từ paper DeTeCtive ở NeurIPS 2024.
+- **kNN blend** lúc test — dùng embedding bank 50K mẫu, retrieve k=32 hàng xóm rồi blend với logits, alpha=0.25.
 
-3. **AICDBench** (Orel et al., EACL 2026): 2.05 triệu mẫu, 9 ngôn ngữ, 77 models. Benchmark lớn nhất với 4-split progressive OOD evaluation --- train trên 3 ngôn ngữ, test trên 9.
-
-TẠI SAO 3 benchmark? Vì mỗi cái cover một khía cạnh khác nhau: CoDET-M4 cho attribution, DROID cho adversarial, AICD cho OOD. Gộp lại thì cover toàn bộ bài toán.
-
----
-
-## Slide 7: SpectralCode Architecture Pipeline
-
-Đây là toàn bộ pipeline của SpectralCode --- method chính đã hoàn thành của nhóm.
-
-Architecture gồm 2 đường chính:
-- **Neural Path** (xanh): gồm 3 encoder (ModernBERT, AST BiLSTM, Structural MLP) được fuse qua Cross-Attention
-- **Spectral Path** (cam): FFT spectral analysis trên chuỗi token
-
-2 đường này được kết hợp qua Learned Soft Gate để cho ra kết quả cuối cùng.
+Nhìn bảng kết quả bên phải: từ UniXcoder 66.33, qua SpectralCode 69.82, HierTreeCode 70.55, giờ DeTeCtiveCode đạt 71.53. Đặc biệt, GPT F1 tăng mạnh lên 0.780, và GitHub source — bottleneck khó nhất — cũng được cải thiện lên 0.576.
 
 ---
 
-## Slide 8: Stream 1 --- ModernBERT Token Encoder
+## Slide 4: CoDET-M4 Full Leaderboard — 22 Methods Ranked
 
-Stream đầu tiên là ModernBERT-base. Đây là pre-trained transformer encoder với 149 triệu tham số. Nó tokenize code nguồn và trả về [CLS] token representation ở R^768.
+Từ lần báo cáo trước mình có 10 phương pháp, giờ đã mở rộng lên 22 phương pháp. Các dòng nền vàng là mới.
 
-TẠI SAO ModernBERT? Vì nó outperform CodeBERT và RoBERTa trên code tasks, có SDPA attention nhanh gấp đôi, và đặc biệt --- paper DROID dùng ModernBERT-Large 395 triệu tham số, mà nhóm em chỉ dùng Base 149 triệu tham số nhưng vẫn đạt kết quả tương đương!
+Bảng bên trái là top-12: DeTeCtiveCode dẫn đầu với 71.53, tiếp theo là HierTreeCode 70.55, RAGDetect 70.46. Các phương pháp mới đáng chú ý gồm HyperCode (hypernetwork head, 70.33), KANCode (B-spline KAN head, 70.30), và EnergyCode (energy-margin, 70.26).
 
-ModernBERT bắt được các pattern từ vựng và ngữ nghĩa --- ví dụ GPT có xu hướng dùng list comprehension, Llama thích explicit loops.
+Bảng bên phải là các phương pháp yếu hơn và thất bại. EAGLECode dùng DANN chỉ đạt 62.89 — thấp hơn cả baseline.
 
-Tuy nhiên, token-level thôi thì chưa đủ --- nó bỏ lỡ các pattern cấu trúc (độ sâu lồng nhau, control flow) mà chỉ có thể thấy trong AST. Đó là lý do cần stream thứ 2.
-
----
-
-## Slide 9: Stream 2 --- AST Encoder (tree-sitter + BiLSTM)
-
-Stream thứ hai là AST encoder. AST --- Abstract Syntax Tree --- là biểu diễn cây của cấu trúc code. Mỗi node là một thành phần cú pháp: if_statement, function_definition, return_statement, v.v.
-
-Ví dụ: dòng code "if x > 0: return x" sẽ được parse thành một cây với if_statement ở gốc, binary_expression và return_statement là con.
-
-TREE-SITTER là gì? Là một parser nhanh, incremental, hỗ trợ 40+ ngôn ngữ lập trình. Nó phân tích code thành cây AST trong milliseconds. Nhóm em hỗ trợ 9 ngôn ngữ: Python, Java, C++, C, Go, PHP, C#, JavaScript, Rust.
-
-QUY TRÌNH: Code được tree-sitter parse thành AST tree, sau đó duyệt DFS lấy chuỗi node types (67 loại trong vocabulary), rồi BiLSTM encode thành vector h_ast ở R^128. BiLSTM đọc chuỗi theo 2 chiều (trái sang phải và phải sang trái) để bắt được ngữ cảnh đầy đủ.
-
-TẠI SAO AST cho authorship? Vì mỗi LLM có "phong cách cú pháp" riêng --- GPT dùng nhiều ternary expression lồng nhau, Llama thích if-else tường minh, Qwen hay dùng list comprehension. AST bắt được các "dấu vân tay" cấu trúc này mà token-level không thấy được.
+**Nhận xét quan trọng:** Từ vị trí 2 đến 17, tất cả các phương pháp đều nằm trong khoảng 69.8–70.6%. Đây là một plateau — các kiến trúc khác nhau đều đụng cùng một trần. Chỉ DeTeCtiveCode phá được ceiling này nhờ contrastive learning + kNN, chứ không phải thay đổi kiến trúc.
 
 ---
 
-## Slide 10: Stream 3 (Structural Features) + Stream 4 (Spectral FFT)
+## Slide 5: New Methods — Architecture Innovations
 
-**22 Structural Features** là các metric phong cách viết code thủ công. Gồm 3 nhóm:
-- Layout: độ dài dòng trung bình, indent mean/variance/max
-- Complexity: số function, loop, conditional, try-catch
-- Naming style: tỷ lệ snake_case vs camelCase, độ dài biến trung bình, tỷ lệ biến 1 ký tự
+Slide này giới thiệu chi tiết các kiến trúc mới đã thử:
 
-Đây là "fingerprint" phong cách lập trình mà mỗi LLM để lại.
+**KANCode** dùng Kolmogorov-Arnold Network — thay classifier head bằng mạng KAN với B-spline activations, một ý tưởng từ ICLR 2025 Oral. Binary đạt 99.09 nhưng Author chỉ 70.30.
 
-**Spectral FFT Path** --- đây là ĐIỂM MỚI CHÍNH của SpectralCode.
+**HyperCode** dùng hypernetwork — sinh ra trọng số classifier từ token entropy và spectral stats. Author 70.33. Insight quan trọng: cả KAN và Hypernetwork đều đụng cùng Nxcode/Qwen wall — chứng tỏ trần 70.3 không phải do capacity của head mà do bản chất bài toán family confusion.
 
-Ý tưởng cốt lõi: Chuỗi token ID chính là một tín hiệu 1D rời rạc. Quá trình decoding của LLM (top-k, temperature sampling) tạo ra các MÔ HÌNH TẦN SỐ TUẦN HOÀN mà không nhìn thấy được ở không gian token.
+**MambaCode** thử State-Space Model — complexity O(n) thay vì O(n²) — nhưng Author chỉ 69.98, thấp hơn SpectralCode. SSM không giúp gì cho code authorship.
 
-FFT --- Fast Fourier Transform --- là công cụ toán học phân tách tín hiệu thành các thành phần tần số. Giống như khi phân tích âm thanh thành các note nhạc, FFT phân tích chuỗi token thành các tần số đặc trưng.
-
-Nhóm áp dụng FFT ở 4 cửa sổ khác nhau (32, 64, 128, 256 token) để bắt pattern ở nhiều scale. Mỗi cửa sổ trích xuất 16 đặc trưng: 8 năng lượng dải tần (từ tần số thấp đến cao), spectral centroid (trọng tâm phổ), rolloff (tần số chứa 85% năng lượng), flatness (mức "phẳng" của phổ --- noise-like hay tonal), và peak frequency.
-
-Tổng cộng 64 chiều, đưa qua MLP cho ra h_spec ở R^128.
-
-Đây là kỹ thuật lấy cảm hứng từ spectral forensics trong phát hiện deepfake ảnh (Frank et al., ICML 2020), áp dụng lần đầu cho code detection.
+Bên phải là các negative results: IBCode (Information Bottleneck) nén style — mà style lại chính là tín hiệu phân biệt, nên nó phản tác dụng. CosineProto thì confusion Nxcode→Qwen còn tệ hơn.
 
 ---
 
-## Slide 11: Fusion --- Cross-Attention + Learned Gate
+## Slide 6: CoDET-M4 Complete OOD Evaluation
 
-3 representation của Neural Path (token R^768, AST R^128, structural R^128) được project về cùng chiều R^512, stack thành chuỗi 3 token, rồi đưa qua 4-head self-attention. Mỗi view "attend" tới các view khác --- ví dụ: token feature được điều chỉnh bởi AST structure, giúp model nhận ra "pattern token này đáng ngờ hơn với cấu trúc AST này."
+Đây là phần hoàn toàn mới — lần đầu tiên mình chạy đánh giá OOD đầy đủ trên CoDET-M4 với HierTreeCode.
 
-Sau đó, Learned Soft Gate kết hợp Neural và Spectral predictions. Gate học trọng số cho từng mẫu --- không phải code nào cũng cần spectral như nhau. Ví dụ: code ngắn có thể chủ yếu dựa vào neural, code dài dựa nhiều hơn vào spectral.
+**OOD Source** (bảng trái): Hold out lần lượt CodeForces, GitHub, LeetCode. Kết quả trung bình 55.42 — ngang bằng với UniXcoder của paper (55.01), tức +0.41. Đây là lần đầu phương pháp deep methods match được UniXcoder trên source OOD.
 
-Loss function gồm Focal Loss (giảm trọng số mẫu dễ, tập trung vào mẫu khó) trên 3 head: gate (chính), neural (phụ 0.3), spectral (phụ 0.3). Auxiliary losses đảm bảo cả 2 đường đều học representation hữu ích độc lập.
+Nhưng GitHub held-out thì catastrophic: chỉ 28.34%, human recall 5.71%. Model train trên CF+LC chỉ học mẫu competitive programming, không generalize sang GitHub.
 
----
+**OOD Language** (bảng phải): C++ 87.68, Java 76.92, Python chỉ 59.86. Trung bình 74.82, còn gap 14.14 so với UniXcoder. Python LOO là yếu nhất — model phụ thuộc lexical shortcuts.
 
-## Slide 12: CoDET-M4 Results
-
-Kết quả trên CoDET-M4: SpectralCode đạt 99.06% F1 binary --- hơn UniXcoder (98.65%). Quan trọng hơn, trên bài toán author attribution 6 lớp, SpectralCode đạt 69.82% --- cao hơn UniXcoder 3.49 điểm, cao hơn CodeBERT 5.02 điểm.
-
-Breakdown theo ngôn ngữ: C++ 72.31%, Java 70.12%, Python 69.22% --- khá ổn định. Nhưng breakdown theo nguồn code cho thấy GitHub chỉ 56.18% trong khi CodeForces đạt 77.17% --- chênh lệch 21 điểm. Đây là bottleneck chính --- code GitHub đa dạng phong cách hơn nhiều so với competitive programming.
+**OOD Generator**: Weighted-F1 trung bình 94.72 — khá cao vì đây là bài toán binary khi chỉ test trên 1 generator.
 
 ---
 
-## Slide 13: DroidCollection Results
+## Slide 7: OOD Summary — What We Learned
 
-Kết quả trên DROID (EMNLP 2025): SpectralCode đạt 88.77% weighted-F1 trên 3-class task --- THẮNG DroidDetect-Base (86.76%) và NGANG DroidDetect-Large (88.78%).
+Tóm tắt OOD: Source OOD đã đạt parity, Language OOD còn gap lớn -14 điểm, và GitHub source là bottleneck phổ quát.
 
-Đặc biệt, nhóm chỉ dùng ModernBERT-base (149M params) trong khi paper dùng Large (395M params), và chỉ train trên 1/10 dữ liệu (100K/1.06M). Đây là kết quả rất tích cực --- model nhỏ hơn, ít data hơn mà vẫn competitive. Khi scale lên full data, nhóm kỳ vọng sẽ vượt cả DroidDetect-Large.
+Bên phải em muốn nhấn mạnh: GitHub là distribution khó nhất. Bằng chứng từ MỌI thí nghiệm: OOD-Source held-GH 28.34%, IID per-source GH chỉ 56.18% vs CF 77.17%. CF/LC là competitive programming — style hẹp, dễ học. GH là code thực tế — style đa dạng, khó generalize.
 
----
-
-## Slide 14: AICDBench Results
-
-AICD là benchmark khó nhất --- 77 models, 9 ngôn ngữ, OOD evaluation nghiêm ngặt.
-
-SpectralCode đạt 29.83% trên T1 (competitive với ModernBERT 30.61%), 56.31% trên T3. T2 (12-class family attribution) còn 18.93% --- đây là nơi HierTreeCode được kỳ vọng sẽ cải thiện với family-aware loss.
-
-LƯU Ý QUAN TRỌNG: Tất cả methods --- kể cả SOTA --- đều bị OOD collapse nghiêm trọng trên AICD T1: val 99.5% nhưng test chỉ 29.8%. Đây là vấn đề cơ bản của benchmark --- train 3 ngôn ngữ, test 9 ngôn ngữ với domain hoàn toàn mới --- không phải của method.
-
-Nhóm đang chỉ dùng 1/20 dữ liệu (100K/2.05M), nên còn nhiều room để cải thiện khi chạy full data.
+**Bất kỳ phương pháp nào đạt trên 0.40 macro trên OOD-SRC-gh thì đều xứng đáng NeurIPS.**
 
 ---
 
-## Slide 15: HierTreeCode Pipeline
+## Slide 8: Exp_Climb — 20% Data, Dual-Benchmark
 
-HierTreeCode = SpectralCode + Hierarchical Affinity Loss. Pipeline giống hệt SpectralCode, chỉ thêm một nhánh MÀU ĐỎ: lấy h_neural và áp dụng Hierarchical Affinity Loss.
+Exp_Climb là bộ thí nghiệm mới hoàn toàn. Ý tưởng: train chỉ 20% data nhưng test trên FULL test set, đồng thời đánh giá trên CẢ HAI benchmark CoDET-M4 và DROID.
 
-Family Tree được định nghĩa cho từng benchmark: Qwen -> {Qwen1.5, Nxcode}, Meta -> {Llama3.1, CodeLlama}, Google -> {Gemma, Gemini}.
+Kết quả đáng chú ý:
 
-Batch-hard triplet loss hoạt động như sau: với mỗi anchor sample, tìm mẫu cùng family xa nhất (hard positive) và mẫu khác family gần nhất (hard negative). Loss enforce: khoảng cách positive + margin < khoảng cách negative. Margin alpha = 0.3, dùng cosine distance trên L2-normalized embeddings.
+- **NTKAlignCode** đạt 71.03 Author — chỉ thua DeTeCtiveCode 0.50 điểm nhưng chỉ dùng 20% data! Phương pháp này dùng Neural Tangent Kernel alignment trên task head.
+- **FlowCodeDet** đạt OOD-lang-python 64.50 — hơn cả bộ phương pháp 11 điểm! Flow matching giúp tốt nhất cho language generalization.
+- **PoincareGenealogy** đạt Droid T3 89.76 — vượt cả DroidDetect-Large (88.78)! Hyperbolic geometry giúp tốt cho in-distribution identification.
+- **PersistentHomologyCode** đạt OOD-src-gh 35.56 — record mới trên climb. Topological Data Analysis bắt được structural invariants mà token-level không thấy.
 
-Khác biệt duy nhất so với SpectralCode: thêm 0.4 * L_hier vào total loss. Mọi thứ khác giữ nguyên.
-
----
-
-## Slide 16: HierTreeCode Preliminary Results
-
-Trên CoDET-M4, HierTreeCode đạt 70.55% author F1 --- cao hơn SpectralCode 0.73 điểm và cao hơn UniXcoder 4.22 điểm. Gain tập trung vào Qwen1.5 (+3% F1) --- đúng là class khó nhất.
-
-Nhóm kỳ vọng HierTreeCode sẽ cải thiện hơn nữa trên:
-- DROID T3/T4: family hierarchy (human → refined → machine → adversarial) giúp phân biệt các loại code
-- AICD T2: 12-class family attribution --- perfect match cho family-aware loss, đặc biệt nhóm Google (Gemma+Gemini) và Chinese AI (DeepSeek+Qwen)
-
-Code đã sẵn sàng, đang chạy experiments.
+Paper claim: "Với chỉ 20% training data, phương pháp của chúng tôi match hoặc vượt baselines full-data trên hai benchmark lớn."
 
 ---
 
-## Slide 17: Evaluation Plan + Timeline
+## Slide 9: Exp_Climb — Novel Method Highlights
 
-Tổng kết trạng thái hiện tại:
-- CoDET-M4: ĐÃ XONG binary 99.06%, author 70.55%
-- DROID: ĐÃ XONG T3 88.77%, T4 88.02% (SpectralCode)
-- AICD: ĐANG CHẠY --- kết quả sơ bộ competitive
+Slide này đi sâu vào 4 phương pháp nổi bật:
 
-Timeline: Tháng 4-6 chạy OOD CoDET + DROID HierTreeCode, tháng 6-8 AICD full eval + full data, tháng 8-10 viết paper và submit NeurIPS 2026.
+**FlowCodeDet**: Dùng class-conditioned flow matching — học continuous normalizing flow trên embedding space. OOD-lang-python đạt 64.50 — +11 pts so với pack. Đây là phương pháp đầu tiên vượt 70.6 Author trên climb.
 
----
+**PoincareGenealogy**: Embed vào không gian Poincaré ball (hyperbolic). Centering loss tổ chức cây phả hệ Human→AI. Droid T3 đạt 89.76 — best overall, vượt DroidDetect-Large.
 
-## Slide 18: Contributions
+**NTKAlignCode**: Dùng Gram-matrix alignment giữa NTK và target kernel. Author 71.03 — #1 trên climb. OOD-src-gh 35.14 — #2. Chỉ 0.50 thua DeTeCtive nhưng với 20% data!
 
-4 đóng góp chính:
-1. SpectralCode: multi-stream architecture (token + AST + structural + spectral FFT) với cross-attention fusion và learned gating --- đã SOTA trên CoDET-M4 và thắng DroidDetect-Base trên DROID
-2. HierTreeCode: lần đầu sử dụng cây gia phả LLM làm prior cho code attribution --- encode quan hệ cha-con thành ràng buộc khoảng cách trong embedding space
-3. Unified evaluation trên 3 benchmark (3.6M mẫu) --- đầu tiên cover binary + attribution + OOD + adversarial trong cùng một method
-4. Insight về scaling: kết quả competitive với chỉ 1/10 - 1/20 data, model base nhỏ hơn 2.6x so với paper mà vẫn ngang điểm
+**PersistentHomologyCode**: Topological Data Analysis — tính Betti numbers từ AST filtration. OOD-src-gh 35.56 — climb record! Topology bắt structural invariants mà tokens không thấy. Trade-off: Droid T3 chỉ 85.85 — TDA hurt in-distribution.
 
 ---
 
-## Slide 19: CoDET-M4 Experiment Insights (10 methods)
+## Slide 10: Zero-Shot Detectors — 31 Methods, No Training
 
-Nhóm đã explore 10 methods khác nhau trên CoDET-M4. Leaderboard cho thấy các method cluster trong khoảng 69.7-70.6% author F1. HierTreeCode dẫn đầu với 70.55%.
+Bộ thí nghiệm zero-shot hoàn toàn mới: 31 phương pháp, KHÔNG cần training gì cả. Mỗi method chỉ là một scoring function — nhận code đầu vào, trả ra một con số score. Sau đó calibrate threshold trên dev set (5K mẫu) rồi đánh giá trên FULL test set. Tức là zero-shot chạy full data luôn — không có khái niệm 20% hay subsample gì, vì không có bước training nào cả.
 
-NEGATIVE RESULT QUAN TRỌNG: DANN (domain adversarial) THẤT BẠI thảm hại --- từ 69.82% xuống 62.89%. Gradient reversal ép model tạo feature không phân biệt generator --- nhưng đây CHÍNH LÀ điều ta KHÔNG muốn trong attribution. Qwen1.5 F1 rơi xuống 0.198 (random). Bài học: domain adversarial KHÔNG phù hợp cho attribution --- đây là negative result có giá trị cho cộng đồng.
+Top-10 theo Droid T3 Weighted-F1: BuresQuantum đứng đầu 0.432, CodeAcrostic 0.426, CFGEntropy 0.414. Tất cả 9 top methods đều vượt reproduction Fast-DetectGPT của mình (0.321).
 
-Ngoài ra: GAT trên AST cũng không giúp (GraphStyleCode thậm chí kém hơn baseline), trong khi các method đơn giản hơn như RAGDetect (retrieval-augmented) và BiScopeCode (MLM memorization probe) lại hiệu quả.
+Lưu ý quan trọng: Paper Fast-DetectGPT báo 64.54 nhưng reproduction của mình chỉ 32.07 — gap 32 điểm. Có thể do paper dùng full-data access hoặc different mask-sampling budget. Tuy nhiên, so sánh TRONG bộ suite là fair vì cùng protocol.
 
----
-
-## Slide 20: AICD + DROID Insights (13 methods)
-
-Trên AICD + DROID, nhóm chạy 13 method. SpectralCode dẫn đầu overall (0.549 avg macro-F1), TokenStat mạnh nhất trên DROID (0.852).
-
-5 insight chính:
-1. AICD T1 OOD vẫn chưa ai giải được --- tất cả methods collapse từ 99% xuống 30%
-2. Spectral features transfer tốt nhất dù kiến trúc đơn giản --- FFT bắt được các pattern tần số mà neural features bỏ lỡ
-3. Token statistics (entropy, burstiness, Yule-K) cực mạnh trên DROID --- cho thấy statistical features vẫn có giá trị
-4. Embedding Mixup giúp OOD --- DomainMix đạt best AICD T1 nhờ data augmentation
-5. Chỉ dùng 1/10-1/20 data --- full data sẽ cho kết quả cao hơn, đây là low-hanging fruit
-
-Các method thất bại: CausAST (orthogonal penalty triệt tiêu hoàn toàn), OSCP (whitening loss quá lớn ~206, lấn át loss chính), AST-IRM (IRM penalty nổ tới 5000).
+26 signal families hoàn toàn orthogonal — từ curvature, compression, quantum info, path-signature, martingale, optimal transport... "Không có single signal nào thống trị code authorship."
 
 ---
 
-## Slide 21: Thank You
+## Slide 11: Zero-Shot — Novel Signal Families
 
-Cảm ơn thầy đã lắng nghe. Nhóm sẵn sàng trả lời câu hỏi. 
+6 detector hoàn toàn mới, chưa từng được áp dụng cho code detection:
 
-Ba benchmark sử dụng: CoDET-M4 (ACL Findings 2025), DroidCollection (EMNLP 2025), AICDBench (EACL 2026). Code và experiments có sẵn.
+1. **PathSignature** — dùng Chen's rough-path iterated integrals trên log-prob trajectory. Đạt 3/4 oral claims.
+2. **BuresQuantum** — coi attention matrix là quantum density matrix, tính Bures metric. Best W-F1 overall.
+3. **Martingale** — De Jong test kinh tế lượng trên AST-depth-conditioned residuals. Cách tiếp cận hoàn toàn mới.
+4. **KSDScope** — Kernel Stein Discrepancy trên scope-edge graphs. Detector duy nhất dùng structural (không phải sequential) info.
+5. **AttentionCriticality** — Hill MLE của power-law exponent trên attention avalanches.
+6. **SinkhornOT** — Entropic optimal transport trong embedding space.
+
+Ý nghĩa: 26 signal families orthogonal → bảng ablation mega-scale cho NeurIPS, reviewer không thể dismiss là "yet-another-log-ratio". Mọi method đều test trên cả Droid và CoDET, deterministic, reproducible.
 
 ---
 
-**GHI CHÚ CHO THUYẾT TRÌNH:**
-- Thời gian dự kiến: 20-25 phút
-- Tập trung vào story: benchmark cũ binary-only đã bão hòa → cần attribution/OOD/adversarial → 3 benchmark mới → SpectralCode đã có kết quả tốt → HierTreeCode là bước tiếp theo
-- Nhấn mạnh: model base (149M) thắng model large (395M), chỉ dùng 1/10 data
-- Nhấn mạnh negative results: DANN failure là insight có giá trị cho cộng đồng nghiên cứu
-- Khi giải thích FFT: dùng analogy âm nhạc --- "giống như phân tích bài hát thành các note, FFT phân tích chuỗi token thành các tần số đặc trưng cho từng LLM"
-- Khi giải thích AST: vẽ trên bảng nếu cần --- "if x > 0: return x" → cây với if ở gốc
+## Slide 12: AICD + DROID Cross-Benchmark Results
+
+Trên bộ deep methods (AICD + DROID), đã hoàn thành 6 phương pháp chạy trên 5 tasks.
+
+SpectralCode dẫn đầu overall với avg 0.549. HierTreeCode mạnh nhất AICD T2 (12-class family attribution, 0.207). TokenStat mạnh nhất Droid T3 và T4.
+
+So sánh với paper DROID: TokenStat đạt 89.41 Weighted-F1 — vượt DroidDetect-Large (88.78) 0.63 điểm. HierTreeCode cũng vượt (89.17). Tất cả đều dùng model base 149M tham số, trong khi paper dùng large 395M.
+
+AICD T1 vẫn chưa giải được: Val 99.5% → Test 30% cho TẤT CẢ 23 phương pháp. Đây là tính chất của dataset, không phải bug của phương pháp.
+
+---
+
+## Slide 13: What Works — Validated Patterns
+
+Tổng hợp các pattern đã được validate, có thể tái sử dụng cho phương pháp cuối cùng:
+
+1. **HierTree family loss** — bắt buộc, +3% Qwen F1
+2. **Multi-level SupCon** — contrastive trên cả neural và spectral heads, +0.98 so với HierTree
+3. **kNN blend** — free OOD lift, không cần train thêm
+4. **Token statistics** — entropy, burstiness, Yule-K — rẻ mà mạnh trên Droid
+5. **Spectral FFT** — robust cross-domain transfer
+6. **Flow matching** — best OOD-lang-python (+11 pts)
+7. **Poincaré embeddings** — best Droid T3 geometry
+
+Cocktail tốt nhất hiện tại: HierTree + SupCon + kNN + token stats + spectral FFT → DeTeCtiveCode 71.53.
+
+---
+
+## Slide 14: What Fails — Anti-Patterns
+
+Những gì KHÔNG nên làm:
+
+**Thất bại thảm khốc:**
+1. DANN/GRL — ép features invariant theo generator = NGƯỢC với attribution. Qwen F1 rơi xuống 0.198, gần random. Giảm 7.66%.
+2. VILW whitening — loss whitening chiếm 206, đè bẹp CE.
+3. Orthogonal penalty không warmup — drive Cov về 0, giết features hữu ích.
+4. IRM không annealing — penalty nổ lên 5000, NaN gradients.
+
+**Hiệu quả giảm dần:**
+1. GAT trên AST — không hơn BiLSTM. Cần graph phong phú hơn (CFG/DFG).
+2. Info Bottleneck — nén style = sai cho attribution.
+3. CosineProto — confusion Nxcode→Qwen tệ hơn.
+
+**Quy tắc chung:** Bất kỳ phương pháp nào xóa generator-specific style (DANN, IB, whitening) đều HẠI attribution. Style chính LÀ tín hiệu phân biệt.
+
+---
+
+## Slide 15: The Three Unsolved Bottlenecks
+
+Ba bài toán chưa giải được:
+
+**1. Nxcode ↔ Qwen1.5 confusion:** 33–40% Qwen bị predict thành Nxcode ở MỌI phương pháp. Nxcode fine-tune từ CodeQwen1.5 → gần như cùng "DNA phong cách". Best Qwen F1 = 0.490 (DeTeCtive). Target ≥ 0.55.
+
+**2. GitHub Source OOD:** 28.34% macro, human recall 5.71%. CF/LC là competitive programming (style hẹp), GH là code thực tế (đa dạng). Target > 0.40 = NeurIPS-worthy. Best climb: PersistentHomology 35.56.
+
+**3. AICD T1 OOD Collapse:** Val 99.5% → Test 29.8% cho TẤT CẢ 23 phương pháp. Đây là tính chất dataset — train/test có phân phối khác nhau hoàn toàn. Chiến lược: frame là "open challenge / negative result" nếu reviewer hỏi.
+
+---
+
+## Slide 16: Scale of Work — By the Numbers
+
+Nhìn tổng thể quy mô công việc:
+
+- **Exp_DM**: 6 phương pháp deep methods trên AICD + Droid (30 thiết kế, 6 đã chạy)
+- **Exp_CodeDet**: 22 phương pháp trên CoDET-M4 full data (22 chạy, 1 pending)
+- **Exp_Climb**: 14 phương pháp lean dual-bench 20% data (14 chạy, 12 pending)
+- **Exp_ZeroShot**: 31 phương pháp zero-shot trên cả Droid và CoDET — chạy trên **full test set** vì không cần train (20 done, 11 đang fix)
+
+Tổng cộng: **73+ phương pháp unique × 3 benchmarks × 3.6 triệu mẫu**. Tất cả chạy trên Kaggle H100 80GB, BF16, sessions tối đa 12 giờ.
+
+---
+
+## Slide 17: Updated Evaluation Matrix
+
+Ma trận đánh giá cập nhật. Tick xanh là đã hoàn thành, đồng hồ cam là đang làm hoặc challenging, mũi tên lên là mới so với lần báo cáo trước.
+
+Tiến độ kể từ lần báo cáo trước:
+- Author F1: 70.55 → **71.53** (+0.98)
+- CoDET methods: 10 → **22**
+- Full OOD suite: hoàn thành
+- Lean dual-bench: 14 methods
+- Zero-shot: 31 methods
+- Tổng: **73+ methods**
+
+---
+
+## Slide 18: Next Steps & Priorities
+
+**Ưu tiên cao:**
+1. **DFR-SourceBalanced** — retrain last layer trên balanced data. Theo lý thuyết ICLR 2025, nếu features đã sufficient thì chỉ cần fix classifier. Target: OOD-GH > 0.40.
+2. **HierNCoE** — Hierarchical Neural Collapse + ETF geometry để phân tách Qwen/Nxcode. Target: Qwen F1 ≥ 0.50.
+3. **FrontDoor-NLP** — Causal mediation cho source OOD breakthrough.
+4. **Full data training** — scale từ 100K lên 500K–1M trên top methods.
+
+**Kill criteria:** Phương pháp mới chỉ worth promoting nếu beat ít nhất 1 trong: Author > 71.53, Droid T3 > 89.41, OOD-SRC-gh > 35.56, hoặc AICD T1 > 0.31.
+
+**Timeline:** Tháng 4–5 chạy nốt Climb và DM, tháng 6–7 full data + ablations, tháng 8–9 viết paper, tháng 10 nộp NeurIPS 2026.
+
+---
+
+## Slide 19: Thank You
+
+Cảm ơn thầy đã lắng nghe. Em sẵn sàng trả lời câu hỏi.
+
+Tổng kết: 73+ phương pháp, 4 bộ thí nghiệm, 3.6 triệu mẫu, trên 3 benchmark lớn nhất trong lĩnh vực AI code detection.
+
+---
+
+## Câu hỏi thầy có thể hỏi & cách trả lời
+
+**Q: Tại sao không train full data?**
+A: Full data không thay đổi ranking — đã verify ablation 100K vs 500K trên Exp18 CoDET, kết quả flat. Với 20% data đã match/beat paper baselines.
+
+**Q: AICD T1 sao tệ vậy?**
+A: Val-test gap là dataset property — train/test có distribution hoàn toàn khác (3 ngôn ngữ → 9 ngôn ngữ, different domains). 23 methods đều fail → không phải bug method. Chiến lược: frame là open challenge.
+
+**Q: Nxcode/Qwen confusion giải sao?**
+A: HierTree helps +3%, DeTeCtive thêm SupCon + kNN đưa Qwen lên 0.49. Next step: HierNCoE dùng ETF geometry ép orthogonal trong tangent space, và Binoculars log-ratio PPL_Qwen/PPL_Nxcode cho Neyman-Pearson optimal.
+
+**Q: Zero-shot có ý nghĩa gì khi gap 32 pts với paper?**
+A: Gap là do reproduction protocol khác. Trong bộ suite, 9 methods beat FDG của mình → fair ranking. 26 signal families orthogonal → mega-ablation table cho paper, reviewer không dismiss được.
+
+**Q: Novelty contribution là gì?**
+A: (1) HierTree — first use of LLM genealogy as structured prior, (2) Multi-level SupCon + kNN cracks 71.53, (3) Unified 3-benchmark eval — first work covering binary + attribution + OOD + adversarial, (4) 73+ method comprehensive study, (5) 6 novel zero-shot signal families never applied to code.
