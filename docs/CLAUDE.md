@@ -96,11 +96,16 @@ ai_code_detection/
 │   ├── _data_codet.py / _data_droid.py
 │   ├── _climb_runner.py / _paper_table.py / _ablation.py
 │   └── exp_NN_<method>.py               # ONE method per file, thin wrapper, each targets a named axis (see §4)
-├── Exp_DM/                              # 30 methods on AICD + Droid (historical). dm_tracker.md.
+├── Exp_DM/                              # 5 champions on AICD + Droid (exp07/09/11/13/18). dm_tracker.md.
 ├── Exp_CodeDet/                         # CoDET-M4 adaptation of DM methods. tracker.md.
+├── legacy/                              # Archived suites — see legacy/README.md
+│   ├── Exp_ZeroShot/                    # 31 ZS detectors, dropped (reproduction gap −32 pt vs paper FDG)
+│   ├── Exp_TK/                          # consolidated champion folder, redundant with Exp_Climb / Exp_CodeDet / Exp_DM
+│   ├── Exp_DM_weak/                     # 21 underperformers from Exp_DM (exp01-06, 08, 10, 12, 19-30)
+│   ├── experiment/                      # legacy baselines (exp00-04 from early phase)
+│   └── performance_tracker.md           # superseded by per-suite trackers
 ├── docs/
 │   ├── CLAUDE.md                        # THIS FILE
-│   ├── performance_tracker.md           # Legacy. Superseded by Exp_Climb/tracker.md + Exp_DM/dm_tracker.md.
 │   └── references/                      # Read-only: paper_AICD.md, paper_Droid.md, paper_CodeDet_M4.md, dataset_links.md
 ├── Slide/                               # Proposal deck (Vietnamese presentation script + .tex + .pdf)
 └── Formatting_Instructions_For_NeurIPS_2026/   # DO NOT MODIFY .sty
@@ -110,7 +115,7 @@ ai_code_detection/
 - Axis spine + ablation matrix → [Exp_Climb/tracker.md](../Exp_Climb/tracker.md) §Theory axes, §Ablation matrix
 - AICD + Droid method history → [Exp_DM/dm_tracker.md](../Exp_DM/dm_tracker.md)
 - CoDET-M4 baseline leaderboard → [Exp_CodeDet/tracker.md](../Exp_CodeDet/tracker.md)
-- Backbone reference implementation → [experiment/exp00_codeorigin.py](../experiment/exp00_codeorigin.py)
+- Backbone reference implementation → [legacy/experiment/exp00_codeorigin.py](../legacy/experiment/exp00_codeorigin.py) *(archived; legacy reference)*
 
 ## 8. Current standing (as of 2026-04-19)
 
@@ -158,9 +163,8 @@ Each file is self-contained. Kaggle-first: scripts assume H100 BF16, auto-instal
 
 ## 12. Time-wasters to avoid
 
-- `docs/performance_tracker.md` is legacy; trust `Exp_Climb/tracker.md` → `Exp_DM/dm_tracker.md` in that order.
-- `experiment/` only contains legacy baselines. The active suite is `Exp_Climb/` (climb) and `Exp_DM/` / `Exp_CodeDet/` (historical ablations).
-- Some `Exp_DM/` files (exp28, 29, 30) are tiny wrappers over exp27. Not a bug.
+- `legacy/` is archived; do not run anything from there. Active suites: `Exp_Climb/` (climb), `Exp_CodeDet/` (CoDET-M4 full), `Exp_DM/` (5 champions on AICD + Droid).
+- Exp_ZeroShot is in `legacy/` because the reproduction gap vs paper Fast-DetectGPT (−32 pt W-F1) makes within-suite numbers unciteable.
 - `.claude/`, `.cursor/`, `codet_m4_checkpoints/`, `*.pt`, `logs/`, `results/` are gitignored. Don't commit.
 - Large negative Δ on AICD T1 test is expected, not a bug — it's §1's motivation.
 - **OOD-Generator LOO macro-F1 is ceiling-bound ~0.5** (test = only the held-out class). Report weighted-F1 and per-class recall for that column; macro is a regression detector only.

@@ -23,7 +23,7 @@ The user develops locally but runs experiments on Kaggle H100. This command emit
    - `Exp_DM/` → AICD + Droid
    - `Exp_CodeDet/` → CoDET-M4
    - `Exp_Climb/` → EMNLP suite
-   - `Exp_TK/` → baselines
+   - `legacy/Exp_TK/` → archived baselines (read-only, do not emit cells for these)
 3. **Emit the following cells** as fenced code blocks the user can paste. Do NOT execute anything locally.
 
 ## Output template

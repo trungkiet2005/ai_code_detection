@@ -23,8 +23,9 @@
 - Results (AICD + Droid): [Exp_DM/dm_tracker.md](Exp_DM/dm_tracker.md)
 - Results (CoDET-M4): [Exp_CodeDet/tracker.md](Exp_CodeDet/tracker.md)
 - Climb / EMNLP 2026 experiments: [Exp_Climb/tracker.md](Exp_Climb/tracker.md)
-- Baseline implementation: [Exp_TK/exp00_codeorigin.py](Exp_TK/exp00_codeorigin.py)
+- Baseline implementation: [legacy/Exp_TK/exp00_codeorigin.py](legacy/Exp_TK/exp00_codeorigin.py) (legacy reference)
 - Paper references: [docs/references/](docs/references/)
+- Archived suites: [legacy/](legacy/) — Exp_ZeroShot (drop), Exp_TK (consolidated), experiment/ (legacy baselines), Exp_DM_weak (21 underperformers)
 
 ## Slash commands & agents
 
