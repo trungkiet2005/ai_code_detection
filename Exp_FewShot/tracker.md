@@ -101,18 +101,37 @@ FS_K_SHOT=8 python Exp_FewShot/exp_fs_00_baseline.py
 FS_K_SHOT=8 FS_LAMBDA_NTK=0.4 python Exp_FewShot/exp_fs_01_ntkalign.py
 ```
 
-## 🚀 Kaggle T4 run
+## 🚀 Kaggle T4 run — TWO equivalent ways
+
+### Option A: full repo clone (recommended for sweeps)
 
 ```python
-# Cell 1: clone + cd
-!git clone https://github.com/<your-fork>/ai_code_detection.git
+# Cell 1
+!git clone --depth 1 https://github.com/trungkiet2005/ai_code_detection.git
 %cd /kaggle/working/ai_code_detection
 
-# Cell 2: K-sweep on NTKAlign (CoDET Author)
-import os
+# Cell 2: K-sweep on NTKAlign + Baseline
+import os, pathlib
+pathlib.Path("logs").mkdir(exist_ok=True)
 for k in [8, 16, 32, 64, 128]:
     os.environ["FS_K_SHOT"] = str(k)
     !python Exp_FewShot/exp_fs_01_ntkalign.py 2>&1 | tee logs/exp_fs_01_K{k}.log
+    !python Exp_FewShot/exp_fs_00_baseline.py 2>&1 | tee logs/exp_fs_00_K{k}.log
+```
+
+### Option B: standalone single-file (paste into a cell)
+
+The exp file auto-clones the repo on first run if support modules aren't
+present, then imports from the cloned `Exp_FewShot/`. Useful when you only
+have the script and don't want to manage `cd`.
+
+```python
+# Cell: just upload exp_fs_01_ntkalign.py to /kaggle/working and run
+import os
+os.environ["FS_K_SHOT"] = "32"
+!python /kaggle/working/exp_fs_01_ntkalign.py
+# First run prints: [fs-bootstrap] cloning ... -> /kaggle/working/ai_code_detection
+# Subsequent runs reuse the clone.
 ```
 
 Each run emits a `BEGIN_FS_TABLE ... END_FS_TABLE` block. Paste those blocks back
