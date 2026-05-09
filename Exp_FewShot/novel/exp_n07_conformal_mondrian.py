@@ -122,6 +122,9 @@ def set_seed(seed=42):
 
 @dataclass
 class FSConfig:
+    # benchmark: "codet_m4" (default, 6-class Author IID) | "droid_t3" (3-class
+    # Weighted-F1) | "droid_t4" (4-class incl. adversarial). Switch via
+    # FS_BENCHMARK env var in main().
     benchmark: str = "codet_m4"
     task: str = "author"
     k_shot: int = 128
@@ -255,6 +258,50 @@ def _load(seed):
     return train, val, test
 
 
+# -----------------------------------------------------------------------------
+# Droid loader (T3 = 3-class, T4 = 4-class with adversarial). Schema verified
+# against the DroidCollection HF viewer (2026-04-20):
+#   columns = Code / Label / Language / Generator / Generation_Mode / Source /
+#             Sampling_Params / Rewriting_Params / Model_Family
+#   Label values: HUMAN_GENERATED / MACHINE_GENERATED / MACHINE_REFINED /
+#                 MACHINE_GENERATED_ADVERSARIAL.
+# -----------------------------------------------------------------------------
+def _droid_label(row, task):
+    norm = str(row.get("Label", "")).upper()
+    if task == "T3":
+        if norm == "HUMAN_GENERATED": return 0
+        if norm in ("MACHINE_GENERATED", "MACHINE_GENERATED_ADVERSARIAL"): return 1
+        if norm == "MACHINE_REFINED": return 2
+        return -1
+    if task == "T4":
+        m = {"HUMAN_GENERATED": 0, "MACHINE_GENERATED": 1,
+             "MACHINE_REFINED": 2, "MACHINE_GENERATED_ADVERSARIAL": 3}
+        return m.get(norm, -1)
+    return -1
+
+
+def _droid_convert(split, task):
+    def _row(r):
+        return {
+            "code": r.get("Code", "") or "",
+            "label": _droid_label(r, task),
+            "language": str(r.get("Language", "") or "").strip().lower(),
+            "source": str(r.get("Source", "") or "").strip().lower(),
+            "is_adversarial": int(str(r.get("Label", "")).upper()
+                                   == "MACHINE_GENERATED_ADVERSARIAL"),
+        }
+    out = split.map(_row, remove_columns=split.column_names)
+    return out.filter(lambda x: x["label"] >= 0 and len(x["code"].strip()) > 0)
+
+
+def _load_droid(seed, task):
+    logger.info(f"Loading dataset: project-droid/DroidCollection ({task})")
+    train = load_dataset("project-droid/DroidCollection", split="train")
+    val = load_dataset("project-droid/DroidCollection", split="validation")
+    test = load_dataset("project-droid/DroidCollection", split="test")
+    return train, val, test
+
+
 class _Ds(TorchDataset):
     def __init__(self, hf, tok, ml):
         self.hf = hf; self.tok = tok; self.ml = ml
@@ -279,10 +326,24 @@ def _coll(b):
 
 def build_loaders(cfg):
     set_seed(cfg.seed)
-    train_raw, val_raw, test_raw = _load(cfg.seed)
-    vocab = _vocab(train_raw)
-    logger.info(f"Author vocab ({len(vocab)}): {sorted(vocab.keys())}")
-    train_ds = _convert(train_raw, vocab); val_ds = _convert(val_raw, vocab); test_ds = _convert(test_raw, vocab)
+    bench = cfg.benchmark.lower()
+    if bench in ("droid_t3", "droid_t4"):
+        task = "T4" if bench == "droid_t4" else "T3"
+        cfg.n_classes = 4 if task == "T4" else 3
+        train_raw, val_raw, test_raw = _load_droid(cfg.seed, task)
+        train_ds = _droid_convert(train_raw, task)
+        val_ds = _droid_convert(val_raw, task)
+        test_ds = _droid_convert(test_raw, task)
+        vocab = {}
+        logger.info(f"[droid {task}] {cfg.n_classes}-class | train={len(train_ds)} "
+                    f"val={len(val_ds)} test={len(test_ds)}")
+    else:
+        cfg.benchmark = "codet_m4"
+        cfg.n_classes = 6
+        train_raw, val_raw, test_raw = _load(cfg.seed)
+        vocab = _vocab(train_raw)
+        logger.info(f"Author vocab ({len(vocab)}): {sorted(vocab.keys())}")
+        train_ds = _convert(train_raw, vocab); val_ds = _convert(val_raw, vocab); test_ds = _convert(test_raw, vocab)
     fs = cfg.k_shot > 0 and cfg.train_fraction <= 0
     if fs:
         idxs, counts = kshot_idx(list(train_ds["label"]), cfg.k_shot, cfg.n_classes, cfg.fs_seed)
@@ -533,9 +594,12 @@ def emit(method, exp_id, cfg, results):
     fs = cfg.k_shot > 0 and cfg.train_fraction <= 0
     rl = f"K={cfg.k_shot}" if fs else f"frac={cfg.train_fraction:.4f}"
     fl = f"K{cfg.k_shot}" if fs else f"frac{cfg.train_fraction:.4f}".rstrip("0").rstrip(".")
+    bench_tag = "" if cfg.benchmark == "codet_m4" else f"_{cfg.benchmark}"
     payload = {"method": method, "exp_id": exp_id, "regime": rl,
+               "benchmark": cfg.benchmark, "n_classes": cfg.n_classes,
                "timestamp": datetime.utcnow().isoformat() + "Z",
-               "config": {"k_shot": cfg.k_shot, "train_fraction": cfg.train_fraction,
+               "config": {"benchmark": cfg.benchmark, "n_classes": cfg.n_classes,
+                          "k_shot": cfg.k_shot, "train_fraction": cfg.train_fraction,
                           "fs_seed": cfg.fs_seed, "encoder": cfg.encoder_name,
                           "epochs": cfg.epochs, "batch_size": cfg.batch_size,
                           "max_length": cfg.max_length, "lambda_method": cfg.lambda_method},
@@ -552,7 +616,7 @@ def emit(method, exp_id, cfg, results):
     for d in cands:
         try:
             os.makedirs(d, exist_ok=True)
-            p = os.path.join(d, f"{exp_id}_{fl}_seed{cfg.fs_seed}.json")
+            p = os.path.join(d, f"{exp_id}{bench_tag}_{fl}_seed{cfg.fs_seed}.json")
             with open(p, "w", encoding="utf-8") as f:
                 json.dump(payload, f, indent=2, ensure_ascii=False)
             logger.info(f"[json] -> {p}"); return
@@ -582,8 +646,9 @@ METHOD_NAME = "FS-ConformalMondrian"
 EXP_ID = "exp_n07_conformal_mondrian"
 
 
-def run_one(kind, value, base_seed, lambda_method):
+def run_one(kind, value, base_seed, lambda_method, benchmark="codet_m4"):
     cfg = FSConfig(
+        benchmark=benchmark,
         k_shot=value if kind == "kshot" else 0,
         train_fraction=value if kind == "fraction" else 0.0,
         fs_seed=base_seed, lambda_method=lambda_method,
@@ -602,11 +667,16 @@ def run_one(kind, value, base_seed, lambda_method):
 def main():
     base_seed = int(os.environ.get("FS_SEED", "42"))
     lambda_method = float(os.environ.get("FS_CMP_ALPHA", "0.5"))
+    benchmark = os.environ.get("FS_BENCHMARK", "codet_m4").lower()
+    if benchmark not in ("codet_m4", "droid_t3", "droid_t4"):
+        raise SystemExit(f"FS_BENCHMARK must be one of "
+                          f"{{'codet_m4', 'droid_t3', 'droid_t4'}}; got {benchmark!r}")
     configs = parse_sweep()
-    logger.info(f"[{EXP_ID}] sweep={configs} seed={base_seed} lambda_method={lambda_method}")
+    logger.info(f"[{EXP_ID}] benchmark={benchmark} sweep={configs} "
+                f"seed={base_seed} lambda_method={lambda_method}")
     summary = []
     for kind, value in configs:
-        t, v, w = run_one(kind, value, base_seed, lambda_method)
+        t, v, w = run_one(kind, value, base_seed, lambda_method, benchmark=benchmark)
         summary.append((kind, value, t, v, w))
         cleanup()
 

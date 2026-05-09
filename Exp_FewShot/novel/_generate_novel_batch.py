@@ -807,6 +807,11 @@ def render(spec, src_text):
                 "summary.append((kind, value, t, v, w, sib_f1, r[\"fisher_increased\"]))",
                 "summary.append((kind, value, t, v, w))"))
             continue
+        if "t, v, w, r = run_one(kind, value, base_seed, lambda_method, benchmark=benchmark)" in s:
+            cleaned.append(line.replace(
+                "t, v, w, r = run_one(kind, value, base_seed, lambda_method, benchmark=benchmark)",
+                "t, v, w = run_one(kind, value, base_seed, lambda_method, benchmark=benchmark)"))
+            continue
         if "t, v, w, r = run_one" in s:
             cleaned.append(line.replace(
                 "t, v, w, r = run_one(kind, value, base_seed, lambda_method)",

@@ -121,3 +121,43 @@ A novel idea answers ONE of these with one new mathematical object.
 > Generator: `_generate_novel_batch.py` — reads `exp_n01_sibling_residual.py`
 > as the template, substitutes per-method blocks. To add a new entry, append
 > to the SPECS list in that file.
+
+## 🎚️ Two-benchmark dispatch (2026-05-09)
+
+Every novel file now supports BOTH benchmarks via `FS_BENCHMARK` env var:
+
+| `FS_BENCHMARK` | Bench / Task | Classes | Primary metric | Paper baseline |
+|:--|:--|:-:|:--|:-:|
+| `codet_m4` (default) | CoDET-M4 6-class Author IID | 6 | Macro-F1 | UniXcoder 66.33 |
+| `droid_t3` | DroidCollection T3 (3-class) | 3 | Macro-F1 / W-F1 | DroidDetectCLS-Large 88.78 |
+| `droid_t4` | DroidCollection T4 (4-class incl. adversarial) | 4 | Macro-F1 / W-F1 | DroidDetectCLS-Large 94.30 |
+
+```python
+# Cell on Kaggle:
+import os
+os.environ["FS_BENCHMARK"] = "droid_t3"   # switch to Droid T3
+# Paste exp_n02_frontdoor_style.py and run
+```
+
+JSON output filename encodes the benchmark:
+```
+exp_n02_frontdoor_style_K128_seed42.json            # CoDET (default)
+exp_n02_frontdoor_style_droid_t3_K128_seed42.json   # Droid T3
+exp_n02_frontdoor_style_droid_t4_K128_seed42.json   # Droid T4
+```
+
+**Cross-bench portability of each method:**
+
+| Method | CoDET | Droid T3 | Droid T4 | Why |
+|:--|:-:|:-:|:-:|:--|
+| n01 SRD | ✅ ideal | ⚠️ no sibling pair in 3-class | ⚠️ same | sibling-restricted to codellama-nxcode |
+| n02 FSM | ✅ | ✅ Droid has 3 domains too | ✅ | source-confounding general |
+| n04 EFS | ✅ K=6 | ✅ K=3 | ✅ K=4 | ETF works for any K |
+| n05 MIF | ✅ | ✅ but I(Y;X) less interesting at K=3 | ✅ | MINE is generic |
+| n06 PCS | ✅ ideal | ⚠️ no sibling | ⚠️ same | proxy-causal needs sibling pair |
+| n07 CMP | ✅ | ✅ | ✅✅ T4 adversarial sweet-spot | conformal calibration is generic |
+| n08 SEA | ✅ K=6 | ⚠️ K=3 eigengap less informative | ⚠️ K=4 | Cheeger bound is K-sensitive |
+| n10 VIB | ✅ | ✅ | ✅ | VIB is K-agnostic |
+
+> Recommended Droid runs (subset that transfers cleanly):
+> n02 FSM, n04 EFS, n07 CMP, n10 VIB. Skip n01/n06/n08 on Droid.
