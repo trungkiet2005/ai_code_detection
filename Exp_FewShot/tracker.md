@@ -1,5 +1,25 @@
 # Exp_FewShot Tracker — K-shot AI-Code Detection on Kaggle T4
 
+> **Layout (2026-05-09):** the suite is split into two tracks.
+>
+> 1. **`testing/`** — SETUP-VARIATION track. Methods, encoder swaps, paper-
+>    baseline reimplementations, hyperparameter points. Goal: fill the
+>    data-efficiency matrix and find the strongest "safe" position. Current
+>    leader: **FS-NTKAlign + 5% data = 0.665 Macro-F1** (≈ paper UniXcoder full
+>    data). Build cells freely; no novelty gate.
+>
+> 2. **`novel/`** — THEORY-DRIVEN ORAL track. Each file proposes one new
+>    mathematical object with a falsifiable claim and a theorem hook.
+>    Files numbered `exp_nNN_*.py`. Must clear the 5-gate Novelty Filter
+>    (see [novel/README.md](novel/README.md)) before landing. Aim: EMNLP
+>    2026 Oral.
+>
+> **Safe submission floor:** the `testing/` results above (NTKAlign 0.665 at
+> 5% + Exp_13 NTKAlign 71.03 at 20% from `Exp_Climb/`) already give us a
+> publishable EMNLP Main paper. The `novel/` track is upside, not blocker.
+
+
+
 > **Pivot rationale (2026-05-08):** 20% data SOTA already done; we believe few-shot
 > (K=8..128 examples per class) is the higher-impact claim for EMNLP Main 2026.
 > 17 days to deadline. Phase B Day 5 = decision gate; if K=128 < 60 Author F1 we

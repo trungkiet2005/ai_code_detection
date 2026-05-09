@@ -52,12 +52,12 @@ FS_DIR = _setup_paths()
 
 
 METHOD_TO_SCRIPT = {
-    "baseline":      "exp_fs_00_baseline.py",
-    "ntkalign":      "exp_fs_01_ntkalign.py",
-    "supcon":        "exp_fs_02_supcon.py",
-    "frozen":        "exp_fs_03_frozen.py",
-    "ntk_frozen":    "exp_fs_04_ntk_frozen.py",
-    "supcon_frozen": "exp_fs_05_supcon_frozen.py",
+    "baseline":      "testing/exp_fs_00_baseline.py",
+    "ntkalign":      "testing/exp_fs_01_ntkalign.py",
+    "supcon":        "testing/exp_fs_02_supcon.py",
+    "frozen":        "testing/exp_fs_03_frozen.py",
+    "ntk_frozen":    "testing/exp_fs_04_ntk_frozen.py",
+    "supcon_frozen": "testing/exp_fs_05_supcon_frozen.py",
 }
 
 

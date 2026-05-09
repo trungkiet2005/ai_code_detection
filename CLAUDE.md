@@ -6,16 +6,26 @@
 
 ---
 
-## ⏱️ TL;DR — current state (2026-05-09)
+## ⏱️ TL;DR — current state (2026-05-09 evening)
 
-- **Submission target:** EMNLP 2026 Main, deadline ~2026-05-26 (~17 days).
-- **Headline numbers (anchor / fallback):** Exp_27 DeTeCtive **71.53** (CoDET Author full data) · Exp_13 NTKAlign **71.03** (lean 20%) · Exp_04 Poincare **89.76** (Droid T3). These are the safety net — paper draft v1 builds on them.
+- **Submission target:** EMNLP 2026 (Main + reach for Oral). Deadline ~2026-05-26 (~17 days).
+- **Safe floor (anchor / fallback for Main):** Exp_27 DeTeCtive **71.53** (CoDET Author full data) · Exp_13 NTKAlign **71.03** (lean 20%) · **NEW** Testing FS-NTKAlign **0.665** (5% data ≈ paper UniXcoder full) · Exp_04 Poincare **89.76** (Droid T3). Paper draft v1 builds on these.
 - **Paper draft:** [Paper/latex/main.tex](Paper/latex/main.tex), 5 pages storytelling.
-- **Active exploration (DO NOT lock yet):** `Exp_FewShot/` runs a **portfolio of (method × K × fraction)** setups on Kaggle T4. Goal: find which (training-budget, method) cell gives the strongest data-efficient claim. Lock the headline AFTER the portfolio runs, not before.
-  - 4 methods: baseline / NTKAlign / SupCon / frozen-encoder
-  - 5 K-shot points (K ∈ {8,16,32,64,128}) + 5 fraction points (1%, 5%, 10%, 20%, 50%)
-  - First two cells filled (K=32 baseline 0.18, K=32 NTKAlign 0.12 ⚠️ regression). Rest pending.
+- **Active two-track exploration in `Exp_FewShot/`:**
+  - **`testing/`** — setup-variation track. 14+ inline files (method × encoder × K × fraction). Already produced the 0.665 5%-data result. Free of novelty gate; build cells liberally to fill the data-efficiency matrix.
+  - **`novel/`** — theory-driven oral track. Each file = one new mathematical object + falsifiable claim + theorem hook. Files numbered `exp_nNN_*.py`. Must pass the 5-gate Novelty Filter ([novel/README.md](Exp_FewShot/novel/README.md)) before landing. Currently: **`exp_n01_sibling_residual.py`** — Sibling-Residual Discriminant targeting K=32 codellama↔nxcode collapse via Hierarchical Neural Collapse (Galanti-Poggio 2025).
 - **Excluded from headline:** AICD-Bench (universal val→test collapse), Zero-Shot suite (in `legacy/`, reproduction gap −32 pt vs paper FDG).
+
+## 📐 Two-track policy (testing/ vs novel/)
+
+| Question | testing/ | novel/ |
+|:--|:--|:--|
+| When to use | hyperparameter point, encoder swap, loss combo of existing pieces | new mathematical object with theorem |
+| Filename | `exp_fs_*.py` (free naming) | `exp_nNN_<concept>.py` (sequential) |
+| Header docstring | regular | mandatory: NAME / ONE-LINE CLAIM / EQUATION / THEORY HOOK / WHY NOT BEFORE / FALSIFIER |
+| Gate | none | 5-gate Novelty Filter (see novel/README.md) |
+| Anti-patterns | — | "stack 3 losses", λ-tuning, augmentation cocktail, "apply to new domain" alone |
+| Failure handling | overwrite / iterate | move to `legacy/novel_failed_NN_*.py`; never delete |
 
 ## 🧪 Exp_FewShot/ — portfolio policy
 

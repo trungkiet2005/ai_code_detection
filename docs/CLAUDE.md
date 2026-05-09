@@ -283,7 +283,53 @@ Each file is self-contained. Kaggle-first: scripts assume H100 BF16, auto-instal
 - **Always** keep the existing 71.03 / 71.53 / 89.76 numbers as the safety net. New runs in `Exp_FewShot/` go to new cells, never overwrite.
 - For paper edits: **prefer Edit on `Paper/latex/main.tex` over Write** — keeps history of section evolution clean in `git log -p`.
 
-## 15. Exp_FewShot portfolio rules (active suite)
+## 15. Exp_FewShot two-track rules (active suite, 2026-05-09)
+
+The few-shot suite is split into two physically separate folders. Different rules apply to each.
+
+### `Exp_FewShot/testing/` — setup-variation track
+
+- Hyperparameter points, encoder swaps, paper-baseline reimplementations,
+  combinations of existing losses.
+- **No novelty gate.** Add cells liberally to fill the data-efficiency matrix.
+- Filename free-form (e.g. `exp_fs_baseline_unixcoder.py`).
+- Current leader: **FS-NTKAlign + 5% data = 0.665 Macro-F1** (≈ paper UniXcoder full data).
+- This track is the safe-floor for EMNLP Main.
+
+### `Exp_FewShot/novel/` — theory-driven oral track
+
+- Each file proposes ONE new mathematical object with a falsifiable claim.
+- Filename pattern: `exp_nNN_<concept>.py` (sequential, e.g. `exp_n01_*`).
+- **Must pass 5-gate Novelty Filter** before landing here:
+  1. Theory-driven (theorem behind it)
+  2. ≤ 2 novel components
+  3. Falsifiable claim
+  4. Differentiated from prior work
+  5. Compute-feasible (≤ 1 T4-hour per data point)
+- **Mandatory header docstring** with: NAME / ONE-LINE CLAIM / EQUATION / THEORY HOOK / WHY NOT BEFORE / FALSIFIER.
+- Failed runs go to `legacy/novel_failed_NN_*.py`. Never delete; document the negative result in tracker.
+- Current entries: `exp_n01_sibling_residual.py` (Sibling-Residual Discriminant, targets K=32 codellama↔nxcode collapse via Galanti-Poggio 2025 Hierarchical Neural Collapse).
+
+### Anti-patterns (do NOT add to `novel/`)
+
+- Loss-weight tuning ("we tried λ=0.4, 0.6, 0.8")
+- Feature stacking ("AST + token-stat + spectral all at once")
+- Augmentation cocktails
+- Hyperparameter sweeps presented as method
+- "Apply existing method to new domain" alone
+
+If the idea is "stronger version of an existing method", ship under `testing/`.
+
+### Five open problems where novelty is welcome
+
+(See [Exp_FewShot/novel/README.md](../Exp_FewShot/novel/README.md) for full text.)
+1. K-shot collapse on codellama↔nxcode siblings (n01 attacks this).
+2. Source-confounding (CF/LC → GitHub OOD), the original NeurIPS thesis.
+3. Phase transition at ~5K samples — sample-complexity floor theorem.
+4. Hierarchical neural collapse explicit parameterisation.
+5. Information-theoretic floor I(Y; X) for CoDET-M4.
+
+## 16. Original portfolio rules (kept for legacy reference)
 
 The few-shot portfolio is **exploratory until the matrix is half-filled**. Until then, treat it like a search, not a commitment.
 
