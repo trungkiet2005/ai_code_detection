@@ -52,10 +52,12 @@ FS_DIR = _setup_paths()
 
 
 METHOD_TO_SCRIPT = {
-    "baseline": "exp_fs_00_baseline.py",
-    "ntkalign": "exp_fs_01_ntkalign.py",
-    "supcon":   "exp_fs_02_supcon.py",
-    "frozen":   "exp_fs_03_frozen.py",
+    "baseline":      "exp_fs_00_baseline.py",
+    "ntkalign":      "exp_fs_01_ntkalign.py",
+    "supcon":        "exp_fs_02_supcon.py",
+    "frozen":        "exp_fs_03_frozen.py",
+    "ntk_frozen":    "exp_fs_04_ntk_frozen.py",
+    "supcon_frozen": "exp_fs_05_supcon_frozen.py",
 }
 
 
@@ -65,7 +67,10 @@ def _parse_csv(env_key: str, default: str):
 
 
 def main():
-    methods = _parse_csv("FS_METHODS", "baseline,ntkalign,supcon,frozen")
+    methods = _parse_csv(
+        "FS_METHODS",
+        "baseline,ntkalign,supcon,frozen,ntk_frozen,supcon_frozen",
+    )
     ks      = [int(x) for x in _parse_csv("FS_KS", "32,128")]
     fracs   = [float(x) for x in _parse_csv("FS_FRACTIONS", "0.01,0.05")]
     seed    = int(os.environ.get("FS_SEED", "42"))

@@ -45,19 +45,49 @@
 
 | Method | Exp | K=8 | K=16 | K=32 | K=64 | K=128 | Notes |
 |:--|:--|:-:|:-:|:-:|:-:|:-:|:--|
-| FS-Baseline-CE | exp_fs_00 | — | — | **0.1836** (+0.04) | — | — | floor; only 12 train steps at K=32 |
-| FS-NTKAlign | exp_fs_01 | — | — | **0.1222** (+0.08) | — | — | ⚠️ **−6.14 pt vs baseline** at K=32 |
-| FS-SupCon | exp_fs_02 | — | — | — | — | — | ⏳ alternative to NTK (per-anchor softmax) |
-| FS-Frozen | exp_fs_03 | — | — | — | — | — | ⏳ encoder frozen, only head trains |
+| FS-Baseline-CE      | exp_fs_00 | — | — | **0.1836** (+0.04) | — | — | floor; CE only |
+| FS-NTKAlign         | exp_fs_01 | — | — | **0.1222** (+0.08) | — | — | ⚠️ **−6.14 pt vs baseline** at K=32 |
+| FS-SupCon           | exp_fs_02 | — | — | — | — | — | ⏳ per-anchor softmax (Khosla'20) |
+| FS-Frozen           | exp_fs_03 | — | — | — | — | — | ⏳ encoder frozen, head only |
+| FS-NTKAlign+Frozen  | exp_fs_04 | — | — | — | — | — | ⏳ NTK + frozen encoder |
+| FS-SupCon+Frozen    | exp_fs_05 | — | — | — | — | — | ⏳ SupCon + frozen encoder |
 
 ### %-fraction regime (phase-transition curve)
 
 | Method | Exp | 1% (~5K) | 5% (~25K) | 10% (~50K) | 20% (~100K) | 50% (~250K) |
 |:--|:--|:-:|:-:|:-:|:-:|:-:|
-| FS-Baseline-CE | exp_fs_00 | — | — | — | — | — |
-| FS-NTKAlign | exp_fs_01 | — | — | — | (Exp_13 lean: **0.71**) | — |
-| FS-SupCon | exp_fs_02 | — | — | — | — | — |
-| FS-Frozen | exp_fs_03 | — | — | — | — | — |
+| FS-Baseline-CE     | exp_fs_00 | — | — | — | — | — |
+| FS-NTKAlign        | exp_fs_01 | — | — | — | (Exp_13 lean: **0.71**) | — |
+| FS-SupCon          | exp_fs_02 | — | — | — | — | — |
+| FS-Frozen          | exp_fs_03 | — | — | — | — | — |
+| FS-NTKAlign+Frozen | exp_fs_04 | — | — | — | — | — |
+| FS-SupCon+Frozen   | exp_fs_05 | — | — | — | — | — |
+
+---
+
+## 💾 JSON output — convention for downloading from Kaggle
+
+Every `exp_fs_*.py` writes a JSON to `/kaggle/working/results/<exp_id>_<label>_seed<S>.json`
+(falls back to `./results/...` locally). The label encodes the regime:
+
+```
+exp_fs_01_K128_seed42.json     ← K-shot regime, K=128
+exp_fs_03_frac0.05_seed42.json ← %-fraction regime, fraction=0.05
+```
+
+After the Kaggle session ends, download the entire `/kaggle/working/results/`
+folder (Kaggle: "Output" tab → ZIP). Locally:
+
+```bash
+# Aggregate everything into a leaderboard
+python Exp_FewShot/aggregate_fs_results.py results
+# Also dump CSV
+python Exp_FewShot/aggregate_fs_results.py results --csv
+```
+
+This prints a table sorted by `test_macro_f1` and writes `results/summary.json`
++ optional `summary.csv`. **Append-only** — re-running with a different seed
+adds a row, never overwrites.
 
 > The 20% cell for NTKAlign references **Exp_13 NTKAlignCode 0.7103** in
 > `Exp_Climb/tracker.md` — that uses the FULL Exp_Climb backbone (HierTree +

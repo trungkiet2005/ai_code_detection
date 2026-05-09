@@ -239,9 +239,25 @@ def apply_hardware_profile(cfg: FSConfig) -> FSConfig:
 # ---------------------------------------------------------------------------
 
 def emit_paper_table(method_name: str, exp_id: str, cfg: FSConfig, results: Dict):
-    """Emit a BEGIN_FS_TABLE/END_FS_TABLE block parsed by tracker.md updater."""
+    """Emit BEGIN_FS_TABLE block AND save the same payload as JSON.
+
+    JSON path:
+      - /kaggle/working/results/<exp_id>_<label>.json   (Kaggle, downloadable)
+      - ./results/<exp_id>_<label>.json                  (local fallback)
+
+    The label encodes the regime so multiple sweeps don't overwrite each other:
+      K-shot:    <exp_id>_K<n>_seed<s>.json
+      fraction:  <exp_id>_frac<n>_seed<s>.json
+    """
+    import json
+    from datetime import datetime
+
     fewshot_mode = cfg.k_shot > 0 and cfg.train_fraction <= 0
     regime_label = f"K={cfg.k_shot}" if fewshot_mode else f"frac={cfg.train_fraction:.4f}"
+    file_label = (
+        f"K{cfg.k_shot}" if fewshot_mode
+        else f"frac{cfg.train_fraction:.4f}".rstrip("0").rstrip(".")
+    )
     lines = [
         f"BEGIN_FS_TABLE method={method_name} exp_id={exp_id}",
         f"  benchmark:    {cfg.benchmark}",
@@ -264,3 +280,68 @@ def emit_paper_table(method_name: str, exp_id: str, cfg: FSConfig, results: Dict
             lines.append(f"  {key:<10} {value}")
     lines.append("END_FS_TABLE")
     print("\n".join(lines), flush=True)
+
+    # ----- Save same payload as JSON (downloadable from Kaggle) -----
+    payload = {
+        "method": method_name,
+        "exp_id": exp_id,
+        "regime": regime_label,
+        "timestamp": datetime.utcnow().isoformat() + "Z",
+        "config": {
+            "benchmark": cfg.benchmark,
+            "task": cfg.task,
+            "k_shot": cfg.k_shot,
+            "train_fraction": cfg.train_fraction,
+            "n_classes": cfg.n_classes,
+            "fs_seed": cfg.fs_seed,
+            "encoder": cfg.encoder_name,
+            "epochs": cfg.epochs,
+            "batch_size": cfg.batch_size,
+            "max_length": cfg.max_length,
+            "precision": cfg.precision,
+            "lr_encoder": cfg.lr_encoder,
+            "lr_heads": cfg.lr_heads,
+            "lambda_ntk": cfg.lambda_ntk,
+        },
+        "results": _jsonify(results),
+    }
+
+    # Pick the right destination: Kaggle (POSIX + /kaggle/working real) else local.
+    # On Windows local, "/kaggle/working" resolves to D:\kaggle\working and might
+    # exist accidentally, so we also require POSIX.
+    candidate_dirs = []
+    if os.name == "posix" and os.path.isdir("/kaggle/working"):
+        candidate_dirs.append("/kaggle/working/results")
+    candidate_dirs.append("./results")
+
+    saved = False
+    for d in candidate_dirs:
+        try:
+            os.makedirs(d, exist_ok=True)
+            path = os.path.join(d, f"{exp_id}_{file_label}_seed{cfg.fs_seed}.json")
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(payload, f, indent=2, ensure_ascii=False)
+            logger.info(f"[json] saved -> {path}")
+            saved = True
+            break
+        except (OSError, PermissionError) as e:
+            logger.warning(f"[json] could not write to {d}: {e}")
+            continue
+    if not saved:
+        logger.warning("[json] all save paths failed; result available only in stdout")
+
+
+def _jsonify(obj):
+    """Recursively convert numpy / torch scalars + dict-keys to JSON-safe types."""
+    if isinstance(obj, dict):
+        return {str(k): _jsonify(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_jsonify(x) for x in obj]
+    if hasattr(obj, "item"):  # numpy / torch scalar
+        try:
+            return obj.item()
+        except Exception:
+            pass
+    if isinstance(obj, (int, float, bool, str)) or obj is None:
+        return obj
+    return str(obj)

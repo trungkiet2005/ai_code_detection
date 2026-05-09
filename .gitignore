@@ -29,6 +29,10 @@ Exp_ZeroShot/run_zs_*_results.json
 # Exp_ZeroShot/fast_detect_gpt/ instead). Kept locally for reference.
 third_party/
 
+# Few-shot result JSONs (downloaded from Kaggle, not version-controlled)
+results/
+Exp_FewShot/results/
+
 # LaTeX build artifacts
 *.aux
 *.log
