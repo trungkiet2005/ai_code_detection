@@ -47,7 +47,6 @@
 #                      ineffective.
 # COMPUTE        : ~50 min Kaggle T4 default sweep.
 # =============================================================================
-# =============================================================================
 from __future__ import annotations
 
 import importlib.util
@@ -428,32 +427,6 @@ def fsm_loss(outputs, labels, sources_list, lambda_fsm=0.4, class_weights=None):
     hsic = (KH * LH.t()).sum() / max(1, (B - 1) ** 2)
     return {"total": ce + lambda_fsm * hsic, "ce": ce, "fsm": hsic,
             "hsic": hsic.detach(), "n_src": n_unique_src}
-
-    # Family centroid (over codellama + nxcode pooled).
-    mu_A = z_sib.mean(0, keepdim=True)                    # (1, D)
-    mu_A_norm = mu_A / mu_A.norm(p=2).clamp(min=eps)
-
-    # Per-sample family residual, then project orthogonal to mu_A.
-    r = z_sib - mu_A
-    proj = (r @ mu_A_norm.t()) * mu_A_norm                # (N_sib, D)
-    r_perp = r - proj                                      # orthogonal component
-
-    # Per-class residual centroids and within-class scatter on r_perp.
-    m1 = r_perp[y_sib == 1].mean(0)
-    m4 = r_perp[y_sib == 4].mean(0)
-    s1 = ((r_perp[y_sib == 1] - m1) ** 2).sum(-1).mean()
-    s4 = ((r_perp[y_sib == 4] - m4) ** 2).sum(-1).mean()
-    s_w = s1 + s4
-    s_b = ((m1 - m4) ** 2).sum()
-
-    # Maximise Fisher = minimise -Fisher (clipped for stability).
-    fisher = s_b / (s_w + eps)
-    srd = -fisher
-
-    return {"total": ce + lambda_method * srd, "ce": ce, "srd": srd,
-            "s_b": s_b.detach(), "s_w": s_w.detach(), "n_pair": n_sib}
-
-
 # =============================================================================
 # Trainer (1-epoch K-shot / 3-epoch fraction; identical structure)
 # =============================================================================

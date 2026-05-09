@@ -43,7 +43,6 @@
 #                      improvement headroom.
 # COMPUTE        : ~50 min Kaggle T4. The MINE discriminator adds <10% wall.
 # =============================================================================
-# =============================================================================
 from __future__ import annotations
 
 import importlib.util
@@ -431,32 +430,6 @@ def mine_loss(outputs, labels, mine, lambda_mine=0.1, class_weights=None):
     return {"total": ce - lambda_mine * i_lower, "ce": ce, "i_lower": i_lower.detach(),
             "mine_t_joint": t_joint.mean().detach(),
             "mine_t_marg": t_marg.mean().detach()}
-
-    # Family centroid (over codellama + nxcode pooled).
-    mu_A = z_sib.mean(0, keepdim=True)                    # (1, D)
-    mu_A_norm = mu_A / mu_A.norm(p=2).clamp(min=eps)
-
-    # Per-sample family residual, then project orthogonal to mu_A.
-    r = z_sib - mu_A
-    proj = (r @ mu_A_norm.t()) * mu_A_norm                # (N_sib, D)
-    r_perp = r - proj                                      # orthogonal component
-
-    # Per-class residual centroids and within-class scatter on r_perp.
-    m1 = r_perp[y_sib == 1].mean(0)
-    m4 = r_perp[y_sib == 4].mean(0)
-    s1 = ((r_perp[y_sib == 1] - m1) ** 2).sum(-1).mean()
-    s4 = ((r_perp[y_sib == 4] - m4) ** 2).sum(-1).mean()
-    s_w = s1 + s4
-    s_b = ((m1 - m4) ** 2).sum()
-
-    # Maximise Fisher = minimise -Fisher (clipped for stability).
-    fisher = s_b / (s_w + eps)
-    srd = -fisher
-
-    return {"total": ce + lambda_method * srd, "ce": ce, "srd": srd,
-            "s_b": s_b.detach(), "s_w": s_w.detach(), "n_pair": n_sib}
-
-
 # =============================================================================
 # Trainer (1-epoch K-shot / 3-epoch fraction; identical structure)
 # =============================================================================
@@ -518,6 +491,13 @@ def train(cfg, model, train_l, val_l, test_l, lambda_method):
             from transformers import get_cosine_schedule_with_warmup
             sched = get_cosine_schedule_with_warmup(opt, int(total * cfg.warmup_ratio), total)
         except ImportError: pass
+    mine_disc = MINEDiscriminator(cfg.ntk_proj_dim, cfg.n_classes).to(dev)
+    # Add MINE discriminator params to the existing optimiser as a third group
+    # (separate LR, no weight decay) so the bound is actually trained.
+    opt.add_param_group({"params": list(mine_disc.parameters()),
+                         "lr": 1e-4, "weight_decay": 0.0})
+    logger.info(f"[mine] discriminator dim={cfg.ntk_proj_dim} K={cfg.n_classes} "
+                f"params={sum(p.numel() for p in mine_disc.parameters())}")
     best = -1.0; best_state = None; pl = 0; step = 0
     t0 = time.time()
     for _ in range(cfg.epochs):

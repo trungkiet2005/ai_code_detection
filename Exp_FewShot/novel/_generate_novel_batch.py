@@ -206,9 +206,8 @@ def etf_cosine_loss(outputs, labels, etf_weights, scale=16.0, class_weights=None
         "summary_metric": "mean_align",
         "env_var": "FS_ETF_SCALE",
         "default_value": "16.0",
-        "extra_setup": '''    # Pre-compute frozen ETF (used by all batches).
-    etf_w = build_etf(cfg.n_classes, cfg.ntk_proj_dim,
-                       device=torch.device(cfg.device), dtype=torch.float32)
+        "extra_setup": '''    # Pre-compute frozen ETF on the training device (used by all batches).
+    etf_w = build_etf(cfg.n_classes, cfg.ntk_proj_dim, device=dev, dtype=torch.float32)
     logger.info(f"[etf] frozen ETF shape={tuple(etf_w.shape)} "
                 f"<W_i, W_j>=-1/(K-1)={-1.0 / (cfg.n_classes - 1):.4f}")''',
     },
@@ -303,8 +302,13 @@ def mine_loss(outputs, labels, mine, lambda_mine=0.1, class_weights=None):
         "summary_metric": "i_lower_avg",
         "env_var": "FS_LAMBDA_MINE",
         "default_value": "0.1",
-        "extra_setup": '''    mine_disc = MINEDiscriminator(cfg.ntk_proj_dim, cfg.n_classes).to(cfg.device)
-    # MINE discriminator joins the optimiser via param_groups (added below).''',
+        "extra_setup": '''    mine_disc = MINEDiscriminator(cfg.ntk_proj_dim, cfg.n_classes).to(dev)
+    # Add MINE discriminator params to the existing optimiser as a third group
+    # (separate LR, no weight decay) so the bound is actually trained.
+    opt.add_param_group({"params": list(mine_disc.parameters()),
+                         "lr": 1e-4, "weight_decay": 0.0})
+    logger.info(f"[mine] discriminator dim={cfg.ntk_proj_dim} K={cfg.n_classes} "
+                f"params={sum(p.numel() for p in mine_disc.parameters())}")''',
     },
 
     # ========================================================================
@@ -686,10 +690,15 @@ def _replace_block(src, marker_start, marker_end, replacement):
 def render(spec, src_text):
     out = src_text
 
-    # 1) Replace the n01 header (everything from the first '# =====' block).
-    n01_header_end = "# =============================================================================\nfrom __future__ import annotations"
-    n01_header_pat = re.compile(r"^# ==.*?(?=" + re.escape(n01_header_end) + r")",
-                                  flags=re.DOTALL)
+    # 1) Replace the n01 header (everything from the first '# =====' block to
+    #    the empty line right before `from __future__`). spec["header_block"]
+    #    already ends with its own `# =====` divider, so we anchor the END of
+    #    the n01 header at the divider line ITSELF (consuming it) and drop
+    #    `from __future__` outside the match -- avoids the duplicate `# =====`.
+    n01_header_pat = re.compile(
+        r"^# ==.*?\n(?=from __future__ import annotations)",
+        flags=re.DOTALL,
+    )
     out = n01_header_pat.sub(spec["header_block"] + "\n", out, count=1)
 
     # 2) Replace METHOD_NAME / EXP_ID.
@@ -700,13 +709,18 @@ def render(spec, src_text):
     out = re.sub(r'logger = logging\.getLogger\("exp_n01_sibling_residual"\)',
                   f'logger = logging.getLogger("{spec["exp_id"]}")', out)
 
-    # 3) Replace SIBLING_FAMILY + srd_loss block with the new loss code.
-    sib_marker_start = "# Family map:"
-    sib_marker_end = '"n_pair": n_sib}'
-    pat = re.compile(re.escape(sib_marker_start) + r".*?" + re.escape(sib_marker_end),
-                      flags=re.DOTALL)
-    if pat.search(out):
-        out = pat.sub(spec["loss_block"], out, count=1)
+    # 3) Replace the ENTIRE SRD block (constants + srd_loss function) with
+    #    the method-specific loss code. We anchor on:
+    #      start: "# Family map:" line of the n01 family-map comment
+    #      end:   "# =====...\n# Trainer (1-epoch" header that begins the
+    #             trainer section after srd_loss.
+    #    Capture group preserves the trainer-section header so we don't eat it.
+    sib_pat = re.compile(
+        r"(# Family map:.*?)(\n# =============================================================================\n# Trainer)",
+        flags=re.DOTALL,
+    )
+    if sib_pat.search(out):
+        out = sib_pat.sub(spec["loss_block"] + r"\2", out, count=1)
 
     # 4) Replace the lambda_srd / FS_LAMBDA_SRD env var read in main FIRST,
     #    then alias `lambda_srd` -> `lambda_method` everywhere else.
@@ -794,6 +808,13 @@ def render(spec, src_text):
         r'return results\["test_macro_f1"\], results\["val_macro_f1"\], results\["wall_time_s"\], results',
         'return results["test_macro_f1"], results["val_macro_f1"], results["wall_time_s"]',
         out)
+
+    # 11b) Inject method-specific extra_setup at the start of train(), right
+    #      before the 'best = -1.0' init. This is where etf_w / mine_disc /
+    #      etc. need to be created.
+    if spec.get("extra_setup"):
+        anchor = "    best = -1.0; best_state = None; pl = 0; step = 0"
+        out = out.replace(anchor, spec["extra_setup"].rstrip() + "\n" + anchor, 1)
 
     # 12) Final cleanup pass: line-by-line strip n01-specific lingering
     #     statements that the regexes above missed.
