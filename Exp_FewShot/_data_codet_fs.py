@@ -24,7 +24,9 @@ from transformers import AutoTokenizer
 from _common_fs import FSConfig, logger, set_seed
 from _fewshot_sampler import (
     build_minival_indices,
+    fraction_stratified_subset,
     kshot_stratified_subset,
+    report_fraction_distribution,
     report_kshot_distribution,
 )
 
@@ -183,11 +185,24 @@ def build_codet_fs_loaders(cfg: FSConfig) -> FSDataBundle:
     val_ds = _convert(val_raw, cfg.task, vocab)
     test_ds = _convert(test_raw, cfg.task, vocab)
 
-    # K-shot sample TRAIN
-    train_ds, train_counts = kshot_stratified_subset(
-        train_ds, k_shot=cfg.k_shot, n_classes=cfg.n_classes, seed=cfg.fs_seed
-    )
-    logger.info(f"[K-shot train] {report_kshot_distribution(train_counts, cfg.k_shot)}")
+    # Subsample TRAIN -- K-shot or %-fraction depending on cfg
+    fewshot_mode = cfg.k_shot > 0 and cfg.train_fraction <= 0
+    if fewshot_mode:
+        train_ds, train_counts = kshot_stratified_subset(
+            train_ds, k_shot=cfg.k_shot, n_classes=cfg.n_classes, seed=cfg.fs_seed
+        )
+        logger.info(f"[K-shot train] {report_kshot_distribution(train_counts, cfg.k_shot)}")
+    else:
+        if cfg.train_fraction <= 0 or cfg.train_fraction > 1:
+            raise ValueError(
+                f"Need k_shot>0 OR 0<train_fraction<=1, got "
+                f"k_shot={cfg.k_shot} train_fraction={cfg.train_fraction}"
+            )
+        train_ds, train_counts = fraction_stratified_subset(
+            train_ds, fraction=cfg.train_fraction, n_classes=cfg.n_classes,
+            seed=cfg.fs_seed,
+        )
+        logger.info(f"[fraction train] {report_fraction_distribution(train_counts, cfg.train_fraction)}")
 
     # Mini-val for early stopping (separate seed)
     val_indices = build_minival_indices(

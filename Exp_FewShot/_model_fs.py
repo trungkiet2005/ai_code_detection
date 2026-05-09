@@ -112,3 +112,48 @@ def ntk_alignment_loss(
 
     total = ce + lambda_ntk * align
     return {"total": total, "ce": ce, "ntk_align": align}
+
+
+def supcon_loss(
+    outputs: Dict[str, torch.Tensor],
+    labels: torch.Tensor,
+    lambda_supcon: float = 0.4,
+    temperature: float = 0.07,
+    class_weights: Optional[torch.Tensor] = None,
+) -> Dict[str, torch.Tensor]:
+    """CE + Supervised Contrastive (Khosla et al. NeurIPS 2020).
+
+    Compared to NTK-alignment: SupCon uses a softmax over similarities, not a
+    Frobenius distance. Empirically less sensitive to small batch sizes
+    because it normalises per-anchor (sum over positives only), so a single
+    same-class pair already provides usable signal.
+
+    L_supcon = - 1/B * sum_i 1/|P(i)| * sum_{p in P(i)} log
+                exp(z_i z_p / T) / sum_{a != i} exp(z_i z_a / T)
+
+    Anchors with no in-batch positives contribute zero (skipped).
+    """
+    ce = F.cross_entropy(outputs["logits"], labels, weight=class_weights)
+
+    z = outputs["ntk_proj"]                       # reuse the same L2-normalised projector
+    sim = z @ z.t() / temperature                 # (B, B) similarity matrix
+    B = z.size(0)
+    # Mask out self-similarity (i, i) entries.
+    eye = torch.eye(B, dtype=torch.bool, device=z.device)
+    sim = sim.masked_fill(eye, float("-inf"))
+
+    # Positive mask: same-label, not self.
+    pos_mask = (labels.unsqueeze(0) == labels.unsqueeze(1)) & ~eye
+    has_pos = pos_mask.any(dim=1)
+
+    log_prob = sim - torch.logsumexp(sim, dim=1, keepdim=True)
+    # Mean log-prob over positives, per anchor.
+    pos_log_prob = (log_prob * pos_mask.float()).sum(dim=1) / pos_mask.float().sum(dim=1).clamp(min=1.0)
+    # Skip anchors with no positives (sum*0 / 1 = 0 anyway).
+    if has_pos.any():
+        sup = -(pos_log_prob[has_pos]).mean()
+    else:
+        sup = torch.zeros((), device=z.device)
+
+    total = ce + lambda_supcon * sup
+    return {"total": total, "ce": ce, "supcon": sup}

@@ -132,9 +132,24 @@ def train_fewshot(
 
     total_steps = max(1, len(train_loader) * cfg.epochs)
     eval_every = max(5, total_steps // 8)
+
+    # Optional LR schedule for fraction mode (multi-epoch). K-shot keeps constant LR.
+    scheduler = None
+    if cfg.warmup_ratio > 0 and total_steps > 20:
+        warmup_steps = max(1, int(total_steps * cfg.warmup_ratio))
+        try:
+            from transformers import get_cosine_schedule_with_warmup
+            scheduler = get_cosine_schedule_with_warmup(
+                optimizer, num_warmup_steps=warmup_steps, num_training_steps=total_steps
+            )
+            logger.info(f"[trainer] LR schedule: cosine, warmup={warmup_steps} of {total_steps}")
+        except ImportError:
+            scheduler = None
+
     logger.info(
         f"[trainer] method={method_name} total_steps={total_steps} "
-        f"eval_every={eval_every} lr_enc={cfg.lr_encoder} lr_head={cfg.lr_heads}"
+        f"eval_every={eval_every} epochs={cfg.epochs} "
+        f"lr_enc={cfg.lr_encoder} lr_head={cfg.lr_heads}"
     )
 
     best_val_f1 = -1.0
@@ -169,6 +184,8 @@ def train_fewshot(
                 loss.backward()
                 torch.nn.utils.clip_grad_norm_(model.parameters(), cfg.max_grad_norm)
                 optimizer.step()
+            if scheduler is not None:
+                scheduler.step()
 
             if step % cfg.log_every == 0:
                 comp = " ".join(f"{k}={v.item():.4f}" for k, v in losses.items())

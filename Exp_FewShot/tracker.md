@@ -41,10 +41,30 @@
 > Sorted by `K=32` Author F1 (the practical sweet spot for the EMNLP claim).
 > Each row = one method. Columns = test Macro-F1 at K ∈ {8, 16, 32, 64, 128}.
 
+### K-shot regime (per-class examples)
+
 | Method | Exp | K=8 | K=16 | K=32 | K=64 | K=128 | Notes |
 |:--|:--|:-:|:-:|:-:|:-:|:-:|:--|
 | FS-Baseline-CE | exp_fs_00 | — | — | **0.1836** (+0.04) | — | — | floor; only 12 train steps at K=32 |
 | FS-NTKAlign | exp_fs_01 | — | — | **0.1222** (+0.08) | — | — | ⚠️ **−6.14 pt vs baseline** at K=32 |
+| FS-SupCon | exp_fs_02 | — | — | — | — | — | ⏳ alternative to NTK (per-anchor softmax) |
+| FS-Frozen | exp_fs_03 | — | — | — | — | — | ⏳ encoder frozen, only head trains |
+
+### %-fraction regime (phase-transition curve)
+
+| Method | Exp | 1% (~5K) | 5% (~25K) | 10% (~50K) | 20% (~100K) | 50% (~250K) |
+|:--|:--|:-:|:-:|:-:|:-:|:-:|
+| FS-Baseline-CE | exp_fs_00 | — | — | — | — | — |
+| FS-NTKAlign | exp_fs_01 | — | — | — | (Exp_13 lean: **0.71**) | — |
+| FS-SupCon | exp_fs_02 | — | — | — | — | — |
+| FS-Frozen | exp_fs_03 | — | — | — | — | — |
+
+> The 20% cell for NTKAlign references **Exp_13 NTKAlignCode 0.7103** in
+> `Exp_Climb/tracker.md` — that uses the FULL Exp_Climb backbone (HierTree +
+> spectral + neural heads), not the lean ModernBERT-only stack here. Direct
+> comparison is informative but **not** apples-to-apples; we will run the
+> lean stack at 20% when we have results at 5% / 1% to characterise the
+> simple-recipe curve.
 
 > **Cell format:** test Macro-F1 with val-test gap in parens, e.g. `0.43 (-0.05)`.
 > Negative gap = test ≥ val (good); large positive gap = overfitting on K-shot train.

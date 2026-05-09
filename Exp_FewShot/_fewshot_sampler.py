@@ -84,6 +84,59 @@ def kshot_stratified_subset(
     return subset, counts
 
 
+def fraction_stratified_subset(
+    dataset: Dataset,
+    fraction: float,
+    n_classes: int,
+    seed: int = 42,
+    label_field: str = "label",
+) -> Tuple[Dataset, Dict[int, int]]:
+    """Take `fraction` of the dataset, stratified by label.
+
+    Used for the phase-transition study: we want a clean "X% of full train"
+    sweep that scales each class proportionally (preserves class imbalance,
+    unlike K-shot which forces per-class equality).
+
+    Args:
+        dataset:   HF Dataset with `label_field`
+        fraction:  0 < fraction <= 1.0
+        n_classes: expected class count (for logging only; we sample whatever exists)
+        seed:      RNG seed for reproducibility
+
+    Returns:
+        subset, {class_id -> sampled_count}
+    """
+    if not (0.0 < fraction <= 1.0):
+        raise ValueError(f"fraction must be in (0, 1], got {fraction}")
+
+    labels = list(dataset[label_field])
+    by_class: Dict[int, List[int]] = defaultdict(list)
+    for idx, lab in enumerate(labels):
+        if lab >= 0:
+            by_class[int(lab)].append(idx)
+
+    rng = random.Random(seed)
+    chosen: List[int] = []
+    counts: Dict[int, int] = {}
+    for cls in range(n_classes):
+        pool = by_class.get(cls, [])
+        n_take = max(1, int(round(len(pool) * fraction))) if pool else 0
+        if n_take > 0:
+            chosen.extend(rng.sample(pool, n_take))
+        counts[cls] = n_take
+
+    rng.shuffle(chosen)
+    subset = dataset.select(chosen) if chosen else dataset.select([])
+    return subset, counts
+
+
+def report_fraction_distribution(counts: Dict[int, int], fraction: float) -> str:
+    """Format fraction-mode counts for logging."""
+    parts = [f"class{cls}={n}" for cls, n in sorted(counts.items())]
+    total = sum(counts.values())
+    return f"{' '.join(parts)} (total={total}, fraction={fraction:.4f})"
+
+
 def report_kshot_distribution(counts: Dict[int, int], k_shot: int) -> str:
     """Format K-shot counts for logging:  class0=32 class1=32 ... (total=192)."""
     parts = [f"class{cls}={n}" for cls, n in sorted(counts.items())]

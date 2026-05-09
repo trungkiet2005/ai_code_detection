@@ -101,8 +101,12 @@ class FSConfig:
     benchmark: str = "codet_m4"        # codet_m4 | droid
     task: str = "author"                # author (6-cls) | binary | t3 (Droid 3-cls)
 
-    # Few-shot regime
-    k_shot: int = 32                    # K examples per class in TRAIN
+    # Sampling regime — choose ONE:
+    #   k_shot > 0  AND  train_fraction <= 0   -> K-shot per-class (few-shot mode)
+    #   k_shot <= 0 AND  train_fraction > 0    -> percent of full train (phase-transition mode)
+    # k_shot wins if both are set.
+    k_shot: int = 32                    # K examples per class in TRAIN (few-shot mode)
+    train_fraction: float = 0.0         # fraction of train to use (phase-transition mode)
     n_classes: int = 6                  # 6 for CoDET author, 2 for binary, 3 for Droid T3
     fs_seed: int = 42                   # sampling seed (reported in tracker)
 
@@ -110,7 +114,9 @@ class FSConfig:
     encoder_name: str = "answerdotai/ModernBERT-base"
     max_length: int = 384               # T4-friendly (was 512 on H100)
 
-    # Optimization (1 epoch, no scheduler)
+    # Optimization
+    # Few-shot K=32 needs only 1 epoch; %-fraction with thousands of samples
+    # benefits from 3 epochs + LR warmup. Auto-tuned in apply_hardware_profile.
     epochs: int = 1
     batch_size: int = 16                # T4 16GB fp16
     grad_accum_steps: int = 1
@@ -210,6 +216,21 @@ def apply_hardware_profile(cfg: FSConfig) -> FSConfig:
         cfg.num_workers = 0
         logger.info("[hw-profile] CPU mode -> smoke test only")
 
+    # Regime-dependent epoch tuning. K-shot has so few train samples that
+    # 1 epoch is enough; %-fraction needs more for the LR schedule to mean
+    # anything. We never set epochs > 5 -- the original Exp_Climb climb runs
+    # used 3 epochs on 100K samples, so 3 here on >5K samples is comparable.
+    fewshot_mode = cfg.k_shot > 0 and cfg.train_fraction <= 0
+    if fewshot_mode:
+        cfg.epochs = 1
+        cfg.warmup_ratio = 0.0
+    else:
+        cfg.epochs = 3
+        cfg.warmup_ratio = 0.1
+    logger.info(
+        f"[hw-profile] regime={'K-shot' if fewshot_mode else 'fraction'} "
+        f"epochs={cfg.epochs} warmup={cfg.warmup_ratio}"
+    )
     return cfg
 
 
@@ -219,13 +240,18 @@ def apply_hardware_profile(cfg: FSConfig) -> FSConfig:
 
 def emit_paper_table(method_name: str, exp_id: str, cfg: FSConfig, results: Dict):
     """Emit a BEGIN_FS_TABLE/END_FS_TABLE block parsed by tracker.md updater."""
+    fewshot_mode = cfg.k_shot > 0 and cfg.train_fraction <= 0
+    regime_label = f"K={cfg.k_shot}" if fewshot_mode else f"frac={cfg.train_fraction:.4f}"
     lines = [
         f"BEGIN_FS_TABLE method={method_name} exp_id={exp_id}",
-        f"  benchmark: {cfg.benchmark}",
-        f"  task:      {cfg.task}",
-        f"  k_shot:    {cfg.k_shot}",
-        f"  n_classes: {cfg.n_classes}",
-        f"  fs_seed:   {cfg.fs_seed}",
+        f"  benchmark:    {cfg.benchmark}",
+        f"  task:         {cfg.task}",
+        f"  regime:       {regime_label}",
+        f"  k_shot:       {cfg.k_shot}",
+        f"  train_fraction: {cfg.train_fraction:.4f}",
+        f"  n_classes:    {cfg.n_classes}",
+        f"  fs_seed:      {cfg.fs_seed}",
+        f"  epochs:       {cfg.epochs}",
         f"  encoder:   {cfg.encoder_name}",
         f"  precision: {cfg.precision}",
         f"  bs:        {cfg.batch_size}",

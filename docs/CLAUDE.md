@@ -25,11 +25,18 @@
 | Droid T3 (lean 20%) | Exp_04 Poincare | **89.76** | +0.98 vs DroidDetectCLS-Large |
 | OOD-SRC-gh (best) | Exp_11 PH | 35.56 | best in suite, but **does not break 0.40 oral threshold** |
 
-**Active pivot — Few-Shot extension (Exp_FewShot/, Phase A complete):**
-- Hypothesis: K=64 or K=128 examples per class can match UniXcoder full-data (66.33).
-- Phase B Day 4 = Kaggle T4 K-sweep on `exp_fs_01_ntkalign.py`. Phase B Day 5 = decision gate.
-- **Decision rule:** K=64 ≥ 65 → full pivot. K=128 < 60 → fall back to 20% story (paper draft v1 still works).
-- See `Exp_FewShot/tracker.md` for decision criteria.
+**Active exploration — Exp_FewShot/ portfolio (DO NOT lock the headline yet):**
+- Goal: find the strongest (method × training-budget) cell for the EMNLP claim. We **do not pre-commit** to K-shot or to %-fraction — we run both, see what wins.
+- Methods (each = one self-contained `exp_fs_NN_*.py`):
+  - `exp_fs_00_baseline` — CE only, ModernBERT-base
+  - `exp_fs_01_ntkalign` — CE + NTK target-kernel alignment
+  - `exp_fs_02_supcon`   — CE + Supervised Contrastive (Khosla 2020)
+  - `exp_fs_03_frozen`   — CE only, encoder frozen (linear probe)
+- Sweeps (env vars):
+  - `FS_K_SHOT ∈ {8, 16, 32, 64, 128}`   →  K-shot regime (1 epoch)
+  - `FS_TRAIN_FRACTION ∈ {0.01, 0.05, 0.1, 0.2, 0.5}`  →  %-fraction regime (3 epochs, cosine LR)
+- First two cells filled: K=32 baseline 0.18 / K=32 NTKAlign 0.12 (regression). Rest pending.
+- Lock the paper headline only after at least half the matrix is filled.
 
 **Hardware switch:** Kaggle **T4 16GB** is now first-class (Exp_FewShot is T4-native bs=16 fp16 seq=384). H100 still preferred for `Exp_Climb/` runs but no longer required.
 
@@ -267,11 +274,38 @@ Each file is self-contained. Kaggle-first: scripts assume H100 BF16, auto-instal
 
 ## 14. Decision rules (what NOT to do unprompted)
 
-- **Never** add a new method to `Exp_Climb/` / `Exp_CodeDet/` / `Exp_DM/` without user approval. Suite is frozen for paper.
+- **Never** add a new method to `Exp_Climb/` / `Exp_CodeDet/` / `Exp_DM/` without user approval. Those suites are frozen for paper.
 - **Never** re-open Zero-Shot work — it's archived. If user asks "can we revive ZS?", point at the −32 pt FDG reproduction gap and require a justification.
 - **Never** mix benchmarks in a single training run (CLAUDE.md root rule).
 - **Never** reuse an `expNN` ID across or within suites.
 - **Never** rewrite historical tracker rows. Append-only.
 - **Always** report val-test gap alongside test metrics.
-- **Always** keep the locked headline numbers stable. New runs go in new exp IDs.
+- **Always** keep the existing 71.03 / 71.53 / 89.76 numbers as the safety net. New runs in `Exp_FewShot/` go to new cells, never overwrite.
 - For paper edits: **prefer Edit on `Paper/latex/main.tex` over Write** — keeps history of section evolution clean in `git log -p`.
+
+## 15. Exp_FewShot portfolio rules (active suite)
+
+The few-shot portfolio is **exploratory until the matrix is half-filled**. Until then, treat it like a search, not a commitment.
+
+### File contract (every `exp_fs_NN_*.py`)
+1. **Self-contained.** Each file auto-clones the repo from GitHub if `_common_fs.py` is absent locally. A Kaggle cell can `!python exp_fs_NN.py` with no setup.
+2. **Standalone per CLAUDE.md.** Imports come from `Exp_FewShot/_*.py`, never from `Exp_Climb/`, `Exp_DM/`, `Exp_CodeDet/`.
+3. **One method, one file.** Hyperparameters surface as env vars (`FS_K_SHOT`, `FS_TRAIN_FRACTION`, `FS_LAMBDA_NTK`, `FS_TEMP`, `FS_LR_HEADS`, ...).
+4. **Two regimes via env vars:**
+   - `FS_K_SHOT=N` (N≥1) → K-shot per-class, 1 epoch, no LR schedule.
+   - `FS_TRAIN_FRACTION=f` (with `FS_K_SHOT=0`) → fraction of train, 3 epochs, cosine LR + 10% warmup.
+5. **Always emit `BEGIN_FS_TABLE … END_FS_TABLE`** — that's how the tracker matrix gets updated.
+
+### Sweep contract (`run_fs_portfolio.py`)
+- Spawn each `(method, regime, value)` as a subprocess; pipe stdout to `logs/<script>_<label>.log`.
+- `FS_METHODS`, `FS_KS`, `FS_FRACTIONS` env vars override the sweep grid.
+- Default sweep is conservative: 4 methods × {K=32, K=128, 1%, 5%} = 16 runs.
+
+### Hardware contract
+- T4 first (Kaggle free tier): bs=16, fp16, seq=384, 1 epoch (K-shot) or 3 epochs (%-fraction).
+- Auto-upgrade on H100/A100/V100 if available (bs/seq lifted).
+- CPU mode = smoke test only.
+
+### When to lock the paper headline
+- Lock when **at least 50%** of the portfolio matrix is filled AND one cell beats `Exp_13 NTKAlign 0.7103` OR clearly beats UniXcoder full-data 0.6633 with substantially less data.
+- If after the full sweep no cell improves on the safety net, paper draft v1 ships unchanged with the data-efficient curve as a supplementary figure.

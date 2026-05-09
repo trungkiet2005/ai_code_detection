@@ -6,13 +6,29 @@
 
 ---
 
-## ⏱️ TL;DR — current state (2026-05-08)
+## ⏱️ TL;DR — current state (2026-05-09)
 
-- **Submission target:** EMNLP 2026 Main, deadline ~2026-05-26 (~18 days). Pivoted from NeurIPS 2026 Oral on 2026-05-08.
-- **Locked headline numbers:** Exp_27 DeTeCtive **71.53** (CoDET Author full data, +5.20 vs UniXcoder) · Exp_13 NTKAlign **71.03** (lean 20%, +4.70) · Exp_04 Poincare **89.76** (Droid T3, +0.98).
-- **Paper draft:** [Paper/latex/main.tex](Paper/latex/main.tex), 5 pages, storytelling, committed `2268691`. See [Paper/outline.md](Paper/outline.md) for day-by-day plan.
-- **Active pivot:** few-shot K-sweep on `Exp_FewShot/` (T4-native, Phase A done `a0a0798`). Phase B Day 4 = Kaggle T4 K∈{8,16,32,64,128}. Day 5 = decision gate.
+- **Submission target:** EMNLP 2026 Main, deadline ~2026-05-26 (~17 days).
+- **Headline numbers (anchor / fallback):** Exp_27 DeTeCtive **71.53** (CoDET Author full data) · Exp_13 NTKAlign **71.03** (lean 20%) · Exp_04 Poincare **89.76** (Droid T3). These are the safety net — paper draft v1 builds on them.
+- **Paper draft:** [Paper/latex/main.tex](Paper/latex/main.tex), 5 pages storytelling.
+- **Active exploration (DO NOT lock yet):** `Exp_FewShot/` runs a **portfolio of (method × K × fraction)** setups on Kaggle T4. Goal: find which (training-budget, method) cell gives the strongest data-efficient claim. Lock the headline AFTER the portfolio runs, not before.
+  - 4 methods: baseline / NTKAlign / SupCon / frozen-encoder
+  - 5 K-shot points (K ∈ {8,16,32,64,128}) + 5 fraction points (1%, 5%, 10%, 20%, 50%)
+  - First two cells filled (K=32 baseline 0.18, K=32 NTKAlign 0.12 ⚠️ regression). Rest pending.
 - **Excluded from headline:** AICD-Bench (universal val→test collapse), Zero-Shot suite (in `legacy/`, reproduction gap −32 pt vs paper FDG).
+
+## 🧪 Exp_FewShot/ — portfolio policy
+
+Patterned after the cross-modal ReID workspace ([Exp_FewShot/README.md](Exp_FewShot/README.md)):
+
+- **Each `exp_fs_NN_*.py` is fully self-contained.** Bootstrap auto-clones from GitHub if support modules are missing — Kaggle just runs `!python exp_fs_01_ntkalign.py`.
+- **Two regimes per file** via env vars:
+  - `FS_K_SHOT=N` (N ≥ 1) → K-shot mode (1 epoch, no LR schedule)
+  - `FS_TRAIN_FRACTION=0.05` (with FS_K_SHOT=0) → %-fraction mode (3 epochs, cosine LR + warmup)
+- **One file = one method.** Hyperparameters via env vars (`FS_LAMBDA_NTK`, `FS_TEMP`, `FS_LR_HEADS`, ...).
+- **Sweep via `run_fs_portfolio.py`** — fires every (method, regime, value) into `logs/<exp>_<label>.log`.
+- **Tracker is a portfolio MATRIX**, not a single leaderboard. Cells get filled as runs complete.
+- **NEVER lock the paper headline before the matrix is at least half-filled.** The 20%-data Exp_13 number is the fallback; we are searching for whether a better cell exists.
 
 ## Operational rules for this repo
 
