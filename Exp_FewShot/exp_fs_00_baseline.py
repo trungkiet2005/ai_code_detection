@@ -1,20 +1,22 @@
 """
 exp_fs_00 -- Few-shot baseline: ModernBERT + linear head + cross-entropy.
 
-Floor for the few-shot suite. If our novel methods can't beat this baseline
-at K=64 / 128, the entire pivot fails. CE-only.
+Floor for the few-shot suite. CE only. main() runs a SWEEP across both
+K-shot and %-fraction configurations in one go and writes one JSON per
+configuration to /kaggle/working/results/.
 
-KAGGLE-READY: this single file auto-clones the repo from GitHub if the
-support modules (_common_fs, _data_codet_fs, ...) aren't present locally.
-Just `!python exp_fs_00_baseline.py` in any Kaggle cell — no setup needed.
-
-Run on Kaggle T4 (auto-detected). Set FS_K_SHOT env var to override K.
-
-  python Exp_FewShot/exp_fs_00_baseline.py
-  FS_K_SHOT=128 python Exp_FewShot/exp_fs_00_baseline.py
-
-  # Standalone Kaggle cell (just upload THIS file or paste it in):
+KAGGLE-READY: paste this entire file into a Kaggle cell, or
   !python exp_fs_00_baseline.py
+The bootstrap auto-clones the repo from GitHub if the support modules
+(_common_fs, _data_codet_fs, ...) aren't present locally.
+
+Default sweep: K in {32, 128} + fraction in {0.01, 0.05} = 4 configs
+(~30 min on T4). Override:
+  FS_SWEEP_KS="8,16,32,64,128"     # extend or shrink K-shot points
+  FS_SWEEP_FRACS="0.01,0.05,0.1"   # extend or shrink fraction points
+  FS_SWEEP_KS=""                   # skip K-shot regime entirely
+  FS_SWEEP_FRACS=""                # skip fraction regime entirely
+  FS_SEED=42                       # reproducibility
 """
 from __future__ import annotations
 
@@ -81,7 +83,9 @@ def _setup_paths():
 
 _setup_paths()
 
-from _common_fs import FSConfig, apply_hardware_profile, emit_paper_table, logger
+from _common_fs import (FSConfig, apply_hardware_profile, cleanup_after_run,
+                         emit_paper_table, logger, parse_sweep_configs,
+                         print_sweep_summary)
 from _data_codet_fs import build_codet_fs_loaders
 from _model_fs import FSClassifier, cross_entropy_loss
 from _trainer_fs import train_fewshot
@@ -91,16 +95,17 @@ METHOD_NAME = "FS-Baseline-CE"
 EXP_ID = "exp_fs_00"
 
 
-def main():
+def run_one(kind: str, value, base_seed: int):
     cfg = FSConfig(
         benchmark="codet_m4",
         task="author",
-        k_shot=int(os.environ.get("FS_K_SHOT", "32")),
-        fs_seed=int(os.environ.get("FS_SEED", "42")),
+        k_shot=value if kind == "kshot" else 0,
+        train_fraction=value if kind == "fraction" else 0.0,
+        fs_seed=base_seed,
         encoder_name="answerdotai/ModernBERT-base",
     )
     cfg = apply_hardware_profile(cfg)
-    logger.info(f"[{EXP_ID}] starting K={cfg.k_shot} on {cfg.benchmark}/{cfg.task}")
+    logger.info(f"\n{'=' * 60}\n[{EXP_ID}] config={kind}={value}\n{'=' * 60}")
 
     bundle = build_codet_fs_loaders(cfg)
     model = FSClassifier(cfg)
@@ -108,15 +113,9 @@ def main():
     def loss_fn(outputs, labels, class_weights=None):
         return cross_entropy_loss(outputs, labels, class_weights=class_weights)
 
-    results = train_fewshot(
-        cfg=cfg,
-        model=model,
-        train_loader=bundle.train_loader,
-        val_loader=bundle.val_loader,
-        test_loader=bundle.test_loader,
-        loss_fn=loss_fn,
-        method_name=METHOD_NAME,
-    )
+    results = train_fewshot(cfg, model,
+                            bundle.train_loader, bundle.val_loader, bundle.test_loader,
+                            loss_fn=loss_fn, method_name=METHOD_NAME)
 
     emit_paper_table(METHOD_NAME, EXP_ID, cfg, {
         "test_macro_f1":    results.test_macro_f1,
@@ -131,6 +130,22 @@ def main():
         "per_source_f1":    results.per_source_f1,
         "train_per_class":  bundle.train_per_class,
     })
+
+    return results.test_macro_f1, results.val_macro_f1, results.wall_time_s
+
+
+def main():
+    base_seed = int(os.environ.get("FS_SEED", "42"))
+    configs = parse_sweep_configs()
+    logger.info(f"[{EXP_ID}] sweep plan: {configs}  seed={base_seed}")
+
+    summary = []
+    for kind, value in configs:
+        test_f1, val_f1, wall_s = run_one(kind, value, base_seed)
+        summary.append((kind, value, test_f1, val_f1, wall_s))
+        cleanup_after_run()
+
+    print_sweep_summary(summary, EXP_ID, METHOD_NAME)
 
 
 if __name__ == "__main__":

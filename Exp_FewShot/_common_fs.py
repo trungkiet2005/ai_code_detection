@@ -345,3 +345,63 @@ def _jsonify(obj):
     if isinstance(obj, (int, float, bool, str)) or obj is None:
         return obj
     return str(obj)
+
+
+# ---------------------------------------------------------------------------
+# Sweep helpers (each exp file calls these from main())
+# ---------------------------------------------------------------------------
+
+def parse_sweep_configs():
+    """Read FS_SWEEP_KS and FS_SWEEP_FRACS from env, return list of configs.
+
+    Default sweep is conservative for a single Kaggle T4 session:
+      K-shot:    K = 32, 128                      (~2 quick runs)
+      Fraction:  f = 0.01, 0.05                   (~2 medium runs)
+    Override:
+      FS_SWEEP_KS="8,16,32,64,128"
+      FS_SWEEP_FRACS="0.01,0.05,0.1,0.2"
+      FS_SWEEP_KS=""                  -> skip K-shot regime
+      FS_SWEEP_FRACS=""               -> skip fraction regime
+
+    Returns:
+      list of (kind, value) where kind in {'kshot', 'fraction'}.
+    """
+    raw_ks = os.environ.get("FS_SWEEP_KS", "32,128").strip()
+    raw_fracs = os.environ.get("FS_SWEEP_FRACS", "0.01,0.05").strip()
+    out = []
+    if raw_ks:
+        for x in raw_ks.split(","):
+            if x.strip():
+                out.append(("kshot", int(x.strip())))
+    if raw_fracs:
+        for x in raw_fracs.split(","):
+            if x.strip():
+                out.append(("fraction", float(x.strip())))
+    return out
+
+
+def cleanup_after_run():
+    """Release GPU memory between sweep runs so a fresh model can fit."""
+    import gc
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+
+
+def print_sweep_summary(summary, exp_id: str, method_name: str):
+    """Pretty per-method leaderboard at the end of a sweep.
+
+    summary: list of (kind, value, test_f1, val_f1, wall_s) tuples.
+    """
+    print(f"\n{'=' * 70}")
+    print(f"[{exp_id}] SWEEP SUMMARY -- {method_name}")
+    print(f"{'=' * 70}")
+    header = f"{'config':<16}{'test_F1':>10}{'val_F1':>10}{'gap':>10}{'wall':>10}"
+    print(header)
+    print("-" * len(header))
+    for kind, value, test_f1, val_f1, wall_s in summary:
+        label = f"K={value}" if kind == "kshot" else f"frac={value:.4f}"
+        gap = val_f1 - test_f1
+        print(f"{label:<16}{test_f1:>10.4f}{val_f1:>10.4f}{gap:>+10.4f}{wall_s:>10.0f}")
+    print("-" * len(header))
+    print(f"{len(summary)} configs total. JSON files saved to /kaggle/working/results/")

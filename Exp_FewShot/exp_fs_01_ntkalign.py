@@ -83,7 +83,9 @@ def _setup_paths():
 
 _setup_paths()
 
-from _common_fs import FSConfig, apply_hardware_profile, emit_paper_table, logger
+from _common_fs import (FSConfig, apply_hardware_profile, cleanup_after_run,
+                         emit_paper_table, logger, parse_sweep_configs,
+                         print_sweep_summary)
 from _data_codet_fs import build_codet_fs_loaders
 from _model_fs import FSClassifier, ntk_alignment_loss
 from _trainer_fs import train_fewshot
@@ -93,40 +95,29 @@ METHOD_NAME = "FS-NTKAlign"
 EXP_ID = "exp_fs_01"
 
 
-def main():
+def run_one(kind: str, value, base_seed: int, lambda_ntk: float):
     cfg = FSConfig(
         benchmark="codet_m4",
         task="author",
-        k_shot=int(os.environ.get("FS_K_SHOT", "32")),
-        fs_seed=int(os.environ.get("FS_SEED", "42")),
-        lambda_ntk=float(os.environ.get("FS_LAMBDA_NTK", "0.4")),
+        k_shot=value if kind == "kshot" else 0,
+        train_fraction=value if kind == "fraction" else 0.0,
+        fs_seed=base_seed,
+        lambda_ntk=lambda_ntk,
         encoder_name="answerdotai/ModernBERT-base",
     )
     cfg = apply_hardware_profile(cfg)
-    logger.info(
-        f"[{EXP_ID}] starting K={cfg.k_shot} lambda_ntk={cfg.lambda_ntk} "
-        f"on {cfg.benchmark}/{cfg.task}"
-    )
+    logger.info(f"\n{'=' * 60}\n[{EXP_ID}] config={kind}={value} lambda_ntk={lambda_ntk}\n{'=' * 60}")
 
     bundle = build_codet_fs_loaders(cfg)
     model = FSClassifier(cfg)
 
     def loss_fn(outputs, labels, class_weights=None):
-        return ntk_alignment_loss(
-            outputs, labels,
-            lambda_ntk=cfg.lambda_ntk,
-            class_weights=class_weights,
-        )
+        return ntk_alignment_loss(outputs, labels, lambda_ntk=cfg.lambda_ntk,
+                                  class_weights=class_weights)
 
-    results = train_fewshot(
-        cfg=cfg,
-        model=model,
-        train_loader=bundle.train_loader,
-        val_loader=bundle.val_loader,
-        test_loader=bundle.test_loader,
-        loss_fn=loss_fn,
-        method_name=METHOD_NAME,
-    )
+    results = train_fewshot(cfg, model,
+                            bundle.train_loader, bundle.val_loader, bundle.test_loader,
+                            loss_fn=loss_fn, method_name=METHOD_NAME)
 
     emit_paper_table(METHOD_NAME, EXP_ID, cfg, {
         "test_macro_f1":    results.test_macro_f1,
@@ -142,6 +133,23 @@ def main():
         "per_source_f1":    results.per_source_f1,
         "train_per_class":  bundle.train_per_class,
     })
+
+    return results.test_macro_f1, results.val_macro_f1, results.wall_time_s
+
+
+def main():
+    base_seed = int(os.environ.get("FS_SEED", "42"))
+    lambda_ntk = float(os.environ.get("FS_LAMBDA_NTK", "0.4"))
+    configs = parse_sweep_configs()
+    logger.info(f"[{EXP_ID}] sweep plan: {configs}  seed={base_seed} lambda_ntk={lambda_ntk}")
+
+    summary = []
+    for kind, value in configs:
+        test_f1, val_f1, wall_s = run_one(kind, value, base_seed, lambda_ntk)
+        summary.append((kind, value, test_f1, val_f1, wall_s))
+        cleanup_after_run()
+
+    print_sweep_summary(summary, EXP_ID, METHOD_NAME)
 
 
 if __name__ == "__main__":

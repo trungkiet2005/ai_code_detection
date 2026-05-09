@@ -53,7 +53,9 @@ def _setup_paths():
 
 _setup_paths()
 
-from _common_fs import FSConfig, apply_hardware_profile, emit_paper_table, logger
+from _common_fs import (FSConfig, apply_hardware_profile, cleanup_after_run,
+                         emit_paper_table, logger, parse_sweep_configs,
+                         print_sweep_summary)
 from _data_codet_fs import build_codet_fs_loaders
 from _model_fs import FSClassifier, supcon_loss
 from _trainer_fs import train_fewshot
@@ -63,25 +65,17 @@ METHOD_NAME = "FS-SupCon-Frozen"
 EXP_ID = "exp_fs_05"
 
 
-def main():
+def run_one(kind, value, base_seed, lr_heads, lambda_supcon, temperature):
     cfg = FSConfig(
-        benchmark="codet_m4",
-        task="author",
-        k_shot=int(os.environ.get("FS_K_SHOT", "32")),
-        train_fraction=float(os.environ.get("FS_TRAIN_FRACTION", "0.0")),
-        fs_seed=int(os.environ.get("FS_SEED", "42")),
+        benchmark="codet_m4", task="author",
+        k_shot=value if kind == "kshot" else 0,
+        train_fraction=value if kind == "fraction" else 0.0,
+        fs_seed=base_seed,
         encoder_name="answerdotai/ModernBERT-base",
-        lr_encoder=0.0,
-        lr_heads=float(os.environ.get("FS_LR_HEADS", "1e-3")),
+        lr_encoder=0.0, lr_heads=lr_heads,
     )
     cfg = apply_hardware_profile(cfg)
-    lambda_supcon = float(os.environ.get("FS_LAMBDA_SUPCON", "0.4"))
-    temperature = float(os.environ.get("FS_TEMP", "0.07"))
-    logger.info(
-        f"[{EXP_ID}] K={cfg.k_shot} frac={cfg.train_fraction} "
-        f"FROZEN encoder, lr_heads={cfg.lr_heads}, "
-        f"lambda_supcon={lambda_supcon}, T={temperature}"
-    )
+    logger.info(f"\n{'=' * 60}\n[{EXP_ID}] {kind}={value} FROZEN+SupCon lambda={lambda_supcon}\n{'=' * 60}")
 
     bundle = build_codet_fs_loaders(cfg)
     model = FSClassifier(cfg)
@@ -91,10 +85,7 @@ def main():
         p.requires_grad = False
         n_frozen += p.numel()
     n_trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
-    logger.info(
-        f"[{EXP_ID}] frozen {n_frozen/1e6:.1f}M params, "
-        f"trainable {n_trainable/1e6:.2f}M (head + projector only)"
-    )
+    logger.info(f"[{EXP_ID}] frozen {n_frozen/1e6:.1f}M, trainable {n_trainable/1e6:.2f}M")
 
     def loss_fn(outputs, labels, class_weights=None):
         return supcon_loss(outputs, labels, lambda_supcon=lambda_supcon,
@@ -105,22 +96,32 @@ def main():
                             loss_fn=loss_fn, method_name=METHOD_NAME)
 
     emit_paper_table(METHOD_NAME, EXP_ID, cfg, {
-        "test_macro_f1":    results.test_macro_f1,
-        "test_weighted_f1": results.test_weighted_f1,
-        "test_accuracy":    results.test_accuracy,
-        "val_macro_f1":     results.val_macro_f1,
-        "val_test_gap":     results.val_macro_f1 - results.test_macro_f1,
-        "train_steps":      results.train_steps,
-        "wall_time_s":      f"{results.wall_time_s:.1f}",
-        "lambda_supcon":    lambda_supcon,
-        "temperature":      temperature,
-        "frozen_params_M":  f"{n_frozen/1e6:.1f}",
+        "test_macro_f1": results.test_macro_f1, "test_weighted_f1": results.test_weighted_f1,
+        "test_accuracy": results.test_accuracy, "val_macro_f1": results.val_macro_f1,
+        "val_test_gap": results.val_macro_f1 - results.test_macro_f1,
+        "train_steps": results.train_steps, "wall_time_s": f"{results.wall_time_s:.1f}",
+        "lambda_supcon": lambda_supcon, "temperature": temperature,
+        "frozen_params_M": f"{n_frozen/1e6:.1f}",
         "trainable_params_M": f"{n_trainable/1e6:.2f}",
-        "per_class_f1":     results.per_class_f1,
-        "per_lang_f1":      results.per_lang_f1,
-        "per_source_f1":    results.per_source_f1,
-        "train_per_class":  bundle.train_per_class,
+        "per_class_f1": results.per_class_f1, "per_lang_f1": results.per_lang_f1,
+        "per_source_f1": results.per_source_f1, "train_per_class": bundle.train_per_class,
     })
+    return results.test_macro_f1, results.val_macro_f1, results.wall_time_s
+
+
+def main():
+    base_seed = int(os.environ.get("FS_SEED", "42"))
+    lr_heads = float(os.environ.get("FS_LR_HEADS", "1e-3"))
+    lambda_supcon = float(os.environ.get("FS_LAMBDA_SUPCON", "0.4"))
+    temperature = float(os.environ.get("FS_TEMP", "0.07"))
+    configs = parse_sweep_configs()
+    logger.info(f"[{EXP_ID}] sweep: {configs}  seed={base_seed}")
+    summary = []
+    for kind, value in configs:
+        test_f1, val_f1, wall = run_one(kind, value, base_seed, lr_heads, lambda_supcon, temperature)
+        summary.append((kind, value, test_f1, val_f1, wall))
+        cleanup_after_run()
+    print_sweep_summary(summary, EXP_ID, METHOD_NAME)
 
 
 if __name__ == "__main__":
