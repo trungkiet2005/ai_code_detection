@@ -44,7 +44,7 @@
 | Method | Exp | K=8 | K=16 | K=32 | K=64 | K=128 | Notes |
 |:--|:--|:-:|:-:|:-:|:-:|:-:|:--|
 | FS-Baseline-CE | exp_fs_00 | — | — | **0.1836** (+0.04) | — | — | floor; only 12 train steps at K=32 |
-| FS-NTKAlign | exp_fs_01 | — | — | — | — | — | ⏳ pending |
+| FS-NTKAlign | exp_fs_01 | — | — | **0.1222** (+0.08) | — | — | ⚠️ **−6.14 pt vs baseline** at K=32 |
 
 > **Cell format:** test Macro-F1 with val-test gap in parens, e.g. `0.43 (-0.05)`.
 > Negative gap = test ≥ val (good); large positive gap = overfitting on K-shot train.
@@ -120,6 +120,67 @@ confusion we predicted in the paper. NTKAlign should help here — its
 target-kernel pulls same-class projections together explicitly.
 
 ### exp_fs_01 — FS-NTKAlign (CE + NTK target-kernel alignment)
+
+#### Run 1 — 2026-05-09 09:31, Kaggle T4 14.6GB, K=32, fs_seed=42, lambda_ntk=0.4
+
+```
+BEGIN_FS_TABLE method=FS-NTKAlign exp_id=exp_fs_01
+  benchmark: codet_m4
+  task:      author
+  k_shot:    32
+  n_classes: 6
+  fs_seed:   42
+  encoder:   answerdotai/ModernBERT-base
+  precision: fp16
+  bs:        16
+  seq:       384
+  lambda_ntk        0.4000
+  test_macro_f1     0.1222
+  test_weighted_f1  0.1605
+  test_accuracy     0.1490
+  val_macro_f1      0.2020
+  val_test_gap      0.0798
+  train_steps       12
+  wall_time_s       476.1
+  per_class_f1   {class_0: 0.2135, class_1: 0.2221, class_2: 0.0882,
+                  class_3: 0.0018, class_4: 0.0256, class_5: 0.1819}
+  per_lang_f1    {cpp: 0.1265, java: 0.0829, python: 0.1346}
+  per_source_f1  {cf: 0.1192, gh: 0.0736, lc: 0.1206}
+  train_per_class {0: 32, 1: 32, 2: 32, 3: 32, 4: 32, 5: 32}
+END_FS_TABLE
+```
+
+**🚨 Diagnosis — NTKAlign is WORSE than baseline at K=32 (−6.14 pt test):**
+
+| Slice | Baseline K=32 | NTKAlign K=32 | Δ |
+|:--|:-:|:-:|:-:|
+| Test Macro-F1 | 0.1836 | **0.1222** | **−0.0614** |
+| Val Macro-F1 | 0.2253 | 0.2020 | −0.0233 |
+| Val-test gap | +0.04 | **+0.08** | gap doubled |
+| Class 0 (human) F1 | **0.503** | 0.214 | −0.289 collapse |
+| Class 1 (codellama) F1 | 0.246 | 0.222 | −0.024 |
+| Class 3 (llama3.1) F1 | 0.002 | 0.002 | unchanged (still collapsed) |
+
+The collapse is concentrated on the **human class** (0.50 → 0.21). NTKAlign's
+target-kernel objective pushes same-class projections together — but with
+batch size B=16 and 6 classes, each batch has only ~2.7 same-class pairs on
+average, so the kernel target Y is mostly off-diagonal zeros. The loss
+becomes a *separation* objective dominated by inter-class repulsion, which
+drags the human cluster (the only class with a strong CE signal) toward
+the centroid mean.
+
+**Hypothesised fixes (in order of expected impact):**
+1. **Class-balanced batch sampler.** Currently the sampler shuffles K·N=192 samples randomly into bs=16 batches → uneven class composition. Force at least $\lceil B/N \rceil = 3$ examples per class per batch. The NTK kernel target Y will then have $\geq B \cdot 3$ on-diagonal pairs instead of $\sim 6$ on average.
+2. **Lower lambda_ntk.** 0.4 may be too aggressive at K-shot scale. Try 0.1 or 0.05 first; sweep upward only if K=128 baseline is also weak.
+3. **Larger batch (bs=32 fp16).** Doubles same-class pair count for free. T4 should fit ModernBERT-base at seq=384 bs=32 fp16. Worth trying.
+4. **Warmup epochs without NTK.** Run 3-5 epochs with $\lambda_{\text{NTK}} = 0$, then activate. Prevents early collapse before CE has settled.
+
+**Implication for paper pivot.** This is K=32, the small end. **K=128
+will tell us whether NTKAlign starts to help once the kernel target
+becomes informative.** Decision gate stays at K=128: if NTKAlign K=128
+< Baseline K=128, we revert to the 20% data story (paper draft v1
+already builds on the existing Exp_13 NTKAlign 71.03 result, which uses
+**bs=64 H100**, not K-shot bs=16). The Exp_Climb claim is unchanged.
 
 _(no run yet)_
 
