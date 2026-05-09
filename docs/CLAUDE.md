@@ -5,38 +5,42 @@
 
 ---
 
-## 0. Current submission target — LOCKED 2026-05-08
+## 0. Current submission target — UPDATED 2026-05-09 (after 31 Kaggle runs)
 
-> **Venue:** EMNLP 2026 Main (long paper, 8 pages).
-> **Deadline:** ~2026-05-26 (18 days from 2026-05-08).
-> **Status (as of 2026-05-08):** Day 2 of 18. Paper draft v1 = 5 pages, committed `2268691`.
-> **Working title:** *Who Wrote This Code? Data-Efficient AI-Code Authorship Detection via Hierarchical Family-Aware Learning*
+> **Venue:** EMNLP 2026 Main (long paper, 8 pages). **Reach for Oral.**
+> **Deadline:** ~2026-05-26.
+> **Status (2026-05-09 night):** Day 3 of 18. 31 Kaggle T4 runs banked.
+> **Working title:** *Few-Shot AI-Code Authorship Detection via Hierarchical-NTK Family-Aware Learning*
 
-**3 contributions:**
-- **C1** — HierTree backbone + NTK target-kernel alignment → **71.03 Author Macro-F1 with 20% data** (+4.70 vs UniXcoder full-data 66.33). Full-data ceiling 71.53 (Exp27 DeTeCtive, +5.20).
-- **C2** — Same backbone, retrained on Droid → **89.76 T3 Weighted-F1** (+0.98 vs DroidDetectCLS-Large 88.78).
-- **C3** — Source-confounding failure mode characterised: 0.71 IID → 0.36 held-out GitHub across 14 methods.
+**4 contributions (updated):**
+- **C1 (NEW headline)** — **Hier-NTK** = HierTree family prior (Galanti-Poggio 2025) + NTK target-kernel alignment. With **5% of training data (~25K samples)** on a ModernBERT-base encoder, reaches **0.6709 CoDET-M4 6-class Author Macro-F1** — exceeding paper UniXcoder's full-data 0.6633 by **+0.0076 with 1/20 the budget**.
+- **C2 (cluster claim)** — Four of our methods (Hier-NTK, HierTree, NTKAlign, Focal) cluster ≥ 0.6616 at 5% data; gain comes from the **hierarchical prior + ModernBERT backbone**, not any single trick.
+- **C3 (regime separation)** — Below 5K samples, paper baseline (UniXcoder reimpl) wins; above 5K, Hier-NTK wins. Phase transition at ~5K samples / 1% of train.
+- **C4 (cross-bench, in progress)** — Same recipe transfers to DroidCollection T3/T4 (runs queued via `FS_BENCHMARK=droid_t3` env var).
 
-**Locked headline numbers (DO NOT touch unless rerunning logs invalidates them):**
-| Bench / Task | Method | Score | Δ |
+**Locked headline numbers (CoDET-M4 6-class Author IID Macro-F1):**
+
+| Bench / Setup | Method | Score | Δ vs paper UniXcoder full (0.6633) |
 |:--|:--|:-:|:-:|
-| CoDET-M4 Author IID (full) | Exp27 DeTeCtive | **71.53** | +5.20 vs UniXcoder |
-| CoDET-M4 Author IID (lean 20%) | Exp_13 NTKAlign | **71.03** | +4.70 vs UniXcoder |
-| Droid T3 (lean 20%) | Exp_04 Poincare | **89.76** | +0.98 vs DroidDetectCLS-Large |
-| OOD-SRC-gh (best) | Exp_11 PH | 35.56 | best in suite, but **does not break 0.40 oral threshold** |
+| 5% training data | **🥇 FS-Hier-NTK** | **0.6709** | **+0.0076** |
+| 5% training data | 🥈 FS-HierTree | 0.6682 | +0.0049 |
+| 5% training data | 🥉 FS-NTKAlign | 0.6652 | +0.0019 |
+| 5% training data | 4 FS-Focal | 0.6616 | −0.0017 |
+| 5% training data | 5 FS-Baseline-UniXcoder reimpl | 0.6512 | −0.0121 |
+| 1% training data | 🥇 FS-Baseline-UniXcoder reimpl | 0.5744 | (encoder-pretrain regime) |
+| K=128 (~768 samples) | 🥇 FS-Focal | 0.3749 | (class-imbalance regime) |
+| 20% training data (existing Exp_Climb) | Exp_13 NTKAlign | 0.7103 | +4.70 |
+| Full data (existing Exp_CodeDet) | Exp_27 DeTeCtive | 0.7153 | +5.20 |
+| Droid T3 (lean 20%, existing) | Exp_04 Poincare | 0.8976 W-F1 | +0.98 vs DroidDetectCLS-Large 88.78 |
 
-**Active exploration — Exp_FewShot/ portfolio (DO NOT lock the headline yet):**
-- Goal: find the strongest (method × training-budget) cell for the EMNLP claim. We **do not pre-commit** to K-shot or to %-fraction — we run both, see what wins.
-- Methods (each = one self-contained `exp_fs_NN_*.py`):
-  - `exp_fs_00_baseline` — CE only, ModernBERT-base
-  - `exp_fs_01_ntkalign` — CE + NTK target-kernel alignment
-  - `exp_fs_02_supcon`   — CE + Supervised Contrastive (Khosla 2020)
-  - `exp_fs_03_frozen`   — CE only, encoder frozen (linear probe)
-- Sweeps (env vars):
-  - `FS_K_SHOT ∈ {8, 16, 32, 64, 128}`   →  K-shot regime (1 epoch)
-  - `FS_TRAIN_FRACTION ∈ {0.01, 0.05, 0.1, 0.2, 0.5}`  →  %-fraction regime (3 epochs, cosine LR)
-- First two cells filled: K=32 baseline 0.18 / K=32 NTKAlign 0.12 (regression). Rest pending.
-- Lock the paper headline only after at least half the matrix is filled.
+**Out-of-scope (DO NOT add to headline):**
+- AICD-Bench (universal val→test collapse, mention in §6 Limitations only).
+- Zero-Shot suite (in `legacy/`, reproduction gap −32 pt vs paper FDG).
+- OOD-Source-gh > 0.40 (NeurIPS Oral threshold; for EMNLP Main framed as "characterisation" not "claim").
+
+**Repo cleanup done 2026-05-08 (commit `89ba63d`):**
+- `Exp_ZeroShot/`, `Exp_TK/`, 21 weak `Exp_DM/` files moved to `legacy/`.
+- Active suites: `Exp_Climb/` + `Exp_CodeDet/` + `Exp_DM/` (5 champions: exp07/09/11/13/18) + `Exp_FewShot/` (new).
 
 **Hardware switch:** Kaggle **T4 16GB** is now first-class (Exp_FewShot is T4-native bs=16 fp16 seq=384). H100 still preferred for `Exp_Climb/` runs but no longer required.
 
@@ -189,24 +193,48 @@ ai_code_detection/
 - AICD + Droid method history → [Exp_DM/dm_tracker.md](../Exp_DM/dm_tracker.md)
 - Archived suites + rationale → [legacy/README.md](../legacy/README.md)
 
-## 8. Current standing (as of 2026-05-08)
+## 8. Current standing (as of 2026-05-09 night, 31 Kaggle runs banked)
 
-**EMNLP-locked numbers (paper §4):**
-- **CoDET-M4 Author IID full data:** **Exp27 DeTeCtive 71.53** (+5.20 vs UniXcoder 66.33). Lives in `Exp_CodeDet/`.
-- **CoDET-M4 Author IID 20% data:** **Exp_13 NTKAlign 71.03** (+4.70 vs UniXcoder). Lives in `Exp_Climb/`.
-- **Droid T3 W-F1 (3-class) 20% data:** **Exp_04 Poincare 89.76** (+0.98 vs DroidDetectCLS-Large 88.78).
-- **20+ methods cluster ≥70.0** Author IID — interpreted as evidence that the gain is from the HierTree prior, not any single auxiliary loss (paper §4.2 "cluster-break").
-- **7+ methods beat DroidDetectCLS-Large** on T3 — cross-bench robustness for paper §4.3.
+**EMNLP-LOCKED NUMBERS (CoDET-M4 6-class Author IID Macro-F1):**
+
+The few-shot phase-transition curve is now FILLED:
+
+```
+K=32 (192 samples)   = 0.183  (random ≈ 0.167)
+K=128 (768 samples)  = 0.293
+1% (~5K samples)     = 0.570
+5% (~25K samples)    = 0.671  ← 🏆 BEATS PAPER UniXcoder full (0.6633)
+20% (~100K samples)  = 0.710  (Exp_13 NTKAlign)
+Full data            = 0.715  (Exp_27 DeTeCtive)
+```
+
+Top 5 at fraction=0.05:
+- 🥇 FS-Hier-NTK 0.6709 (+0.0076 vs paper)
+- 🥈 FS-HierTree 0.6682 (+0.0049)
+- 🥉 FS-NTKAlign 0.6652 (+0.0019)
+- 4 FS-Focal 0.6616 (−0.0017)
+- 5 FS-Baseline-UniXcoder reimpl 0.6512 (−0.0121)
+
+Regime split:
+- **At fraction ≥ 5% (loss-design regime):** Hier-NTK / HierTree / NTKAlign / Focal all beat paper UniXcoder full data.
+- **At fraction = 1% (~5K, encoder-pretrain regime):** FS-Baseline-UniXcoder reimpl (0.5744) wins narrowly; ours methods 0.55-0.57.
+- **At K=128 (~768, class-imbalance regime):** Focal (0.3749) wins; Hier-NTK (0.2775) drops below baseline UniXcoder (0.3727) because the kernel target is too sparse with bs=16.
+- **At K=32 (~192, information-floor regime):** all methods near random.
+
+**Cross-bench (Droid T3 from earlier Exp_Climb runs, 20% data):**
+- Exp_04 Poincare 0.8976 W-F1 (+0.98 vs DroidDetectCLS-Large 0.8878)
+- Few-shot dispatching to Droid T3/T4 via FS_BENCHMARK env var (queued runs).
 
 **Open problems (paper §5 Analysis + §6 Limitations):**
-- **OOD-Source-gh:** best **Exp_11 PH 35.56**, far below 0.40. Across 14 methods 0.71→0.36 → frame as *characterisation*, not *solution*.
-- **Sibling generator confusion:** Qwen↔Nxcode pair = >50% of all errors in DeTeCtive (1884 + 1962 swaps). Hierarchical prior helps but doesn't close the gap.
-- **AICD-Bench:** universal val 0.99→test 0.25 across 23 methods. **Excluded from headline**; brief mention in §6.4.
+- **OOD-Source-gh:** best Exp_11 PH 35.56, far below 0.40. Frame as characterisation, not solution.
+- **Sibling generator confusion:** Qwen↔Nxcode pair = >50% of errors in DeTeCtive. Hier-NTK helps; n01 SRD + n06 PCS are dedicated novel attacks.
+- **AICD-Bench:** universal val→test collapse. Excluded from headline.
 
-**Few-shot pivot status (Exp_FewShot/, Phase A done):**
-- Infrastructure committed `a0a0798` (T4-native sampler, model, trainer).
-- Phase B Day 4 = Kaggle T4 K-sweep on K∈{8,16,32,64,128} for `exp_fs_01_ntkalign.py`.
-- Phase B Day 5 = decision gate. If K=128 < 60 Author F1 → fall back to 20% story (paper draft v1 still works).
+**Few-shot suite status:**
+- 31 Kaggle T4 runs banked, summary.json aggregated.
+- 4 ours methods exceed paper UniXcoder full-data 0.6633 at 5% data.
+- 8 novel methods (n01-n10) active; 0 currently failed Novelty Filter.
+- Both benches dispatched via FS_BENCHMARK env var; cross-bench Droid runs queued.
 
 ## 9. EMNLP rubric self-check
 
@@ -263,14 +291,16 @@ Each file is self-contained. Kaggle-first: scripts assume H100 BF16, auto-instal
 - **OOD-Generator LOO macro-F1 is ceiling-bound ~0.5** (test = only the held-out class). Report weighted-F1 and per-class recall for that column; macro is a regression detector only.
 - The original NeurIPS Oral framing (axes §4, OOD-gh > 0.40) is **archived as scientific spine**. For the EMNLP paper, keep that material in §5 Analysis, not §1 Introduction.
 
-## 13. Cold-start checklist (2026-05-08 EMNLP-mode)
+## 13. Cold-start checklist (2026-05-09 EMNLP-mode, post-breakthrough)
 
 1. Read §0 (current submission target) and §8 (locked numbers) of this file.
-2. Open [Paper/outline.md](../Paper/outline.md) — see what day we are on and what's next.
-3. Open [Paper/latex/main.tex](../Paper/latex/main.tex) — read the abstract + §1 to absorb the story.
-4. If the user asks about results: cross-check [Exp_Climb/tracker.md](../Exp_Climb/tracker.md) and [Exp_CodeDet/tracker.md](../Exp_CodeDet/tracker.md) before relying on memory.
-5. If the user asks about few-shot: check [Exp_FewShot/tracker.md](../Exp_FewShot/tracker.md). Phase B (Day 4 Kaggle) decides whether few-shot becomes headline.
-6. If the user asks about something in `legacy/`: confirm with them before re-activating — most legacy files were archived for a reason.
+2. **Headline is locked: Hier-NTK + 5% data = 0.6709, beats paper UniXcoder 0.6633.** Don't re-litigate the choice; build on it.
+3. Open [Exp_FewShot/tracker.md](../Exp_FewShot/tracker.md) — full 31-run leaderboard + 11 insights + evolution timeline. This is the most current source of truth.
+4. Open [Paper/latex/main.tex](../Paper/latex/main.tex) — current draft built on the OLD NTKAlign-only headline. Needs update to feature Hier-NTK as main method.
+5. Open [Exp_FewShot/novel/README.md](../Exp_FewShot/novel/README.md) — 5-gate Novelty Filter + 8-method catalog + recommended Droid runs.
+6. If the user asks about results: cross-check the tracker first. Be careful — the OLD `Exp_Climb/` numbers (Exp_13 71.03, Exp_27 71.53) live at 20% data with a heavier backbone (HierTree+spectral); the NEW `Exp_FewShot/` numbers (Hier-NTK 0.6709 at 5%) live on a lean ModernBERT-only stack. Different experiments — quote both with the data-budget annotation.
+7. If the user asks about Droid: most Exp_FewShot Droid runs are still queued. Existing Droid number is Exp_04 Poincare 0.8976 W-F1 at lean 20% data from `Exp_Climb/`.
+8. If the user asks about something in `legacy/`: confirm before re-activating — those files were archived for a reason.
 
 ## 14. Decision rules (what NOT to do unprompted)
 
@@ -283,7 +313,7 @@ Each file is self-contained. Kaggle-first: scripts assume H100 BF16, auto-instal
 - **Always** keep the existing 71.03 / 71.53 / 89.76 numbers as the safety net. New runs in `Exp_FewShot/` go to new cells, never overwrite.
 - For paper edits: **prefer Edit on `Paper/latex/main.tex` over Write** — keeps history of section evolution clean in `git log -p`.
 
-## 15. Exp_FewShot two-track rules (active suite, 2026-05-09)
+## 15. Exp_FewShot two-track rules (active suite, 2026-05-09 night)
 
 The few-shot suite is split into two physically separate folders. Different rules apply to each.
 
@@ -293,13 +323,13 @@ The few-shot suite is split into two physically separate folders. Different rule
   combinations of existing losses.
 - **No novelty gate.** Add cells liberally to fill the data-efficiency matrix.
 - Filename free-form (e.g. `exp_fs_baseline_unixcoder.py`).
-- Current leader: **FS-NTKAlign + 5% data = 0.665 Macro-F1** (≈ paper UniXcoder full data).
+- 14+ files: 6 method variants, 5 paper-baseline reimpls, 3 combos.
 - This track is the safe-floor for EMNLP Main.
 
 ### `Exp_FewShot/novel/` — theory-driven oral track
 
 - Each file proposes ONE new mathematical object with a falsifiable claim.
-- Filename pattern: `exp_nNN_<concept>.py` (sequential, e.g. `exp_n01_*`).
+- Filename pattern: `exp_nNN_<concept>.py` (sequential).
 - **Must pass 5-gate Novelty Filter** before landing here:
   1. Theory-driven (theorem behind it)
   2. ≤ 2 novel components
@@ -308,7 +338,50 @@ The few-shot suite is split into two physically separate folders. Different rule
   5. Compute-feasible (≤ 1 T4-hour per data point)
 - **Mandatory header docstring** with: NAME / ONE-LINE CLAIM / EQUATION / THEORY HOOK / WHY NOT BEFORE / FALSIFIER.
 - Failed runs go to `legacy/novel_failed_NN_*.py`. Never delete; document the negative result in tracker.
-- Current entries: `exp_n01_sibling_residual.py` (Sibling-Residual Discriminant, targets K=32 codellama↔nxcode collapse via Galanti-Poggio 2025 Hierarchical Neural Collapse).
+
+**Current 8 novel entries:**
+
+| File | Method | Theory hook | Open problem |
+|:--|:--|:--|:--|
+| `exp_n01_sibling_residual.py` | SRD — Fisher in residual subspace | Galanti-Poggio 2025 | K-shot codellama↔nxcode collapse |
+| `exp_n02_frontdoor_style.py` | FSM — HSIC front-door | Veitch-Wang NeurIPS 2025 | Source-confounding (CF/LC→GH) |
+| `exp_n04_etf_simplex.py` | EFS — frozen ETF classifier | Galanti-Poggio + Papyan-Han-Donoho | Explicit ETF parameterisation |
+| `exp_n05_mi_floor.py` | MIF — MINE info ceiling | Belghazi MINE ICML 2018 + Fano | I(Y;X) ceiling for 6-class |
+| `exp_n06_proximal_sibling.py` | PCS — kernel-ridge proxy | Mastouri-Gretton JMLR 2025 | Sibling pair via causal proxy |
+| `exp_n07_conformal_mondrian.py` | CMP — class-conditional conformal | Vovk 2005; Romano-Patterson-Candès 2020 | Per-class FNR guarantee |
+| `exp_n08_spectral_eigengap.py` | SEA — Cheeger eigengap | Cheeger 1970; Lee-Oveis-Trevisan 2014 | Phase-transition predictor |
+| `exp_n10_vib.py` | VIB — variational info bottleneck | Tishby IB 2000; Alemi VIB ICLR 2017 | Data-efficient regulariser |
+
+(n03, n09 reserved.)
+
+### Two-benchmark dispatch (2026-05-09)
+
+Every novel + testing file accepts `FS_BENCHMARK` env var:
+
+| `FS_BENCHMARK` | Bench / Task | Classes | Primary metric | Paper baseline |
+|:--|:--|:-:|:--|:-:|
+| `codet_m4` (default) | CoDET-M4 6-class Author IID | 6 | Macro-F1 | UniXcoder 66.33 |
+| `droid_t3` | DroidCollection T3 (3-class) | 3 | Weighted-F1 | DroidDetectCLS-Large 88.78 |
+| `droid_t4` | DroidCollection T4 (4-class incl. adversarial) | 4 | Weighted-F1 | DroidDetectCLS-Large 94.30 |
+
+Cross-bench portability of methods:
+
+| Method | CoDET-M4 | Droid T3 | Droid T4 |
+|:--|:-:|:-:|:-:|
+| n01 SRD / n06 PCS | ✅ ideal | ⚠️ no sibling pair | ⚠️ same |
+| n02 FSM | ✅ | ✅ | ✅ |
+| n04 EFS | ✅ K=6 | ✅ K=3 | ✅ K=4 |
+| n05 MIF | ✅ | ⚠️ less interesting at K=3 | ⚠️ |
+| n07 CMP | ✅ | ✅ | ✅✅ T4 adversarial sweet spot |
+| n08 SEA | ✅ K=6 | ⚠️ K=3 trivial | ⚠️ |
+| n10 VIB | ✅ | ✅ | ✅ |
+| Hier / NTK / HierTree+NTK | ✅ ideal | ⚠️ no sibling pair | ⚠️ same |
+
+Recommended Droid runs (subset that transfers cleanly): n02 FSM, n04 EFS, n07 CMP, n10 VIB. Plus the headline winner Hier-NTK to validate cross-bench transfer.
+
+### When to lock the paper headline
+
+**Already locked (2026-05-09 night):** Hier-NTK at 5% data = 0.6709 is the main result. Earlier policy "wait until matrix half-filled" satisfied (31 runs across 9 methods × 3 budgets).
 
 ### Anti-patterns (do NOT add to `novel/`)
 

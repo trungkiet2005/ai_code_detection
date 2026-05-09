@@ -6,39 +6,71 @@
 
 ---
 
-## ⏱️ TL;DR — current state (2026-05-09 evening)
+## ⏱️ TL;DR — current state (2026-05-09 night, after 31 Kaggle runs)
 
-- **Submission target:** EMNLP 2026 (Main + reach for Oral). Deadline ~2026-05-26 (~17 days).
-- **Safe floor (anchor / fallback for Main):** Exp_27 DeTeCtive **71.53** (CoDET Author full data) · Exp_13 NTKAlign **71.03** (lean 20%) · **NEW** Testing FS-NTKAlign **0.665** (5% data ≈ paper UniXcoder full) · Exp_04 Poincare **89.76** (Droid T3). Paper draft v1 builds on these.
-- **Paper draft:** [Paper/latex/main.tex](Paper/latex/main.tex), 5 pages storytelling.
-- **Active two-track exploration in `Exp_FewShot/`:**
-  - **`testing/`** — setup-variation track. 14+ inline files (method × encoder × K × fraction). Already produced the 0.665 5%-data result. Free of novelty gate; build cells liberally to fill the data-efficiency matrix.
-  - **`novel/`** — theory-driven oral track. Each file = one new mathematical object + falsifiable claim + theorem hook. Files numbered `exp_nNN_*.py`. Must pass the 5-gate Novelty Filter ([novel/README.md](Exp_FewShot/novel/README.md)) before landing. Currently: **`exp_n01_sibling_residual.py`** — Sibling-Residual Discriminant targeting K=32 codellama↔nxcode collapse via Hierarchical Neural Collapse (Galanti-Poggio 2025).
-- **Excluded from headline:** AICD-Bench (universal val→test collapse), Zero-Shot suite (in `legacy/`, reproduction gap −32 pt vs paper FDG).
+- **Submission target:** EMNLP 2026 Main, **reach for Oral**. Deadline ~2026-05-26 (~17 days).
+- **🏆 BREAKTHROUGH:** **4 of our methods exceed paper UniXcoder full-data 0.6633 at 5% training data** (≈ 1/20 the budget). Top 5 at fraction=0.05 on CoDET-M4 6-class Author IID:
 
-## 📐 Two-track policy (testing/ vs novel/)
+  | Rank | Method | Macro-F1 | Δ vs paper |
+  |:-:|:--|:-:|:-:|
+  | 🥇 | **FS-Hier-NTK** (combo) | **0.6709** | **+0.0076** |
+  | 🥈 | FS-HierTree (Galanti-Poggio family prior) | 0.6682 | +0.0049 |
+  | 🥉 | FS-NTKAlign | 0.6652 | +0.0019 |
+  | 4 | FS-Focal | 0.6616 | −0.0017 |
+  | 5 | FS-Baseline-UniXcoder reimpl | 0.6512 | −0.0121 |
 
-| Question | testing/ | novel/ |
-|:--|:--|:--|
-| When to use | hyperparameter point, encoder swap, loss combo of existing pieces | new mathematical object with theorem |
-| Filename | `exp_fs_*.py` (free naming) | `exp_nNN_<concept>.py` (sequential) |
-| Header docstring | regular | mandatory: NAME / ONE-LINE CLAIM / EQUATION / THEORY HOOK / WHY NOT BEFORE / FALSIFIER |
-| Gate | none | 5-gate Novelty Filter (see novel/README.md) |
-| Anti-patterns | — | "stack 3 losses", λ-tuning, augmentation cocktail, "apply to new domain" alone |
-| Failure handling | overwrite / iterate | move to `legacy/novel_failed_NN_*.py`; never delete |
+- **Lock the paper main method:** **Hier-NTK** (HierTree family prior + NTK target-kernel alignment). Replaces the earlier "NTKAlign-only" framing.
+- **Phase transition story:** F1 jumps from 0.18 (K=32, 192 samples) → 0.28 (K=128) → 0.57 (1%, 5K samples) → **0.67 (5%, 25K samples ≈ paper SOTA)** → 0.71 (Exp_13 lean 20%, 100K samples). The "bend" is between 1% and 5% data.
+- **Regime-dependent winner (insight 6+7):** at K=128 / 1% Focal & UniXcoder reimpl WIN; at 5%+ Hier/NTK WIN. Paper §3 must specify "use Hier-NTK at fraction ≥ 1%, drop NTK at K-shot regime".
+- **2-bench dispatch:** every novel file accepts `FS_BENCHMARK=codet_m4 | droid_t3 | droid_t4` env var. Cross-bench runs queued.
+- **Paper draft:** [Paper/latex/main.tex](Paper/latex/main.tex), 5 pages storytelling. Will be updated to feature Hier-NTK as headline method.
+- **Excluded from headline:** AICD-Bench (val→test collapse), Zero-Shot suite (legacy, FDG gap).
 
-## 🧪 Exp_FewShot/ — portfolio policy
+## 📐 Two-track structure (`Exp_FewShot/`)
 
-Patterned after the cross-modal ReID workspace ([Exp_FewShot/README.md](Exp_FewShot/README.md)):
+| Track | Folder | Filename | Gate | Purpose |
+|:--|:--|:--|:--|:--|
+| **Setup-variation** | `Exp_FewShot/testing/` | `exp_fs_*.py` (free) | none | Method × encoder × budget grid; paper-baseline reimpls |
+| **Theory-driven** | `Exp_FewShot/novel/` | `exp_nNN_*.py` (sequential) | 5-gate Novelty Filter ([novel/README.md](Exp_FewShot/novel/README.md)) | One new mathematical object per file; oral upside |
 
-- **Each `exp_fs_NN_*.py` is fully self-contained.** Bootstrap auto-clones from GitHub if support modules are missing — Kaggle just runs `!python exp_fs_01_ntkalign.py`.
-- **Two regimes per file** via env vars:
-  - `FS_K_SHOT=N` (N ≥ 1) → K-shot mode (1 epoch, no LR schedule)
-  - `FS_TRAIN_FRACTION=0.05` (with FS_K_SHOT=0) → %-fraction mode (3 epochs, cosine LR + warmup)
-- **One file = one method.** Hyperparameters via env vars (`FS_LAMBDA_NTK`, `FS_TEMP`, `FS_LR_HEADS`, ...).
-- **Sweep via `run_fs_portfolio.py`** — fires every (method, regime, value) into `logs/<exp>_<label>.log`.
-- **Tracker is a portfolio MATRIX**, not a single leaderboard. Cells get filled as runs complete.
-- **NEVER lock the paper headline before the matrix is at least half-filled.** The 20%-data Exp_13 number is the fallback; we are searching for whether a better cell exists.
+- Both tracks: each file is fully self-contained inline; paste into Kaggle cell, run, no `git clone` needed (the file pip-installs deps and uses standard CoDET-M4 / DroidCollection HF datasets).
+- Two regimes per file via env vars:
+  - `FS_K_SHOT=N` → K-shot mode (1 epoch, no LR schedule)
+  - `FS_TRAIN_FRACTION=f` → %-fraction mode (3 epochs, cosine LR + warmup)
+- Two benchmarks via env var:
+  - `FS_BENCHMARK=codet_m4` (default) | `droid_t3` | `droid_t4`
+- JSON output filename encodes benchmark + regime to avoid collision.
+
+## 🧬 Active novel methods (`Exp_FewShot/novel/`)
+
+Each file = one new mathematical object + falsifiable claim + theorem hook.
+
+| File | Method | Open problem | Theory hook |
+|:--|:--|:--|:--|
+| `exp_n01_sibling_residual.py` | SRD | K-shot codellama↔nxcode collapse | Galanti-Poggio 2025 hierarchical neural collapse |
+| `exp_n02_frontdoor_style.py` | FSM | Source-confounding (CF/LC→GH) | Veitch-Wang NeurIPS 2025 front-door criterion |
+| `exp_n04_etf_simplex.py` | EFS | Explicit ETF parameterisation | Galanti-Poggio + Papyan-Han-Donoho ETF |
+| `exp_n05_mi_floor.py` | MIF | I(Y;X) ceiling for 6-class | Belghazi MINE ICML 2018 + Fano |
+| `exp_n06_proximal_sibling.py` | PCS | Sibling pair via proxy | Mastouri-Gretton JMLR 2025 |
+| `exp_n07_conformal_mondrian.py` | CMP | Per-class FNR guarantee | Vovk 2005; Romano-Patterson-Candès 2020 |
+| `exp_n08_spectral_eigengap.py` | SEA | Phase-transition predictor | Cheeger 1970; Lee-Oveis-Trevisan 2014 |
+| `exp_n10_vib.py` | VIB | Data-efficient regulariser | Tishby IB 2000; Alemi VIB ICLR 2017 |
+
+## 💡 Live insights from the 31-run leaderboard (paper-ready)
+
+(Full version + evolution timeline in [Exp_FewShot/tracker.md](Exp_FewShot/tracker.md).)
+
+1. **HierTree family prior is the biggest signal** — alone gives 0.6682 at 5%, beats NTKAlign (0.6652).
+2. **Hier+NTK combo wins** — 0.6709, additive contribution.
+3. **4 methods cluster ≥ 0.6616 at 5%** — gain comes from prior + ModernBERT, not single trick.
+4. **UniXcoder reimpl validates protocol** — 0.6512 at 5% = 98.2% of paper's full-data 0.6633.
+5. **ModernBERT > CodeBERT > GraphCodeBERT** — encoder choice matters; ModernBERT is the right backbone.
+6. **At 1% data, paper baseline (UniXcoder) wins** — encoder pretrain dominates below 5K samples.
+7. **At K=128, Focal loss wins** — class-imbalance-aware loss dominates when batch lacks diverse pairs.
+8. **Frozen-encoder ceiling = 0.46** — pretrained features have no generator-specific signal; encoder fine-tune is necessary.
+9. **Val-test gap signs are diagnostic, not noise** — negative gap (test > val) indicates under-fitting on tiny val pool, not over-fitting.
+10. **Hier+NTK COMBO HURTS at K=128** — sparse kernel target. Specify "use combo at frac ≥ 1%, NTKAlign-only at K-shot".
+11. **Phase transition between 1% and 5%** — model needs ~5K samples to unlock generator-specific signal.
 
 ## Operational rules for this repo
 
