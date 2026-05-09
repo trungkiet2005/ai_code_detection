@@ -46,9 +46,9 @@
 | Method | Exp | K=8 | K=16 | K=32 | K=64 | K=128 | Notes |
 |:--|:--|:-:|:-:|:-:|:-:|:-:|:--|
 | FS-Baseline-CE      | exp_fs_00 | — | — | **0.1836** (+0.04) | — | — | floor; CE only |
-| FS-NTKAlign         | exp_fs_01 | — | — | **0.1222** (+0.08) | — | — | ⚠️ **−6.14 pt vs baseline** at K=32 |
+| FS-NTKAlign         | exp_fs_01 | — | — | **0.1222** (+0.08) | — | — | ⚠️ **−6.14 pt vs baseline** |
 | FS-SupCon           | exp_fs_02 | — | — | — | — | — | ⏳ per-anchor softmax (Khosla'20) |
-| FS-Frozen           | exp_fs_03 | — | — | — | — | — | ⏳ encoder frozen, head only |
+| FS-Frozen           | exp_fs_03 | — | — | **0.1348** (−0.00) | — | — | ⚠️ frozen ≠ silver bullet at K=32 |
 | FS-NTKAlign+Frozen  | exp_fs_04 | — | — | — | — | — | ⏳ NTK + frozen encoder |
 | FS-SupCon+Frozen    | exp_fs_05 | — | — | — | — | — | ⏳ SupCon + frozen encoder |
 
@@ -168,6 +168,69 @@ of llama3.1 in training, the model never separates it from sibling
 codellama. This is exactly the Qwen↔Nxcode → llama3.1↔codellama family
 confusion we predicted in the paper. NTKAlign should help here — its
 target-kernel pulls same-class projections together explicitly.
+
+### exp_fs_03 — FS-Frozen-LinearProbe (encoder frozen, head only)
+
+#### Run 1 — 2026-05-09 11:52, Kaggle T4 14.6GB, K=32, fs_seed=42, lr_heads=1e-3
+
+```
+BEGIN_FS_TABLE method=FS-Frozen-LinearProbe exp_id=exp_fs_03
+  regime: K=32   k_shot: 32   train_fraction: 0.0000
+  encoder: answerdotai/ModernBERT-base   bs: 16   seq: 384   prec: fp16
+  epochs: 1   fs_seed: 42
+  test_macro_f1     0.1348
+  test_weighted_f1  0.3356
+  test_accuracy     0.3517
+  val_macro_f1      0.1338
+  val_test_gap     -0.0010
+  train_steps       12
+  wall_time_s       510.1
+  frozen_params_M   149.0
+  trainable_params_M 0.12  (head only)
+  per_class_f1   {class_0: 0.6274, class_1: 0.0383, class_2: 0.0962,
+                  class_3: 0.0000, class_4: 0.0050, class_5: 0.0416}
+  per_lang_f1    {cpp: 0.1419, java: 0.1206, python: 0.1389}
+  per_source_f1  {cf: 0.1598, gh: 0.1489, lc: 0.0446}
+END_FS_TABLE
+```
+
+**🔬 Diagnosis — frozen ≠ silver bullet at K=32:**
+
+| Slice | Baseline (free) | NTKAlign (free) | **Frozen (head only)** |
+|:--|:-:|:-:|:-:|
+| Test Macro-F1 | 0.1836 | 0.1222 | **0.1348** |
+| Val Macro-F1 | 0.2253 | 0.2020 | 0.1338 |
+| Val-test gap | +0.04 | +0.08 | **−0.001** ← perfect calibration |
+| Class 0 (human) F1 | 0.503 | 0.214 | **0.627 🥇** |
+| Class 1 (codellama) F1 | 0.246 | 0.222 | 0.038 |
+| Class 3 (llama3.1) F1 | 0.002 | 0.002 | 0.000 |
+| Class 4 (nxcode) F1 | 0.035 | 0.026 | 0.005 |
+| Trainable params | 149M | 149.2M | **0.12M (1280x less)** |
+
+**Reading.** Frozen encoder collapses to a near-binary "human vs AI" detector:
+- Class 0 (human) F1 jumps **+0.124 over baseline** (0.503 → 0.627) — the
+  pretrained ModernBERT features clearly distinguish human-written code.
+- All 5 AI classes collapse: codellama 0.04, gpt 0.10, llama3.1 0.00,
+  nxcode 0.005, qwen 0.04. The frozen features carry NO generator-specific
+  signal; with only 32 labeled examples per AI class the head cannot
+  learn to discriminate among siblings.
+- Val-test gap is **−0.001** (test ≥ val) — model is perfectly calibrated;
+  it is not overfitting, it is fundamentally limited by the frozen features.
+- Weighted-F1 0.336 + accuracy 0.352 confirm: model effectively predicts
+  "human" most of the time and gets the binary axis right.
+
+**Implication.** The K=32 failure is NOT primarily catastrophic forgetting
+of the encoder — it is **data scarcity for 5-way generator discrimination**.
+ModernBERT pretrain has plenty of human code but no signal that separates
+codellama from qwen, so 32 labeled examples per class is below the
+information floor. Frozen and free fine-tune both lose. The choice now:
+
+1. K=128 → maybe enough for AI-class discrimination (4× more data per class).
+2. fraction-mode runs (1% ≈ 5K, 5% ≈ 25K) → test where the phase transition is.
+3. Accept K=32 < random for 6-class and pivot the paper to a 1%/5% data
+   efficiency curve (still way below the existing 20% Exp_13 71.03 result).
+
+---
 
 ### exp_fs_01 — FS-NTKAlign (CE + NTK target-kernel alignment)
 
