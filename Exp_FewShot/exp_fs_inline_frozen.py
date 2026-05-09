@@ -1,37 +1,24 @@
 """
-exp_fs_inline.py -- ONE-FILE self-contained few-shot suite for Kaggle T4.
+exp_fs_inline_frozen.py -- ONE-FILE self-contained few-shot suite for Kaggle T4.
 
-Paste this entire file into a Kaggle notebook cell, run. No `git clone` needed,
+Method: FS-Frozen-LinearProbe (encoder frozen, CE only (linear probe))
+
+Paste this entire file into a Kaggle notebook cell, run. No `git clone`,
 no other files needed -- bootstraps pip-installs only.
 
-Method picker via env var FS_METHOD:
-    baseline       -- ModernBERT + linear head + cross-entropy (floor)
-    ntkalign       -- + NTK target-kernel alignment loss
-    supcon         -- + supervised contrastive loss
-    frozen         -- encoder frozen, head only (linear probe)
-    ntk_frozen     -- frozen encoder + NTK loss
-    supcon_frozen  -- frozen encoder + SupCon loss
-Default: ntkalign.
-
-Default sweep: K in {32, 128} + fraction in {0.01, 0.05} = 4 configs.
+Default sweep: K=128 + fraction in {0.01, 0.05} = 3 configs (~50 min on T4).
+The K=32 cell is intentionally skipped (we already have those numbers).
 Override via env vars:
-    FS_METHOD       -- one of {baseline, ntkalign, supcon, frozen, ntk_frozen, supcon_frozen}
     FS_SWEEP_KS     -- "8,16,32,64,128"   (empty -> skip K-shot regime)
     FS_SWEEP_FRACS  -- "0.01,0.05,0.1"    (empty -> skip fraction regime)
     FS_SEED         -- 42
-    FS_LAMBDA_NTK   -- 0.4
-    FS_LAMBDA_SUPCON -- 0.4
-    FS_TEMP         -- 0.07
-    FS_LR_HEADS     -- 1e-3 (only relevant for frozen variants)
+    FS_LAMBDA_NTK   -- 0.4 (NTK variants)
+    FS_LAMBDA_SUPCON -- 0.4 (SupCon variants)
+    FS_TEMP         -- 0.07 (SupCon variants)
+    FS_LR_HEADS     -- 1e-3 (frozen variants)
 
-Output: /kaggle/working/results/exp_fs_inline_<method>_<label>_seed<S>.json
+Output: /kaggle/working/results/exp_fs_inline_frozen_<label>_seed<S>.json
         (or ./results/... locally)
-
-Usage on Kaggle:
-    # Cell 1
-    import os
-    os.environ["FS_METHOD"] = "frozen"     # try this one first
-    # PASTE the rest of this file here, run.
 """
 from __future__ import annotations
 
@@ -90,7 +77,7 @@ except ImportError:
 
 warnings.filterwarnings("ignore")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
-logger = logging.getLogger("exp_fs_inline")
+logger = logging.getLogger('exp_fs_inline_frozen')
 
 
 def autocast(device_type="cuda", enabled=True, dtype=None):
@@ -755,7 +742,7 @@ def run_one(method_key, kind, value, base_seed, hparams):
 
 
 def main():
-    method_key = os.environ.get("FS_METHOD", "ntkalign").strip().lower()
+    method_key = 'frozen'
     if method_key not in METHODS:
         raise SystemExit(f"FS_METHOD must be one of {list(METHODS)}; got {method_key!r}")
     method_name, exp_id, loss_kind, freeze = METHODS[method_key]

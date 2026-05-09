@@ -46,22 +46,45 @@
 | Method | Exp | K=8 | K=16 | K=32 | K=64 | K=128 | Notes |
 |:--|:--|:-:|:-:|:-:|:-:|:-:|:--|
 | FS-Baseline-CE      | exp_fs_00 | — | — | **0.1836** (+0.04) | — | — | floor; CE only |
-| FS-NTKAlign         | exp_fs_01 | — | — | **0.1222** (+0.08) | — | — | ⚠️ **−6.14 pt vs baseline** |
-| FS-SupCon           | exp_fs_02 | — | — | — | — | — | ⏳ per-anchor softmax (Khosla'20) |
-| FS-Frozen           | exp_fs_03 | — | — | **0.1348** (−0.00) | — | — | ⚠️ frozen ≠ silver bullet at K=32 |
-| FS-NTKAlign+Frozen  | exp_fs_04 | — | — | — | — | — | ⏳ NTK + frozen encoder |
-| FS-SupCon+Frozen    | exp_fs_05 | — | — | — | — | — | ⏳ SupCon + frozen encoder |
+| FS-NTKAlign         | exp_fs_01 | — | — | **0.1831** (+0.04) | — | **0.2929** (+0.04) | inline rerun |
+| FS-SupCon           | exp_fs_02 | — | — | — | — | — | ⏳ |
+| FS-Frozen           | exp_fs_03 | — | — | **0.1348** (−0.00) | — | — | head only |
+| FS-NTKAlign+Frozen  | exp_fs_04 | — | — | **0.1348** (−0.00) | — | **0.1479** (+0.10) | head + NTK |
+| FS-SupCon+Frozen    | exp_fs_05 | — | — | **0.1347** (−0.00) | — | **0.1493** (+0.10) | head + SupCon |
 
 ### %-fraction regime (phase-transition curve)
 
 | Method | Exp | 1% (~5K) | 5% (~25K) | 10% (~50K) | 20% (~100K) | 50% (~250K) |
 |:--|:--|:-:|:-:|:-:|:-:|:-:|
 | FS-Baseline-CE     | exp_fs_00 | — | — | — | — | — |
-| FS-NTKAlign        | exp_fs_01 | — | — | — | (Exp_13 lean: **0.71**) | — |
+| **FS-NTKAlign**    | exp_fs_01 | **0.5697** (−0.01) | **🏆 0.6652** (+0.04) | — | (Exp_13 lean: **0.71**) | — |
 | FS-SupCon          | exp_fs_02 | — | — | — | — | — |
 | FS-Frozen          | exp_fs_03 | — | — | — | — | — |
-| FS-NTKAlign+Frozen | exp_fs_04 | — | — | — | — | — |
-| FS-SupCon+Frozen   | exp_fs_05 | — | — | — | — | — |
+| FS-NTKAlign+Frozen | exp_fs_04 | **0.4037** (+0.02) | **0.4608** (+0.03) | — | — | — |
+| FS-SupCon+Frozen   | exp_fs_05 | **0.4038** (+0.02) | **0.4607** (+0.03) | — | — | — |
+
+### 🎉 BREAKTHROUGH 2026-05-09 — NTKAlign + 5% data ≈ paper UniXcoder full data
+
+> **FS-NTKAlign at fraction=0.05 (~25K samples) reaches 0.6652 test Macro-F1**
+> — within **0.0019** of UniXcoder's full-data **0.6633** baseline. Phase
+> transition is at ~5K samples (1% data); above that, the lean recipe
+> recovers paper-level Author IID performance.
+
+**Headline data-efficiency curve (Free encoder + NTKAlign):**
+- K=32 (~192 samples) → 0.1831  (≈ random)
+- K=128 (~768 samples) → 0.2929
+- 1% (~5K samples) → **0.5697**  ← phase transition
+- 5% (~25K samples) → **0.6652** ← matches paper UniXcoder
+- 20% (~100K, Exp_Climb backbone) → **0.7103** (Exp_13)
+
+**Frozen encoder caps out around 0.46:** SupCon+Frozen and NTK+Frozen at
+fraction=0.05 only reach 0.4608 / 0.4607 — confirming the diagnosis that
+frozen ModernBERT features lack generator-specific signal. Free encoder +
+NTKAlign is the winner.
+
+**Implication for EMNLP paper:** The phase-transition story is now
+quantitative. Section 4 can claim "with 5% of training data and a single
+NTK alignment loss, our method matches the full-data UniXcoder baseline".
 
 ---
 
