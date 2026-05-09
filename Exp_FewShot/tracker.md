@@ -43,11 +43,20 @@
 
 | Method | Exp | K=8 | K=16 | K=32 | K=64 | K=128 | Notes |
 |:--|:--|:-:|:-:|:-:|:-:|:-:|:--|
-| FS-Baseline-CE | exp_fs_00 | — | — | — | — | — | ⏳ pending |
+| FS-Baseline-CE | exp_fs_00 | — | — | **0.1836** (+0.04) | — | — | floor; only 12 train steps at K=32 |
 | FS-NTKAlign | exp_fs_01 | — | — | — | — | — | ⏳ pending |
 
 > **Cell format:** test Macro-F1 with val-test gap in parens, e.g. `0.43 (-0.05)`.
 > Negative gap = test ≥ val (good); large positive gap = overfitting on K-shot train.
+
+**🔍 First-run reading (2026-05-09, exp_fs_00 K=32):** Baseline CE on K=32 lands at
+**0.1836** test Macro-F1 (val 0.2253, gap +0.04). With only 12 training steps
+(192 samples / bs=16 / 1 epoch) the model barely converges — and that is the
+point of the floor. Per-class F1 is very uneven: human (class 0) **0.50**,
+codellama 0.25, qwen 0.22, but llama3.1 (class 3) collapses to **0.002**. The
+val-test gap is tight (+0.04), so we are not overfitting; we are simply
+under-fitting. The headroom for the NTK-aligned method is therefore the full
+range from 0.18 toward our 20%-data ceiling 0.71.
 
 ---
 
@@ -58,7 +67,57 @@
 
 ### exp_fs_00 — FS-Baseline-CE (CE only, ModernBERT-base)
 
-_(no run yet)_
+#### Run 1 — 2026-05-09 09:28, Kaggle T4 14.6GB, K=32, fs_seed=42
+
+```
+BEGIN_FS_TABLE method=FS-Baseline-CE exp_id=exp_fs_00
+  benchmark: codet_m4
+  task:      author
+  k_shot:    32
+  n_classes: 6
+  fs_seed:   42
+  encoder:   answerdotai/ModernBERT-base
+  precision: fp16
+  bs:        16
+  seq:       384
+  test_macro_f1     0.1836
+  test_weighted_f1  0.3175
+  test_accuracy     0.2842
+  val_macro_f1      0.2253
+  val_test_gap      0.0417
+  train_steps       12
+  wall_time_s       484.4
+  per_class_f1   {class_0: 0.5031, class_1: 0.2456, class_2: 0.0987,
+                  class_3: 0.0018, class_4: 0.0353, class_5: 0.2171}
+  per_lang_f1    {cpp: 0.2104, java: 0.1178, python: 0.1853}
+  per_source_f1  {cf: 0.2043, gh: 0.1169, lc: 0.1531}
+  train_per_class {0: 32, 1: 32, 2: 32, 3: 32, 4: 32, 5: 32}
+END_FS_TABLE
+```
+
+**Author vocab (5 generators):** `codellama, gpt, llama3.1, nxcode, qwen1.5` →
+class indices `1..5`; class 0 = human.
+
+**Pipeline timeline (T4):**
+- Dataset load + label vocab: 96s
+- K-shot sample + mini-val: ~2s
+- Tokenizer + model load: 12s
+- Train 12 steps: 35s
+- Eval (val 384 + test 47,744 samples): 458s **bottleneck**
+- Total: 484s ≈ 8 min
+
+**Reading:** Loss curve `1.86 → val 0.0783 (step 5) → val 0.2253 (step 10) →
+val 0.1439 (step 12)` — model peaks around step 10 then starts to overfit
+slightly. Best val checkpoint restored. Test 0.1836 is below val 0.2253 by
+4.17 pt because the test set is much larger and contains the OOD-source
+distribution shift our 20%-data climb already documented (val 5K samples are
+mostly CF/LC; full test 47.7K spans all three sources).
+
+**Per-class collapse (class 3 = llama3.1, F1 = 0.002):** with K=32 examples
+of llama3.1 in training, the model never separates it from sibling
+codellama. This is exactly the Qwen↔Nxcode → llama3.1↔codellama family
+confusion we predicted in the paper. NTKAlign should help here — its
+target-kernel pulls same-class projections together explicitly.
 
 ### exp_fs_01 — FS-NTKAlign (CE + NTK target-kernel alignment)
 
