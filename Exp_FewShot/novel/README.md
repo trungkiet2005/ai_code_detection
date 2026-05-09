@@ -103,4 +103,21 @@ A novel idea answers ONE of these with one new mathematical object.
 
 ## Existing entries
 
-_(none yet — first entry will be `exp_n01_*.py`)_
+| File | Name | Targets open problem | New mathematical object | Theory hook |
+|:--|:--|:-:|:--|:--|
+| `exp_n01_sibling_residual.py` | SRD (Sibling-Residual Discriminant) | 1 | Fisher ratio in residual subspace orthogonal to family centroid | Galanti-Poggio Hierarchical Neural Collapse, arXiv:2501.09211 |
+| `exp_n02_frontdoor_style.py` | FSM (Front-Door Style Mediator) | 2 | HSIC(z_style, S) on the source variable | Veitch-Wang front-door criterion, NeurIPS 2025 |
+| `exp_n04_etf_simplex.py` | EFS (ETF Frozen Simplex) | 4 | Frozen K×D ETF classifier with ⟨W_i, W_j⟩ = -1/(K-1) | Galanti-Poggio 2025; Papyan-Han-Donoho neural collapse |
+| `exp_n05_mi_floor.py` | MIF (Mutual-Info Floor) | 5 | MINE Donsker-Varadhan lower bound on I(Y; φ(X)) | Belghazi MINE ICML 2018; Fano's inequality |
+| `exp_n06_proximal_sibling.py` | PCS (Proximal Causal Sibling) | 1 | 2-stage kernel-ridge proxy estimator using sibling as negative control | Mastouri-Gretton JMLR 2025 proximal causal inference |
+| `exp_n07_conformal_mondrian.py` | CMP (Conformal Mondrian Prediction) | — | Per-class threshold τ_c calibrated on val s.t. FNR_c ≤ α | Vovk 2005; Romano-Patterson-Candès JASA 2020 |
+| `exp_n08_spectral_eigengap.py` | SEA (Spectral Eigengap Authorship) | 3 | k-th eigengap of normalised label-similarity Laplacian | Cheeger inequality 1970; Lee-Oveis-Trevisan 2014 |
+| `exp_n10_vib.py` | VIB (Variational Information Bottleneck) | 5 | Gaussian variational posterior + KL(q || N(0,I)) constraint | Tishby IB 2000; Alemi VIB ICLR 2017 |
+
+> "Open problem" column indexes the 5 problems in the section above.
+> n03, n09 reserved for future ideas (sample-complexity bound theorem;
+> score-matching density estimator).
+>
+> Generator: `_generate_novel_batch.py` — reads `exp_n01_sibling_residual.py`
+> as the template, substitutes per-method blocks. To add a new entry, append
+> to the SPECS list in that file.
