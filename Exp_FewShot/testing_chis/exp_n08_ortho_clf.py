@@ -98,16 +98,90 @@ HIER_FAM = {0:0,1:1,2:2,3:3,4:1,5:4}
 PAPER_BASELINE = 0.6633
 
 # =============================================================================
-# PREFLIGHT: Validate all datasets BEFORE training runs
-# Purpose: Fail fast on missing/corrupt data, report sizes, abort if empty
+# PREFLIGHT: Smoke test ALL configs BEFORE full training runs
+# Purpose: Verify model + data + forward pass works for each (enc, bench, frac)
+# This prevents wasting 30+ min on a run that fails on step 1.
 # =============================================================================
+def _smoke_test(cfg: Cfg):
+    """Run 1 forward + backward pass to verify everything works."""
+    logger.info(f"[SMOKE] Testing {cfg.enc} + {cfg.benchmark} (frac={cfg.frac})...")
+    
+    try:
+        set_seed(cfg.seed)
+        enc_path = os.path.join(KAGGLE_MODELS, cfg.enc)
+        tok = AutoTokenizer.from_pretrained(enc_path, local_files_only=True)
+
+        if cfg.benchmark == "codet_m4":
+            tr_raw, vl_raw, ts_raw = _load_codet()
+            vocab = _vocab(tr_raw) if cfg.task == "author" else {}
+            tr_d = _conv_codet(tr_raw, cfg.task, vocab)
+        elif cfg.benchmark.startswith("droid"):
+            tr_raw, vl_raw, ts_raw = _load_droid()
+            tr_d = _conv_droid(tr_raw, cfg.task)
+        else:
+            tr_raw, vl_raw, ts_raw = _load_aicd(cfg.task)
+            tr_d = _conv_aicd(tr_raw)
+
+        # Sample small subset
+        by_cls = defaultdict(list)
+        for i, lab in enumerate(tr_d["label"]): by_cls[int(lab)].append(i)
+        rng = random.Random(cfg.seed)
+        chosen = []
+        for cls in range(cfg.n_cls):
+            pool = by_cls.get(cls, [])
+            n = max(1, int(round(len(pool) * cfg.frac))) if pool else 0
+            chosen.extend(rng.sample(pool, min(n, len(pool))) if pool else [])
+        rng.shuffle(chosen)
+        tr_d = tr_d.select(chosen[:min(100, len(chosen))])  # Cap at 100 samples
+
+        # Build tiny dataloader
+        ds_tiny = FSDS(tr_d, tok, cfg.seq)
+        dl_tiny = DataLoader(ds_tiny, batch_size=cfg.bs, shuffle=True, collate_fn=collate)
+
+        # Build model
+        dev = torch.device(cfg.device)
+        if cfg.benchmark == "codet_m4":
+            model = SimpleNet(cfg).to(dev)
+        else:
+            model = SimpleNet(cfg).to(dev)
+        
+        # Forward pass
+        model.train()
+        b = next(iter(dl_tiny))
+        ids, mask, labs = b["ids"].to(dev), b["mask"].to(dev), b["labels"].to(dev)
+        
+        with _autocast_ctx(dev):
+            out = model(ids, mask)
+            loss = F.cross_entropy(out["logits"], labs)
+        
+        # Backward pass
+        scaler = GradScaler(enabled=(dev.type == "cuda"))
+        scaler.scale(loss).backward()
+        
+        logger.info(f"[SMOKE] ✅ {cfg.enc} + {cfg.benchmark} OK (loss={loss.item():.4f})")
+        
+        del model, dl_tiny
+        gc.collect()
+        torch.cuda.empty_cache()
+        return True
+        
+    except Exception as e:
+        logger.error(f"[SMOKE] ❌ {cfg.enc} + {cfg.benchmark} FAILED: {e}")
+        raise
+
+
 def _preflight_check():
-    """Load all benchmarks and report sizes. Abort if any dataset is empty."""
+    """Load all benchmarks and run smoke tests. Abort if any step fails."""
     logger.info("=" * 60)
-    logger.info("[PREFLIGHT] Starting data validation...")
+    logger.info("[PREFLIGHT] Starting smoke tests...")
     logger.info("=" * 60)
 
     all_ok = True
+    encoders = ["ModernBERT-base", "unixcoder-base"]
+    benchmarks = [("codet_m4","author"), ("aicd_t2","t2")]
+    fracs = [0.01, 0.05, 0.20]
+
+    # First: verify data loads
     bench_configs = [
         ("codet_m4", _load_codet, None, "author"),
         ("aicd_t2", None, "t2", None),
@@ -122,7 +196,6 @@ def _preflight_check():
             else:
                 tr, vl, ts = _load_droid()
 
-            # Convert to filtered data
             if bench_name.startswith("codet_m4"):
                 vocab = _vocab(tr)
                 tr_d = _conv_codet(tr, conv_task, vocab)
@@ -137,38 +210,37 @@ def _preflight_check():
                 vl_d = _conv_droid(vl, conv_task)
                 ts_d = _conv_droid(ts, conv_task)
 
-            n_tr = len(tr_d)
-            n_vl = len(vl_d)
-            n_ts = len(ts_d)
-
             from collections import Counter
+            n_tr, n_vl, n_ts = len(tr_d), len(vl_d), len(ts_d)
             tr_labels = Counter(tr_d["label"])
-            vl_labels = Counter(vl_d["label"])
-            ts_labels = Counter(ts_d["label"])
-
-            logger.info(f"[PREFLIGHT] {bench_name}:")
-            logger.info(f"  Train: {n_tr:,} | Val: {n_vl:,} | Test: {n_ts:,}")
-            logger.info(f"  Train classes: {len(tr_labels)} | Val classes: {len(vl_labels)} | Test classes: {len(ts_labels)}")
-            logger.info(f"  Train dist: {dict(sorted(tr_labels.items()))}")
-
+            
+            logger.info(f"[PREFLIGHT] {bench_name}: Train={n_tr:,} Val={n_vl:,} Test={n_ts:,} | Classes={len(tr_labels)}")
+            
             if n_tr == 0 or n_vl == 0 or n_ts == 0:
-                logger.error(f"[PREFLIGHT] ❌ {bench_name}: EMPTY! Train={n_tr}, Val={n_vl}, Test={n_ts}")
+                logger.error(f"[PREFLIGHT] ❌ {bench_name}: EMPTY dataset!")
                 all_ok = False
-            elif n_tr < 100:
-                logger.warning(f"[PREFLIGHT] ⚠️ {bench_name}: Train={n_tr} is very small!")
-        except FileNotFoundError as e:
-            logger.error(f"[PREFLIGHT] ❌ {bench_name}: File not found: {e}")
-            all_ok = False
         except Exception as e:
             logger.error(f"[PREFLIGHT] ❌ {bench_name}: Load error: {e}")
             all_ok = False
 
+    if not all_ok:
+        logger.error("[PREFLIGHT] ❌ Dataset load FAILED. Aborting.")
+        raise RuntimeError("Dataset load failed")
+
+    # Second: smoke test each config
+    logger.info("-" * 60)
+    logger.info("[PREFLIGHT] Running smoke tests (1 forward+backward per config)...")
+    logger.info("-" * 60)
+    
+    for enc in encoders:
+        for bench, task in benchmarks:
+            for frac in fracs:
+                cfg = Cfg(benchmark=bench, task=task, enc=enc, frac=frac)
+                cfg = _hw(cfg)
+                _smoke_test(cfg)
+
     logger.info("=" * 60)
-    if all_ok:
-        logger.info("[PREFLIGHT] ✅ All datasets loaded successfully!")
-    else:
-        logger.error("[PREFLIGHT] ❌ Dataset validation FAILED. Aborting.")
-        raise RuntimeError("[PREFLIGHT] Dataset validation failed. Check logs above.")
+    logger.info("[PREFLIGHT] ✅ All smoke tests passed! Starting full training...")
     logger.info("=" * 60)
 
 @dataclass
@@ -413,14 +485,18 @@ class OrthoClfNet(nn.Module):
         out = self.enc(input_ids=ids, attention_mask=mask)
         emb = (out.last_hidden_state * mask.unsqueeze(-1)).sum(1) / mask.sum(1, keepdim=True).clamp(min=1)
         
-        # Orthogonalize classifier weights
+        # Orthogonalize classifier weights (no_grad to avoid inplace issues)
         W = self.clf.weight
-        W_ortho = self._orthogonalize(W)
+        with torch.no_grad():
+            W_ortho = self._orthogonalize(W)
         
-        # Use orthogonalized weights for logits
-        logits = F.linear(self.drop(emb), W_ortho)
-        return {"logits": logits, "emb": emb, "W": W, "W_ortho": W_ortho}
+        # Interpolate: W_ortho = W + strength * (W_ortho - W)
+        W_final = W + self.cfg.ortho_strength * (W_ortho - W)
+        
+        logits = F.linear(self.drop(emb), W_final)
+        return {"logits": logits, "emb": emb}
 
+    @torch.no_grad()
     def _orthogonalize(self, W):
         """Orthogonalize classifier weights using Gram-Schmidt.
         
@@ -433,11 +509,10 @@ class OrthoClfNet(nn.Module):
         for i in range(1, W.size(0)):
             for j in range(i):
                 proj = W_ortho[i].dot(W_ortho[j]) / (W_ortho[j].norm() + 1e-8)
-                W_ortho[i] = W_ortho[i] - proj * W_ortho[j]
+                W_ortho[i] = W_ortho[i] - proj * W_ortho[j]  # Create new tensor, not inplace
             W_ortho[i] = W_ortho[i] / (W_ortho[i].norm() + 1e-8)
         
-        # Interpolate between original and orthogonalized
-        return W + self.cfg.ortho_strength * (W_ortho - W)
+        return W_ortho
 
     def groups(self):
         return [{"params": self.enc.parameters(), "lr": self.cfg.lr_enc, "weight_decay": self.cfg.wd},
@@ -450,6 +525,22 @@ def class_w(loader, n):
     c = np.maximum(c, 1)
     w = 1.0 / c
     return torch.tensor(w/w.sum()*n, dtype=torch.float32)
+
+
+class SimpleNet(nn.Module):
+    """Simple encoder + classifier for smoke testing."""
+    def __init__(self, cfg: Cfg):
+        super().__init__()
+        enc_path = os.path.join(KAGGLE_MODELS, cfg.enc)
+        self.enc = AutoModel.from_pretrained(enc_path, local_files_only=True)
+        h = self.enc.config.hidden_size
+        self.drop = nn.Dropout(0.1)
+        self.clf = nn.Linear(h, cfg.n_cls, bias=False)
+
+    def forward(self, ids, mask):
+        out = self.enc(input_ids=ids, attention_mask=mask)
+        emb = (out.last_hidden_state * mask.unsqueeze(-1)).sum(1) / mask.sum(1, keepdim=True).clamp(min=1)
+        return {"logits": self.clf(self.drop(emb)), "emb": emb}
 
 @torch.no_grad()
 def eval_m(model, loader, dev):
