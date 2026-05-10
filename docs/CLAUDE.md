@@ -44,6 +44,15 @@
 
 **Hardware switch:** Kaggle **T4 16GB** is now first-class (Exp_FewShot is T4-native bs=16 fp16 seq=384). H100 still preferred for `Exp_Climb/` runs but no longer required.
 
+**⚡ RTX6000 Ada Lovelace (48GB) speedup:** Detected automatically → bs=64, bf16, seq=512. **~3-4× faster** than T4.
+**⚡ RTX 96GB speedup:** Detected automatically → bs=128, bf16, seq=512. **~6-8× faster** than T4.
+
+**📦 Offline loading (no-internet):** All models and datasets loaded from Kaggle input paths:
+- Encoders: `/kaggle/input/datasets/chiboiz/ai-detection-encoders/models/`
+- CoDET-M4: `/kaggle/input/datasets/chiboiz/codetm4/dataset_without_comments.parquet`
+- DroidCollection: `/kaggle/input/datasets/chiboiz/droid-collection/DroidCollection/`
+No HuggingFace download → eliminates conflict/bias from model caching on shared Kaggle instances.
+
 **Out-of-scope for this paper (do NOT add to headline):**
 - Zero-shot detection (Exp_ZeroShot, **moved to legacy/** — reproduction gap −32 pt vs paper Fast-DetectGPT).
 - AICD-Bench (universal val→test collapse, **discussion-only mention** in §6 Limitations).
@@ -235,6 +244,11 @@ Regime split:
 - 4 ours methods exceed paper UniXcoder full-data 0.6633 at 5% data.
 - 8 novel methods (n01-n10) active; 0 currently failed Novelty Filter.
 - Both benches dispatched via FS_BENCHMARK env var; cross-bench Droid runs queued.
+
+**⚡ Operational improvements (2026-05-10):**
+1. **Merge code for speed** — `run_hier_ntk_portfolio.py` chains multiple configs sequentially in one cell (3 encoders × 3 fractions = 9 runs).
+2. **RTX6000 Ada (48GB) auto-detection** — bs=64, bf16, seq=512 → ~3-4× faster than T4. Detection: `mem_gb >= 40`.
+3. **Offline loading (no-internet)** — All models/datasets from Kaggle input paths. No HuggingFace download → eliminates conflict + bias from shared cache.
 
 ## 9. EMNLP rubric self-check
 
