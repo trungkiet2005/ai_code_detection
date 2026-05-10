@@ -204,7 +204,10 @@ def _hw(cfg: Cfg) -> Cfg:
         torch.backends.cuda.matmul.allow_tf32 = True
         torch.backends.cudnn.allow_tf32 = True
         torch.backends.cudnn.benchmark = True
-        cfg.bs, cfg.seq = 256, 512
+        mem = torch.cuda.get_device_properties(0).total_memory / 1e9
+        if mem >= 40: cfg.bs, cfg.seq = 256, 512
+        elif mem >= 10: cfg.bs, cfg.seq = 128, 384
+        else: cfg.bs, cfg.seq = 64, 256
     return cfg
 
 def set_seed(s):
