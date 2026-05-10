@@ -174,15 +174,21 @@ def _load_droid():
     
     HuggingFace fallback: project-droid/DroidCollection (train/dev/test splits).
     """
-    train_files = sorted(glob.glob(os.path.join(KAGGLE_DROID, "data", "train-*.parquet")))
-    test_files = sorted(glob.glob(os.path.join(KAGGLE_DROID, "data", "test-*.parquet")))
+    train_files = sorted(glob.glob(os.path.join(KAGGLE_DROID, "train-*.parquet")))
+    test_files = sorted(glob.glob(os.path.join(KAGGLE_DROID, "test-*.parquet")))
+    dev_files = sorted(glob.glob(os.path.join(KAGGLE_DROID, "dev-*.parquet")))
     
     if train_files and test_files:
-        logger.info(f"[droid] Loading from local: {len(train_files)} train shards, {len(test_files)} test shards")
+        logger.info(f"[droid] Loading from local: {len(train_files)} train shards, {len(test_files)} test shards, {len(dev_files)} dev shards")
         ds_train = load_dataset("parquet", data_files=train_files, split="train")
         ds_test = load_dataset("parquet", data_files=test_files, split="test")
-        s = ds_train.train_test_split(test_size=0.1, seed=42)
-        return s["train"], s["test"], ds_test
+        
+        if dev_files:
+            ds_dev = load_dataset("parquet", data_files=dev_files, split="train")
+            return ds_train, ds_dev, ds_test
+        else:
+            s = ds_train.train_test_split(test_size=0.1, seed=42)
+            return s["train"], s["test"], ds_test
     else:
         logger.warning("[droid] Kaggle path not found, falling back to HuggingFace...")
         tr = load_dataset("project-droid/DroidCollection", split="train")

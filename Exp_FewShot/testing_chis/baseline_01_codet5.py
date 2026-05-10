@@ -161,20 +161,29 @@ def _load_droid():
     
     Kaggle path structure:
       /kaggle/input/datasets/chiboiz/droid-collection/DroidCollection/data/
-        ├── train-00001-of-00004.parquet ... train-00004-of-00004.parquet
-        └── test-00001-of-00002.parquet ... test-00002-of-00002.parquet
+        ├── train-00000-of-00003.parquet ... train-00002-of-00003.parquet
+        ├── test-00000-of-00001.parquet
+        └── dev-00000-of-00001.parquet
     
     HuggingFace fallback: project-droid/DroidCollection (train/dev/test splits).
     """
-    train_files = sorted(glob.glob(os.path.join(KAGGLE_DROID, "data", "train-*.parquet")))
-    test_files = sorted(glob.glob(os.path.join(KAGGLE_DROID, "data", "test-*.parquet")))
+    train_files = sorted(glob.glob(os.path.join(KAGGLE_DROID, "train-*.parquet")))
+    test_files = sorted(glob.glob(os.path.join(KAGGLE_DROID, "test-*.parquet")))
+    dev_files = sorted(glob.glob(os.path.join(KAGGLE_DROID, "dev-*.parquet")))
     
     if train_files and test_files:
-        logger.info(f"[droid] Loading from local: {len(train_files)} train shards, {len(test_files)} test shards")
+        logger.info(f"[droid] Loading from local: {len(train_files)} train shards, {len(test_files)} test shards, {len(dev_files)} dev shards")
         ds_train = load_dataset("parquet", data_files=train_files, split="train")
         ds_test = load_dataset("parquet", data_files=test_files, split="test")
-        s = ds_train.train_test_split(test_size=0.1, seed=42)
-        return s["train"], s["test"], ds_test
+        
+        if dev_files:
+            # Use provided dev split
+            ds_dev = load_dataset("parquet", data_files=dev_files, split="train")
+            return ds_train, ds_dev, ds_test
+        else:
+            # Split train: 90% train, 10% val
+            s = ds_train.train_test_split(test_size=0.1, seed=42)
+            return s["train"], s["test"], ds_test
     else:
         logger.warning("[droid] Kaggle path not found, falling back to HuggingFace...")
         tr = load_dataset("project-droid/DroidCollection", split="train")
