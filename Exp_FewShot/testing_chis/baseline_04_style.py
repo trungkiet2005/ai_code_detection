@@ -16,7 +16,7 @@ Usage:
 
 # === KAGGLE PATHS ===
 KAGGLE_CODET = "/kaggle/input/datasets/chiboiz/codetm4/dataset_without_comments.parquet"
-KAGGLE_DROID = "/kaggle/input/datasets/chiboiz/droid-collection/DroidCollection"
+KAGGLE_DROID = "/kaggle/input/datasets/chiboiz/droid-collection/DroidCollection/data"
 KAGGLE_AICD = "/kaggle/input/datasets/chiboiz/ai-code-detection/AICD-Bench"
 
 from __future__ import annotations
@@ -122,11 +122,37 @@ def _load_codet():
     return tr, vl, ts
 
 def _load_droid():
-    files = sorted(glob.glob(os.path.join(KAGGLE_DROID, "**","*.parquet"), recursive=True))
-    ds = load_dataset("parquet", data_files=files, split="train") if files else load_dataset(KAGGLE_DROID, split="train")
-    s = ds.train_test_split(test_size=0.1, seed=42)
-    s2 = s["train"].train_test_split(test_size=1/9, seed=42)
-    return s2["train"], s2["test"], s["test"]
+    """Load DroidCollection. Auto-detect: Kaggle version (train shards) vs local version (test/dev/train)."""
+    all_files = sorted(glob.glob(os.path.join(KAGGLE_DROID, "**","*.parquet"), recursive=True))
+    
+    # Categorize by filename pattern
+    test_files = [f for f in all_files if "-test-" in os.path.basename(f)]
+    dev_files = [f for f in all_files if "-dev-" in os.path.basename(f)]
+    train_files = [f for f in all_files if "-train-" in os.path.basename(f)]
+    
+    if test_files and dev_files:
+        # Local version: has explicit test/dev splits
+        test_ds = load_dataset("parquet", data_files=test_files, split="train")
+        dev_ds = load_dataset("parquet", data_files=dev_files, split="train")
+        train_ds = load_dataset("parquet", data_files=train_files, split="train") if train_files else None
+        
+        if train_ds is None:
+            merged = load_dataset("parquet", data_files=test_files + dev_files, split="train")
+            s = merged.train_test_split(test_size=0.1, seed=42)
+            s2 = s["train"].train_test_split(test_size=1/9, seed=42)
+            return s2["train"], s2["test"], s["test"]
+        else:
+            s = train_ds.train_test_split(test_size=1/9, seed=42)
+            return s["train"], s["test"], test_ds
+    else:
+        # Kaggle version: only train shards
+        if all_files:
+            ds = load_dataset("parquet", data_files=all_files, split="train")
+        else:
+            ds = load_dataset(KAGGLE_DROID, split="train")
+        s = ds.train_test_split(test_size=0.1, seed=42)
+        s2 = s["train"].train_test_split(test_size=1/9, seed=42)
+        return s2["train"], s2["test"], s["test"]
 
 def _load_aicd(task):
     cfg_map = {"t2":"T2","t3":"T3","t1":"T1"}

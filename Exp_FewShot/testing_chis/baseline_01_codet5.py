@@ -19,7 +19,7 @@ Usage:
 # === KAGGLE PATHS ===
 KAGGLE_MODELS = "/kaggle/input/datasets/chiboiz/ai-detection-encoders/models"
 KAGGLE_CODET = "/kaggle/input/datasets/chiboiz/codetm4/dataset_without_comments.parquet"
-KAGGLE_DROID = "/kaggle/input/datasets/chiboiz/droid-collection/DroidCollection"
+KAGGLE_DROID = "/kaggle/input/datasets/chiboiz/droid-collection/DroidCollection/data"
 KAGGLE_AICD = "/kaggle/input/datasets/chiboiz/ai-code-detection/AICD-Bench"
 
 from __future__ import annotations
@@ -34,7 +34,7 @@ def _ensure(pkg):
         subprocess.check_call([sys.executable, "-m", "pip", "install", "-q", pkg])
 
 _ensure("numpy"); _ensure("torch"); _ensure("datasets")
-_ensure("transformers"); _ensure("scikit-learn")
+_ensure("transformers"); _ensure("scikit-learn"); _ensure("tqdm")
 
 import numpy as np
 import torch, torch.nn as nn, torch.nn.functional as F
@@ -42,6 +42,7 @@ from datasets import load_dataset
 from sklearn.metrics import accuracy_score, f1_score
 from torch.utils.data import Dataset as TD, DataLoader
 from transformers import AutoModel, AutoTokenizer
+from tqdm import tqdm
 
 try:
     from torch.amp import autocast as _ac, GradScaler
@@ -149,11 +150,37 @@ def _load_codet():
     return tr, vl, ts
 
 def _load_droid():
-    files = sorted(glob.glob(os.path.join(KAGGLE_DROID, "**","*.parquet"), recursive=True))
-    ds = load_dataset("parquet", data_files=files, split="train") if files else load_dataset(KAGGLE_DROID, split="train")
-    s = ds.train_test_split(test_size=0.1, seed=42)
-    s2 = s["train"].train_test_split(test_size=1/9, seed=42)
-    return s2["train"], s2["test"], s["test"]
+    """Load DroidCollection. Auto-detect: Kaggle version (train shards) vs local version (test/dev/train)."""
+    all_files = sorted(glob.glob(os.path.join(KAGGLE_DROID, "**","*.parquet"), recursive=True))
+    
+    # Categorize by filename pattern
+    test_files = [f for f in all_files if "-test-" in os.path.basename(f)]
+    dev_files = [f for f in all_files if "-dev-" in os.path.basename(f)]
+    train_files = [f for f in all_files if "-train-" in os.path.basename(f)]
+    
+    if test_files and dev_files:
+        # Local version: has explicit test/dev splits
+        test_ds = load_dataset("parquet", data_files=test_files, split="train")
+        dev_ds = load_dataset("parquet", data_files=dev_files, split="train")
+        train_ds = load_dataset("parquet", data_files=train_files, split="train") if train_files else None
+        
+        if train_ds is None:
+            merged = load_dataset("parquet", data_files=test_files + dev_files, split="train")
+            s = merged.train_test_split(test_size=0.1, seed=42)
+            s2 = s["train"].train_test_split(test_size=1/9, seed=42)
+            return s2["train"], s2["test"], s["test"]
+        else:
+            s = train_ds.train_test_split(test_size=1/9, seed=42)
+            return s["train"], s["test"], test_ds
+    else:
+        # Kaggle version: only train shards
+        if all_files:
+            ds = load_dataset("parquet", data_files=all_files, split="train")
+        else:
+            ds = load_dataset(KAGGLE_DROID, split="train")
+        s = ds.train_test_split(test_size=0.1, seed=42)
+        s2 = s["train"].train_test_split(test_size=1/9, seed=42)
+        return s2["train"], s2["test"], s["test"]
 
 def _load_aicd(task):
     cfg_map = {"t2":"T2","t3":"T3","t1":"T1"}
@@ -266,7 +293,8 @@ def train(cfg: Cfg, tr_dl, vl_dl, ts_dl):
 
     for ep in range(cfg.epochs):
         model.train()
-        for b in tr_dl:
+        pbar = tqdm(tr_dl, desc=f"Epoch {ep+1}/{cfg.epochs}", leave=False)
+        for b in pbar:
             ids, mask, labs = b["ids"].to(dev), b["mask"].to(dev), b["labels"].to(dev)
             with _ac(dev): logits = model(ids, mask)["logits"]
             loss = F.cross_entropy(logits, labs, weight=w)
@@ -275,6 +303,7 @@ def train(cfg: Cfg, tr_dl, vl_dl, ts_dl):
             torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
             scaler.step(opt); scaler.update(); opt.zero_grad()
             sched.step()
+            pbar.set_postfix({"loss": f"{loss.item():.4f}"})
         vr = eval_m(model, vl_dl, dev)
         if vr["macro"] > best_val:
             best_val = vr["macro"]

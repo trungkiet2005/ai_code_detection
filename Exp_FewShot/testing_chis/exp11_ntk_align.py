@@ -1,5 +1,5 @@
 """
-exp10_hier_tree.py — HierTree prior ONLY (no NTK)
+exp11_ntk_align.py — NTK alignment ONLY (no HierTree)
 
 Self-contained. Runs: 2 encoders × 4 benchmarks × 3 fractions = 24 experiments.
 
@@ -10,38 +10,37 @@ Config:
   - Batch: 256, seq=512
 
 Usage:
-  python exp10_hier_tree.py
+  python exp11_ntk_align.py
 """
 
 # === KAGGLE PATHS ===
 KAGGLE_MODELS = "/kaggle/input/datasets/chiboiz/ai-detection-encoders/models"
 KAGGLE_CODET = "/kaggle/input/datasets/chiboiz/codetm4/dataset_without_comments.parquet"
-KAGGLE_DROID = "/kaggle/input/datasets/chiboiz/droid-collection/DroidCollection"
+KAGGLE_DROID = "/kaggle/input/datasets/chiboiz/droid-collection/DroidCollection/data"
 KAGGLE_AICD = "/kaggle/input/datasets/chiboiz/ai-code-detection/AICD-Bench"
 
 from __future__ import annotations
 import os, sys, time, json, random, subprocess, importlib.util, warnings, glob
 from collections import defaultdict
-from dataclasses import dataclass, field
-from datetime import datetime
-from typing import Dict, List
+from dataclasses import dataclass
+from typing import Dict
 
 os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
 
-# Bootstrap deps
 def _ensure(pkg):
     if importlib.util.find_spec(pkg.split(".")[0]) is None:
         subprocess.check_call([sys.executable, "-m", "pip", "install", "-q", pkg])
 
 _ensure("numpy"); _ensure("torch"); _ensure("datasets")
-_ensure("transformers"); _ensure("scikit-learn")
+_ensure("transformers"); _ensure("scikit-learn"); _ensure("tqdm")
 
 import numpy as np
 import torch, torch.nn as nn, torch.nn.functional as F
 from datasets import load_dataset
-from sklearn.metrics import accuracy_score, f1_score, classification_report
+from sklearn.metrics import accuracy_score, f1_score
 from torch.utils.data import Dataset as TD, DataLoader
 from transformers import AutoModel, AutoTokenizer
+from tqdm import tqdm
 
 try:
     from torch.amp import autocast as _ac, GradScaler
@@ -51,13 +50,11 @@ except ImportError:
 warnings.filterwarnings("ignore")
 import logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s", stream=sys.stdout)
-logger = logging.getLogger("exp10")
+logger = logging.getLogger("exp11")
 
-# === CONSTANTS ===
 HIER_FAM = {0:0,1:1,2:2,3:3,4:1,5:4}
 PAPER_BASELINE = 0.6633
 
-# === CONFIG ===
 @dataclass
 class Cfg:
     benchmark: str = "codet_m4"
@@ -72,7 +69,7 @@ class Cfg:
     lr_enc: float = 2e-5
     lr_head: float = 1e-4
     wd: float = 0.01
-    lambda_hier: float = 0.4
+    lambda_ntk: float = 0.4
     ntk_proj: int = 128
     warmup: float = 0.1
     device: str = "cuda"
@@ -87,21 +84,18 @@ class Cfg:
         elif self.benchmark == "droid_t4":
             self.n_cls = 2; self.task = "t4"
 
-# === HARDWARE ===
 def _hw(cfg: Cfg) -> Cfg:
     if torch.cuda.is_available():
         torch.backends.cuda.matmul.allow_tf32 = True
         torch.backends.cudnn.allow_tf32 = True
         torch.backends.cudnn.benchmark = True
         cfg.bs, cfg.seq = 256, 512  # Force 256 batch size
-        logger.info(f"[hw] bs={cfg.bs} seq={cfg.seq}")
     return cfg
 
 def set_seed(s):
     random.seed(s); np.random.seed(s); torch.manual_seed(s)
     if torch.cuda.is_available(): torch.cuda.manual_seed_all(s)
 
-# === DATA ===
 def _is_human(t):
     return str(t or "").strip().lower() in {"human","human_written","human-generated"}
 
@@ -154,11 +148,37 @@ def _load_codet():
     return tr, vl, ts
 
 def _load_droid():
-    files = sorted(glob.glob(os.path.join(KAGGLE_DROID, "**","*.parquet"), recursive=True))
-    ds = load_dataset("parquet", data_files=files, split="train") if files else load_dataset(KAGGLE_DROID, split="train")
-    s = ds.train_test_split(test_size=0.1, seed=42)
-    s2 = s["train"].train_test_split(test_size=1/9, seed=42)
-    return s2["train"], s2["test"], s["test"]
+    """Load DroidCollection. Auto-detect: Kaggle version (train shards) vs local version (test/dev/train)."""
+    all_files = sorted(glob.glob(os.path.join(KAGGLE_DROID, "**","*.parquet"), recursive=True))
+    
+    # Categorize by filename pattern
+    test_files = [f for f in all_files if "-test-" in os.path.basename(f)]
+    dev_files = [f for f in all_files if "-dev-" in os.path.basename(f)]
+    train_files = [f for f in all_files if "-train-" in os.path.basename(f)]
+    
+    if test_files and dev_files:
+        # Local version: has explicit test/dev splits
+        test_ds = load_dataset("parquet", data_files=test_files, split="train")
+        dev_ds = load_dataset("parquet", data_files=dev_files, split="train")
+        train_ds = load_dataset("parquet", data_files=train_files, split="train") if train_files else None
+        
+        if train_ds is None:
+            merged = load_dataset("parquet", data_files=test_files + dev_files, split="train")
+            s = merged.train_test_split(test_size=0.1, seed=42)
+            s2 = s["train"].train_test_split(test_size=1/9, seed=42)
+            return s2["train"], s2["test"], s["test"]
+        else:
+            s = train_ds.train_test_split(test_size=1/9, seed=42)
+            return s["train"], s["test"], test_ds
+    else:
+        # Kaggle version: only train shards
+        if all_files:
+            ds = load_dataset("parquet", data_files=all_files, split="train")
+        else:
+            ds = load_dataset(KAGGLE_DROID, split="train")
+        s = ds.train_test_split(test_size=0.1, seed=42)
+        s2 = s["train"].train_test_split(test_size=1/9, seed=42)
+        return s2["train"], s2["test"], s["test"]
 
 def _load_aicd(task):
     cfg_map = {"t2":"T2","t3":"T3","t1":"T1"}
@@ -195,11 +215,10 @@ def build_dls(cfg: Cfg):
         tr_d = _conv_droid(tr_raw, cfg.task)
         vl_d = _conv_droid(vl_raw, cfg.task)
         ts_d = _conv_droid(ts_raw, cfg.task)
-    else:  # aicd_t2
+    else:
         tr_raw, vl_raw, ts_raw = _load_aicd(cfg.task)
         tr_d = _conv_aicd(tr_raw); vl_d = _conv_aicd(vl_raw); ts_d = _conv_aicd(ts_raw)
 
-    # Few-shot sampling
     by_cls = defaultdict(list)
     for i, lab in enumerate(tr_d["label"]): by_cls[int(lab)].append(i)
     rng = random.Random(cfg.seed)
@@ -212,12 +231,14 @@ def build_dls(cfg: Cfg):
     tr_d = tr_d.select(chosen)
     logger.info(f"[data] {cfg.enc} | {cfg.benchmark} | frac={cfg.frac} | n_train={len(tr_d)}")
 
+    if len(tr_d) == 0:
+        return None, None, None
+
     def ld(ds, shuf):
         return DataLoader(FSDS(ds, tok, cfg.seq), batch_size=cfg.bs, shuffle=shuf, num_workers=4, collate_fn=collate, pin_memory=True)
     return ld(tr_d, True), ld(vl_d, False), ld(ts_d, False)
 
-# === MODEL ===
-class HierNet(nn.Module):
+class NTKNet(nn.Module):
     def __init__(self, cfg: Cfg):
         super().__init__()
         self.cfg = cfg
@@ -237,22 +258,18 @@ class HierNet(nn.Module):
         return [{"params": self.enc.parameters(), "lr": self.cfg.lr_enc, "weight_decay": self.cfg.wd},
                 {"params": list(self.clf.parameters())+list(self.ntk_proj.parameters()), "lr": self.cfg.lr_head, "weight_decay": self.cfg.wd}]
 
-# === LOSS: HierTree ONLY ===
-def hier_loss(logits, labels, z, w):
-    ce = F.cross_entropy(logits, labels, weight=w)
+# === LOSS: NTK ONLY ===
+def ntk_loss(logits, labels, z, w):
+    ce = F.cross_entropy(logits, labels, weight=w.to(logits))
     B = z.size(0)
-    fam = torch.tensor([HIER_FAM.get(int(y), int(y)) for y in labels.cpu()], device=z.device)
-    same = (fam.unsqueeze(0)==fam.unsqueeze(1)).float()
-    same.fill_diagonal_(0)
-    diff = 1.0 - same
-    dist = torch.cdist(z, z, p=2)
-    pull = (same * dist.pow(2)).sum() / same.sum().clamp(min=1)
-    push = (diff * F.relu(0.3 - dist).pow(2)).sum() / diff.sum().clamp(min=1)
-    return ce + hier_loss.lh * (pull + push)
+    K = z @ z.t()
+    Y = (labels.unsqueeze(0) == labels.unsqueeze(1)).float()
+    H = torch.eye(B, device=z.device) - torch.full((B, B), 1.0/B, device=z.device)
+    align = ((H @ K @ H - H @ Y @ H) ** 2).mean()
+    return ce + ntk_loss.ln * align
 
-hier_loss.lh = 0.4
+ntk_loss.ln = 0.4
 
-# === TRAIN ===
 def class_w(loader, n):
     c = np.zeros(n)
     for b in loader:
@@ -266,7 +283,7 @@ def eval_m(model, loader, dev):
     model.eval()
     ps, ls = [], []
     for b in loader:
-        with _ac(dev): logits = model(b["ids"].to(dev), b["mask"].to(dev))["logits"]
+        with _ac("cuda"): logits = model(b["ids"].to(dev), b["mask"].to(dev))["logits"]
         ps.extend(logits.argmax(1).cpu().tolist())
         ls.extend(b["labels"].tolist())
     return {"macro": f1_score(ls, ps, average="macro", zero_division=0),
@@ -275,7 +292,7 @@ def eval_m(model, loader, dev):
 
 def train(cfg: Cfg, tr_dl, vl_dl, ts_dl):
     dev = torch.device(cfg.device)
-    model = HierNet(cfg).to(dev)
+    model = NTKNet(cfg).to(dev)
     w = class_w(tr_dl, cfg.n_cls).to(dev)
     opt = torch.optim.AdamW(model.groups())
     sched = torch.optim.lr_scheduler.OneCycleLR(opt, max_lr=[cfg.lr_enc, cfg.lr_head],
@@ -285,15 +302,17 @@ def train(cfg: Cfg, tr_dl, vl_dl, ts_dl):
 
     for ep in range(cfg.epochs):
         model.train()
-        for b in tr_dl:
+        pbar = tqdm(tr_dl, desc=f"Epoch {ep+1}/{cfg.epochs}", leave=False)
+        for b in pbar:
             ids, mask, labs = b["ids"].to(dev), b["mask"].to(dev), b["labels"].to(dev)
-            with _ac(dev): out = model(ids, mask)
-            loss = hier_loss(out["logits"], labs, out["z"], w)
+            with _ac("cuda"): out = model(ids, mask)
+            loss = ntk_loss(out["logits"], labs, out["z"], w)
             scaler.scale(loss).backward()
             scaler.unscale_(opt)
             torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
             scaler.step(opt); scaler.update(); opt.zero_grad()
             sched.step()
+            pbar.set_postfix({"loss": f"{loss.item():.4f}"})
         vr = eval_m(model, vl_dl, dev)
         if vr["macro"] > best_val:
             best_val = vr["macro"]
@@ -301,7 +320,6 @@ def train(cfg: Cfg, tr_dl, vl_dl, ts_dl):
     model.load_state_dict(best_state)
     return eval_m(model, ts_dl, dev)
 
-# === MAIN ===
 def main():
     encoders = ["ModernBERT-base", "unixcoder-base"]
     benchmarks = [("codet_m4","author"), ("aicd_t2","t2"), ("droid_t3","t3"), ("droid_t4","t4")]
@@ -313,10 +331,13 @@ def main():
             for frac in fracs:
                 cfg = Cfg(benchmark=bench, task=task, enc=enc, frac=frac)
                 cfg = _hw(cfg)
-                tag = f"exp10_hier_{enc}_{bench}_f{frac}"
+                tag = f"exp11_ntk_{enc}_{bench}_f{frac}"
                 logger.info(f"=== {tag} ===")
                 t0 = time.time()
                 tr_dl, vl_dl, ts_dl = build_dls(cfg)
+                if tr_dl is None:
+                    logger.info(f"[{tag}] SKIPPED (n_train=0 for {bench} at frac={frac})")
+                    continue
                 res = train(cfg, tr_dl, vl_dl, ts_dl)
                 elapsed = time.time() - t0
                 row = {"tag": tag, "enc": enc, "bench": bench, "frac": frac,
@@ -329,7 +350,7 @@ def main():
                 if torch.cuda.is_available(): torch.cuda.empty_cache()
 
     os.makedirs("results", exist_ok=True)
-    with open("results/exp10_results.json", "w") as f:
+    with open("results/exp11_results.json", "w") as f:
         json.dump(results, f, indent=2)
 
     print("\n" + "="*100)
