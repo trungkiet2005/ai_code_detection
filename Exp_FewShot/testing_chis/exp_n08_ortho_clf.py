@@ -1,8 +1,20 @@
 """
-exp02_faid.py — FAID-style multitask (class CE + family CE + multi-level SupCon)
+exp_n08_ortho_clf.py — Orthogonal Classifier for Neural Collapse Prevention
 
-Published method: FAID (EACL 2026)
-Style: class CE + family auxiliary CE + class/family supervised contrastive
+NAME : Orthogonal Classifier (Ortho-CLF)
+ONE-LINE CLAIM : In few-shot settings, classifiers collapse to the NTK
+limit, preventing discovery of novel decision boundaries. An orthogonal
+classifier encourages diverse feature directions.
+EQUATION : W_ortho = W - W(W^T W)^(-1) W^T W (Gram-Schmidt orthogonalized)
+THEORY HOOK : Papyan et al. 2020 Neural Collapse; when training is
+prolonged, class means collapse to an ETF simplex. Ortho-CLF prevents
+this by maintaining diverse classifier directions.
+WHY NOT BEFORE : Standard linear classifiers can co-adapt with encoder
+features, leading to premature neural collapse in few-shot regimes.
+FALSIFIER : If orthogonalization does not improve over standard CE at
+frac=0.05, then neural collapse is not the bottleneck.
+
+Target: EMNLP Oral — Theory contribution (novel classifier object).
 
 Self-contained. Runs: 2 encoders × 4 benchmarks × 3 fractions = 24 experiments.
 
@@ -13,8 +25,29 @@ Config:
   - Batch: 256, seq=512
 
 Usage:
-  python exp02_faid.py
+  python exp_n08_ortho_clf.py
 """
+
+# =============================================================================
+# Theory-Track exp — Orthogonal Classifier (Ortho-CLF):
+# preventing neural collapse via orthogonal classifier directions.
+#
+# NAME : Orthogonal Classifier (Ortho-CLF).
+# ONE-LINE CLAIM : In few-shot regimes, classifiers collapse to NTK limit.
+# Ortho-CLF maintains diverse feature directions by orthogonalizing
+# the classifier weights during training.
+# EQUATION : W_ortho = orth(W) via Gram-Schmidt on row vectors
+# PROPERTY : When classifier weights are orthogonal, each class learns
+# independent features, preventing co-adaptation and neural collapse.
+# In few-shot attribution, this allows the model to capture diverse
+# generator-specific patterns even with limited samples.
+# WHY NOT BEFORE : Standard linear classifiers can co-adapt, causing
+# neural collapse where class features become identical. Ortho-CLF
+# explicitly enforces diversity.
+# FALSIFIER : Compare embedding diversity (cosine similarity between
+# class means) with vs without orthogonalization. If diversity does
+# not increase, orthogonalization is not preventing collapse.
+# =============================================================================
 
 # === KAGGLE PATHS ===
 KAGGLE_MODELS = "/kaggle/input/datasets/chiboiz/ai-detection-encoders/models"
@@ -58,8 +91,9 @@ def _autocast_ctx(dev: torch.device):
 warnings.filterwarnings("ignore")
 import logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s", stream=sys.stdout)
-logger = logging.getLogger("exp02")
+logger = logging.getLogger("exp_n08")
 
+# === CONSTANTS ===
 HIER_FAM = {0:0,1:1,2:2,3:3,4:1,5:4}
 PAPER_BASELINE = 0.6633
 
@@ -151,9 +185,7 @@ class Cfg:
     lr_enc: float = 2e-5
     lr_head: float = 1e-4
     wd: float = 0.01
-    lambda_supcon: float = 0.4
-    lambda_family: float = 0.5
-    ntk_proj: int = 128
+    ortho_strength: float = 0.1
     warmup: float = 0.1
     device: str = "cuda"
 
@@ -172,10 +204,7 @@ def _hw(cfg: Cfg) -> Cfg:
         torch.backends.cuda.matmul.allow_tf32 = True
         torch.backends.cudnn.allow_tf32 = True
         torch.backends.cudnn.benchmark = True
-        mem = torch.cuda.get_device_properties(0).total_memory / 1e9
-        if mem >= 40: cfg.bs, cfg.seq = 256, 512
-        elif mem >= 10: cfg.bs, cfg.seq = 128, 384
-        else: cfg.bs, cfg.seq = 64, 256
+        cfg.bs, cfg.seq = 256, 512
     return cfg
 
 def set_seed(s):
@@ -354,8 +383,7 @@ def build_dls(cfg: Cfg):
     for cls in range(cfg.n_cls):
         pool = by_cls.get(cls, [])
         n = max(1, int(round(len(pool) * cfg.frac))) if pool else 0
-        if pool:
-            chosen.extend(rng.sample(pool, min(n, len(pool))))
+        chosen.extend(rng.sample(pool, min(n, len(pool))) if pool else [])
     rng.shuffle(chosen)
     tr_d = tr_d.select(chosen)
     logger.info(f"[data] {cfg.enc} | {cfg.benchmark} | frac={cfg.frac} | n_train={len(tr_d)}")
@@ -364,7 +392,11 @@ def build_dls(cfg: Cfg):
         return DataLoader(FSDS(ds, tok, cfg.seq), batch_size=cfg.bs, shuffle=shuf, num_workers=4, collate_fn=collate, pin_memory=True)
     return ld(tr_d, True), ld(vl_d, False), ld(ts_d, False)
 
-class FAIDNet(nn.Module):
+class OrthoClfNet(nn.Module):
+    """Orthogonal Classifier network for preventing neural collapse.
+    
+    Maintains diverse classifier directions via orthogonalization.
+    """
     def __init__(self, cfg: Cfg):
         super().__init__()
         self.cfg = cfg
@@ -372,47 +404,41 @@ class FAIDNet(nn.Module):
         self.enc = AutoModel.from_pretrained(enc_path, local_files_only=True)
         h = self.enc.config.hidden_size
         self.drop = nn.Dropout(0.1)
-        self.clf = nn.Linear(h, cfg.n_cls)
-        n_fam = len(set(HIER_FAM.values()))
-        self.fam_clf = nn.Linear(h, n_fam)
-        self.proj = nn.Sequential(nn.Linear(h, cfg.ntk_proj), nn.GELU(), nn.Linear(cfg.ntk_proj, cfg.ntk_proj))
+        self.clf = nn.Linear(h, cfg.n_cls, bias=False)
 
     def forward(self, ids, mask):
         out = self.enc(input_ids=ids, attention_mask=mask)
         emb = (out.last_hidden_state * mask.unsqueeze(-1)).sum(1) / mask.sum(1, keepdim=True).clamp(min=1)
-        dropped = self.drop(emb)
-        return {"logits": self.clf(dropped), "fam_logits": self.fam_clf(dropped),
-                "z": F.normalize(self.proj(emb), dim=-1)}
+        
+        # Orthogonalize classifier weights
+        W = self.clf.weight
+        W_ortho = self._orthogonalize(W)
+        
+        # Use orthogonalized weights for logits
+        logits = F.linear(self.drop(emb), W_ortho)
+        return {"logits": logits, "emb": emb, "W": W, "W_ortho": W_ortho}
+
+    def _orthogonalize(self, W):
+        """Orthogonalize classifier weights using Gram-Schmidt.
+        
+        Makes each class direction orthogonal to others, preventing
+        co-adaptation and neural collapse.
+        """
+        W_norm = W / (W.norm(dim=1, keepdim=True) + 1e-8)
+        W_ortho = W_norm.clone()
+        
+        for i in range(1, W.size(0)):
+            for j in range(i):
+                proj = W_ortho[i].dot(W_ortho[j]) / (W_ortho[j].norm() + 1e-8)
+                W_ortho[i] = W_ortho[i] - proj * W_ortho[j]
+            W_ortho[i] = W_ortho[i] / (W_ortho[i].norm() + 1e-8)
+        
+        # Interpolate between original and orthogonalized
+        return W + self.cfg.ortho_strength * (W_ortho - W)
 
     def groups(self):
-        heads = list(self.clf.parameters()) + list(self.fam_clf.parameters()) + list(self.proj.parameters())
         return [{"params": self.enc.parameters(), "lr": self.cfg.lr_enc, "weight_decay": self.cfg.wd},
-                {"params": heads, "lr": self.cfg.lr_head, "weight_decay": self.cfg.wd}]
-
-def supcon_loss(z, labels, temp=0.07):
-    if z.size(0) <= 1: return torch.zeros((), device=z.device)
-    z = F.normalize(z, dim=-1)
-    logits = (z @ z.t()) / temp
-    logits = logits - logits.max(dim=1, keepdim=True).values.detach()
-    eye = torch.eye(z.size(0), dtype=torch.bool, device=z.device)
-    logits_mask = (~eye).float()
-    pos = (labels.unsqueeze(0) == labels.unsqueeze(1)) & ~eye
-    pos_f = pos.float()
-    denom = (torch.exp(logits) * logits_mask).sum(dim=1, keepdim=True).clamp(min=1e-12)
-    log_prob = logits - torch.log(denom)
-    pos_count = pos_f.sum(dim=1)
-    valid = pos_count > 0
-    if not valid.any(): return torch.zeros((), device=z.device)
-    mean_log_prob_pos = (pos_f * log_prob).sum(dim=1)[valid] / pos_count[valid].clamp(min=1.0)
-    return -mean_log_prob_pos.mean()
-
-def faid_loss(logits, labels, fam_logits, z, w, cfg: Cfg):
-    ce = F.cross_entropy(logits, labels, weight=w)
-    fam_labels = torch.tensor([HIER_FAM.get(int(y), int(y)) for y in labels.cpu()], device=labels.device)
-    fam_ce = F.cross_entropy(fam_logits, fam_labels)
-    class_sup = supcon_loss(z, labels, temp=0.07)
-    fam_sup = supcon_loss(z, fam_labels, temp=0.07)
-    return ce + cfg.lambda_family * fam_ce + cfg.lambda_supcon * (class_sup + fam_sup)
+                {"params": self.clf.parameters(), "lr": self.cfg.lr_head, "weight_decay": 0.0}]
 
 def class_w(loader, n):
     c = np.zeros(n)
@@ -436,7 +462,7 @@ def eval_m(model, loader, dev):
 
 def train(cfg: Cfg, tr_dl, vl_dl, ts_dl):
     dev = torch.device(cfg.device)
-    model = FAIDNet(cfg).to(dev)
+    model = OrthoClfNet(cfg).to(dev)
     w = class_w(tr_dl, cfg.n_cls).to(dev)
     opt = torch.optim.AdamW(model.groups())
     sched = torch.optim.lr_scheduler.OneCycleLR(opt, max_lr=[cfg.lr_enc, cfg.lr_head],
@@ -449,8 +475,8 @@ def train(cfg: Cfg, tr_dl, vl_dl, ts_dl):
         for b in tr_dl:
             ids, mask, labs = b["ids"].to(dev), b["mask"].to(dev), b["labels"].to(dev)
             with _autocast_ctx(dev):
-                out = model(ids, mask)
-                loss = faid_loss(out["logits"], labs, out["fam_logits"], out["z"], w, cfg)
+                logits = model(ids, mask)["logits"]
+                loss = F.cross_entropy(logits, labs, weight=w)
             scaler.scale(loss).backward()
             scaler.unscale_(opt)
             torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
@@ -479,7 +505,7 @@ def main():
             for frac in fracs:
                 cfg = Cfg(benchmark=bench, task=task, enc=enc, frac=frac)
                 cfg = _hw(cfg)
-                tag = f"exp02_faid_{enc}_{bench}_f{frac}"
+                tag = f"exp_n08_ortho_{enc}_{bench}_f{frac}"
                 logger.info(f"=== {tag} ===")
                 t0 = time.time()
                 tr_dl, vl_dl, ts_dl = build_dls(cfg)
@@ -495,7 +521,7 @@ def main():
                 if torch.cuda.is_available(): torch.cuda.empty_cache()
 
     os.makedirs("results", exist_ok=True)
-    with open("results/exp02_results.json", "w") as f:
+    with open("results/exp_n08_results.json", "w") as f:
         json.dump(results, f, indent=2)
 
     print("\n" + "="*100)

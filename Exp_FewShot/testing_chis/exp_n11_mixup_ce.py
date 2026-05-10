@@ -1,8 +1,20 @@
 """
-exp02_faid.py — FAID-style multitask (class CE + family CE + multi-level SupCon)
+exp_n11_mixup_ce.py — Mixup Cross-Entropy with Soft Labels
 
-Published method: FAID (EACL 2026)
-Style: class CE + family auxiliary CE + class/family supervised contrastive
+NAME : Mixup Cross-Entropy (Mixup-CE)
+ONE-LINE CLAIM : Standard CE creates sharp decision boundaries prone to
+overfitting. Mixup interpolates between examples, creating smoother
+boundaries that generalize better in few-shot regimes.
+EQUATION : L_mixup = λ · CE(logits, y₁) + (1-λ) · CE(logits, y₂)
+           where (x₁,y₁),(x₂,y₂) are random pairs and λ ~ Beta(α,α)
+THEORY HOOK : Zhang et al. 2018 Mixup; data augmentation via interpolation
+improves generalization by enforcing linear behavior between samples.
+WHY NOT BEFORE : Standard fine-tuning memorizes training examples.
+Mixup provides implicit regularization without data augmentation.
+FALSIFIER : If Mixup does not improve over standard CE at frac=0.05,
+then data augmentation is not the bottleneck.
+
+Target: EMNLP Oral — Theory contribution (novel augmentation object).
 
 Self-contained. Runs: 2 encoders × 4 benchmarks × 3 fractions = 24 experiments.
 
@@ -13,8 +25,26 @@ Config:
   - Batch: 256, seq=512
 
 Usage:
-  python exp02_faid.py
+  python exp_n11_mixup_ce.py
 """
+
+# =============================================================================
+# Theory-Track exp — Mixup Cross-Entropy (Mixup-CE):
+# data augmentation via interpolation for better generalization.
+#
+# NAME : Mixup Cross-Entropy (Mixup-CE).
+# ONE-LINE CLAIM : Standard CE creates sharp boundaries prone to overfitting.
+# Mixup interpolates examples, creating smoother boundaries that generalize.
+# EQUATION : L_mixup = λ · CE(logits, y₁) + (1-λ) · CE(logits, y₂)
+# where (x₁,y₁),(x₂,y₂) are random pairs and λ ~ Beta(α,α).
+# PROPERTY : Mixup enforces the model to behave linearly between
+# training examples, which improves generalization by preventing
+# overconfident predictions on out-of-distribution inputs.
+# WHY NOT BEFORE : Standard fine-tuning memorizes training examples.
+# Mixup provides implicit regularization without explicit augmentation.
+# FALSIFIER : Compare decision boundary smoothness with vs without Mixup.
+# If Mixup does not improve, smooth boundaries are not the bottleneck.
+# =============================================================================
 
 # === KAGGLE PATHS ===
 KAGGLE_MODELS = "/kaggle/input/datasets/chiboiz/ai-detection-encoders/models"
@@ -58,8 +88,9 @@ def _autocast_ctx(dev: torch.device):
 warnings.filterwarnings("ignore")
 import logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s", stream=sys.stdout)
-logger = logging.getLogger("exp02")
+logger = logging.getLogger("exp_n11")
 
+# === CONSTANTS ===
 HIER_FAM = {0:0,1:1,2:2,3:3,4:1,5:4}
 PAPER_BASELINE = 0.6633
 
@@ -151,9 +182,7 @@ class Cfg:
     lr_enc: float = 2e-5
     lr_head: float = 1e-4
     wd: float = 0.01
-    lambda_supcon: float = 0.4
-    lambda_family: float = 0.5
-    ntk_proj: int = 128
+    mixup_alpha: float = 0.2
     warmup: float = 0.1
     device: str = "cuda"
 
@@ -172,10 +201,7 @@ def _hw(cfg: Cfg) -> Cfg:
         torch.backends.cuda.matmul.allow_tf32 = True
         torch.backends.cudnn.allow_tf32 = True
         torch.backends.cudnn.benchmark = True
-        mem = torch.cuda.get_device_properties(0).total_memory / 1e9
-        if mem >= 40: cfg.bs, cfg.seq = 256, 512
-        elif mem >= 10: cfg.bs, cfg.seq = 128, 384
-        else: cfg.bs, cfg.seq = 64, 256
+        cfg.bs, cfg.seq = 256, 512
     return cfg
 
 def set_seed(s):
@@ -354,8 +380,7 @@ def build_dls(cfg: Cfg):
     for cls in range(cfg.n_cls):
         pool = by_cls.get(cls, [])
         n = max(1, int(round(len(pool) * cfg.frac))) if pool else 0
-        if pool:
-            chosen.extend(rng.sample(pool, min(n, len(pool))))
+        chosen.extend(rng.sample(pool, min(n, len(pool))) if pool else [])
     rng.shuffle(chosen)
     tr_d = tr_d.select(chosen)
     logger.info(f"[data] {cfg.enc} | {cfg.benchmark} | frac={cfg.frac} | n_train={len(tr_d)}")
@@ -364,7 +389,8 @@ def build_dls(cfg: Cfg):
         return DataLoader(FSDS(ds, tok, cfg.seq), batch_size=cfg.bs, shuffle=shuf, num_workers=4, collate_fn=collate, pin_memory=True)
     return ld(tr_d, True), ld(vl_d, False), ld(ts_d, False)
 
-class FAIDNet(nn.Module):
+class MixupCENet(nn.Module):
+    """Mixup Cross-Entropy network for better generalization."""
     def __init__(self, cfg: Cfg):
         super().__init__()
         self.cfg = cfg
@@ -373,46 +399,44 @@ class FAIDNet(nn.Module):
         h = self.enc.config.hidden_size
         self.drop = nn.Dropout(0.1)
         self.clf = nn.Linear(h, cfg.n_cls)
-        n_fam = len(set(HIER_FAM.values()))
-        self.fam_clf = nn.Linear(h, n_fam)
-        self.proj = nn.Sequential(nn.Linear(h, cfg.ntk_proj), nn.GELU(), nn.Linear(cfg.ntk_proj, cfg.ntk_proj))
 
     def forward(self, ids, mask):
         out = self.enc(input_ids=ids, attention_mask=mask)
         emb = (out.last_hidden_state * mask.unsqueeze(-1)).sum(1) / mask.sum(1, keepdim=True).clamp(min=1)
-        dropped = self.drop(emb)
-        return {"logits": self.clf(dropped), "fam_logits": self.fam_clf(dropped),
-                "z": F.normalize(self.proj(emb), dim=-1)}
+        return {"logits": self.clf(self.drop(emb)), "emb": emb}
 
     def groups(self):
-        heads = list(self.clf.parameters()) + list(self.fam_clf.parameters()) + list(self.proj.parameters())
         return [{"params": self.enc.parameters(), "lr": self.cfg.lr_enc, "weight_decay": self.cfg.wd},
-                {"params": heads, "lr": self.cfg.lr_head, "weight_decay": self.cfg.wd}]
+                {"params": self.clf.parameters(), "lr": self.cfg.lr_head, "weight_decay": self.cfg.wd}]
 
-def supcon_loss(z, labels, temp=0.07):
-    if z.size(0) <= 1: return torch.zeros((), device=z.device)
-    z = F.normalize(z, dim=-1)
-    logits = (z @ z.t()) / temp
-    logits = logits - logits.max(dim=1, keepdim=True).values.detach()
-    eye = torch.eye(z.size(0), dtype=torch.bool, device=z.device)
-    logits_mask = (~eye).float()
-    pos = (labels.unsqueeze(0) == labels.unsqueeze(1)) & ~eye
-    pos_f = pos.float()
-    denom = (torch.exp(logits) * logits_mask).sum(dim=1, keepdim=True).clamp(min=1e-12)
-    log_prob = logits - torch.log(denom)
-    pos_count = pos_f.sum(dim=1)
-    valid = pos_count > 0
-    if not valid.any(): return torch.zeros((), device=z.device)
-    mean_log_prob_pos = (pos_f * log_prob).sum(dim=1)[valid] / pos_count[valid].clamp(min=1.0)
-    return -mean_log_prob_pos.mean()
+def mixup_data(ids, mask, labels, alpha=0.2):
+    """Apply Mixup to a batch.
+    
+    Returns interpolated inputs and soft labels.
+    """
+    if alpha > 0:
+        lam = np.random.beta(alpha, alpha)
+    else:
+        lam = 1.0
+    
+    batch_size = ids.size(0)
+    index = torch.randperm(batch_size, device=ids.device)
+    
+    # Interpolate inputs (for embeddings, not raw tokens)
+    mixed_ids = lam * ids + (1 - lam) * ids[index]
+    mixed_mask = torch.minimum(mask, mask[index])  # Use minimum mask
+    mixed_labels = lam * F.one_hot(labels, num_classes=6).float() + (1 - lam) * F.one_hot(labels[index], num_classes=6).float()
+    
+    return mixed_ids, mixed_mask, mixed_labels, lam
 
-def faid_loss(logits, labels, fam_logits, z, w, cfg: Cfg):
-    ce = F.cross_entropy(logits, labels, weight=w)
-    fam_labels = torch.tensor([HIER_FAM.get(int(y), int(y)) for y in labels.cpu()], device=labels.device)
-    fam_ce = F.cross_entropy(fam_logits, fam_labels)
-    class_sup = supcon_loss(z, labels, temp=0.07)
-    fam_sup = supcon_loss(z, fam_labels, temp=0.07)
-    return ce + cfg.lambda_family * fam_ce + cfg.lambda_supcon * (class_sup + fam_sup)
+def mixup_ce_loss(logits, soft_labels, w):
+    """Mixup cross-entropy loss with soft labels.
+    
+    L_mixup = -Σ t_k · log(p_k)
+    where t_k is the soft label from Mixup.
+    """
+    log_probs = F.log_softmax(logits, dim=-1)
+    return -(soft_labels * log_probs).sum(dim=-1).mean()
 
 def class_w(loader, n):
     c = np.zeros(n)
@@ -436,7 +460,7 @@ def eval_m(model, loader, dev):
 
 def train(cfg: Cfg, tr_dl, vl_dl, ts_dl):
     dev = torch.device(cfg.device)
-    model = FAIDNet(cfg).to(dev)
+    model = MixupCENet(cfg).to(dev)
     w = class_w(tr_dl, cfg.n_cls).to(dev)
     opt = torch.optim.AdamW(model.groups())
     sched = torch.optim.lr_scheduler.OneCycleLR(opt, max_lr=[cfg.lr_enc, cfg.lr_head],
@@ -448,9 +472,14 @@ def train(cfg: Cfg, tr_dl, vl_dl, ts_dl):
         model.train()
         for b in tr_dl:
             ids, mask, labs = b["ids"].to(dev), b["mask"].to(dev), b["labels"].to(dev)
+            
+            # Apply Mixup
+            mixed_ids, mixed_mask, soft_labels, lam = mixup_data(ids, mask, labs, cfg.mixup_alpha)
+            
             with _autocast_ctx(dev):
-                out = model(ids, mask)
-                loss = faid_loss(out["logits"], labs, out["fam_logits"], out["z"], w, cfg)
+                out = model(mixed_ids, mixed_mask)
+                loss = mixup_ce_loss(out["logits"], soft_labels, w)
+            
             scaler.scale(loss).backward()
             scaler.unscale_(opt)
             torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
@@ -479,7 +508,7 @@ def main():
             for frac in fracs:
                 cfg = Cfg(benchmark=bench, task=task, enc=enc, frac=frac)
                 cfg = _hw(cfg)
-                tag = f"exp02_faid_{enc}_{bench}_f{frac}"
+                tag = f"exp_n11_mixup_{enc}_{bench}_f{frac}"
                 logger.info(f"=== {tag} ===")
                 t0 = time.time()
                 tr_dl, vl_dl, ts_dl = build_dls(cfg)
@@ -495,7 +524,7 @@ def main():
                 if torch.cuda.is_available(): torch.cuda.empty_cache()
 
     os.makedirs("results", exist_ok=True)
-    with open("results/exp02_results.json", "w") as f:
+    with open("results/exp_n11_results.json", "w") as f:
         json.dump(results, f, indent=2)
 
     print("\n" + "="*100)

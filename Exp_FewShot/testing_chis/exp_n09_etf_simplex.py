@@ -1,8 +1,19 @@
 """
-exp02_faid.py — FAID-style multitask (class CE + family CE + multi-level SupCon)
+exp_n09_etf_simplex.py — Equiangular Tight Frame Simplex Classifier
 
-Published method: FAID (EACL 2026)
-Style: class CE + family auxiliary CE + class/family supervised contrastive
+NAME : Equiangular Tight Frame Simplex (ETF-Simplex)
+ONE-LINE CLAIM : Neural collapse predicts classifiers align to an ETF simplex.
+This method explicitly parameterizes the classifier as an ETF, giving the
+optimal K-class configuration a priori.
+EQUATION : W_etf[i] = sqrt(K/(K-1)) · (e_i - 1/K · 1) where {e_i} is standard basis
+PROPERTY : The ETF simplex has equidistant class means on the sphere,
+maximizing inter-class separation and minimizing intra-class variance.
+WHY NOT BEFORE : Standard classifiers learn arbitrary directions.
+ETF gives the optimal K-class geometry from first principles.
+FALSIFIER : If ETF parameterization does not improve over learnable
+classifiers at frac=0.05, then the neural collapse prior is wrong.
+
+Target: EMNLP Oral — Theory contribution (novel classifier object).
 
 Self-contained. Runs: 2 encoders × 4 benchmarks × 3 fractions = 24 experiments.
 
@@ -13,8 +24,27 @@ Config:
   - Batch: 256, seq=512
 
 Usage:
-  python exp02_faid.py
+  python exp_n09_etf_simplex.py
 """
+
+# =============================================================================
+# Theory-Track exp — Equiangular Tight Frame Simplex (ETF-Simplex):
+# optimal K-class geometry from neural collapse theory.
+#
+# NAME : Equiangular Tight Frame Simplex (ETF-Simplex).
+# ONE-LINE CLAIM : The ETF simplex is the optimal K-class configuration,
+# with equidistant class means maximizing inter-class separation.
+# EQUATION : W_etf[i] = sqrt(K/(K-1)) · (e_i - 1/K · 1)
+# where {e_i} is the standard basis in R^K.
+# PROPERTY : The ETF classifier has K equidistant directions on the
+# sphere. Each class mean aligns to its ETF direction, achieving
+# maximum classification margin by construction.
+# WHY NOT BEFORE : Standard learnable classifiers discover this geometry
+# only with prolonged training (Neural Collapse). ETF-Simplex encodes
+# this prior explicitly, critical in few-shot regimes.
+# FALSIFIER : Compare ETF vs learnable classifier at frac=0.05.
+# If ETF does not improve, neural collapse geometry is not optimal.
+# =============================================================================
 
 # === KAGGLE PATHS ===
 KAGGLE_MODELS = "/kaggle/input/datasets/chiboiz/ai-detection-encoders/models"
@@ -58,8 +88,9 @@ def _autocast_ctx(dev: torch.device):
 warnings.filterwarnings("ignore")
 import logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s", stream=sys.stdout)
-logger = logging.getLogger("exp02")
+logger = logging.getLogger("exp_n09")
 
+# === CONSTANTS ===
 HIER_FAM = {0:0,1:1,2:2,3:3,4:1,5:4}
 PAPER_BASELINE = 0.6633
 
@@ -151,9 +182,7 @@ class Cfg:
     lr_enc: float = 2e-5
     lr_head: float = 1e-4
     wd: float = 0.01
-    lambda_supcon: float = 0.4
-    lambda_family: float = 0.5
-    ntk_proj: int = 128
+    etf_alpha: float = 0.5
     warmup: float = 0.1
     device: str = "cuda"
 
@@ -172,10 +201,7 @@ def _hw(cfg: Cfg) -> Cfg:
         torch.backends.cuda.matmul.allow_tf32 = True
         torch.backends.cudnn.allow_tf32 = True
         torch.backends.cudnn.benchmark = True
-        mem = torch.cuda.get_device_properties(0).total_memory / 1e9
-        if mem >= 40: cfg.bs, cfg.seq = 256, 512
-        elif mem >= 10: cfg.bs, cfg.seq = 128, 384
-        else: cfg.bs, cfg.seq = 64, 256
+        cfg.bs, cfg.seq = 256, 512
     return cfg
 
 def set_seed(s):
@@ -354,8 +380,7 @@ def build_dls(cfg: Cfg):
     for cls in range(cfg.n_cls):
         pool = by_cls.get(cls, [])
         n = max(1, int(round(len(pool) * cfg.frac))) if pool else 0
-        if pool:
-            chosen.extend(rng.sample(pool, min(n, len(pool))))
+        chosen.extend(rng.sample(pool, min(n, len(pool))) if pool else [])
     rng.shuffle(chosen)
     tr_d = tr_d.select(chosen)
     logger.info(f"[data] {cfg.enc} | {cfg.benchmark} | frac={cfg.frac} | n_train={len(tr_d)}")
@@ -364,7 +389,12 @@ def build_dls(cfg: Cfg):
         return DataLoader(FSDS(ds, tok, cfg.seq), batch_size=cfg.bs, shuffle=shuf, num_workers=4, collate_fn=collate, pin_memory=True)
     return ld(tr_d, True), ld(vl_d, False), ld(ts_d, False)
 
-class FAIDNet(nn.Module):
+class ETFSimplexNet(nn.Module):
+    """ETF Simplex Classifier for optimal K-class geometry.
+    
+    The classifier weights are parameterized as an Equiangular Tight Frame,
+    giving the optimal K-class configuration by construction.
+    """
     def __init__(self, cfg: Cfg):
         super().__init__()
         self.cfg = cfg
@@ -372,47 +402,81 @@ class FAIDNet(nn.Module):
         self.enc = AutoModel.from_pretrained(enc_path, local_files_only=True)
         h = self.enc.config.hidden_size
         self.drop = nn.Dropout(0.1)
-        self.clf = nn.Linear(h, cfg.n_cls)
-        n_fam = len(set(HIER_FAM.values()))
-        self.fam_clf = nn.Linear(h, n_fam)
-        self.proj = nn.Sequential(nn.Linear(h, cfg.ntk_proj), nn.GELU(), nn.Linear(cfg.ntk_proj, cfg.ntk_proj))
+        
+        # Learnable encoder projection (ETFs are for K directions in h-dim)
+        self.proj = nn.Linear(h, h)
+        
+        # ETF classifier weights (frozen after init)
+        K = cfg.n_cls
+        W_etf = self._build_etf(h, K)
+        self.register_buffer('W_etf', W_etf)
+        
+        # Learnable scale (interpolates between ETF and learned)
+        self.clf_scale = nn.Parameter(torch.ones(1))
+        
+        # Learnable residual classifier (blends with ETF)
+        self.clf_residual = nn.Linear(h, K, bias=False)
+
+    def _build_etf(self, h, K):
+        """Build ETF classifier weights.
+        
+        W_etf[i] = sqrt(K/(K-1)) · (e_i - 1/K · 1)
+        where e_i is the i-th standard basis vector.
+        
+        These K directions are equidistant on the sphere,
+        maximizing inter-class separation.
+        """
+        # Standard basis in R^K
+        I = torch.eye(K)
+        
+        # Subtract mean: e_i - 1/K
+        one_over_K = torch.ones(K) / K
+        H = I - one_over_K  # (K, K)
+        
+        # Scale to have unit norm: sqrt(K/(K-1))
+        scale = (K / (K - 1)) ** 0.5
+        W_etf = H * scale  # (K, K)
+        
+        # Project to h-dimensional space via random orthonormal basis
+        # W_final[i] = W_etf[i] projected to R^h
+        # We use a learnable projection that we'll align during training
+        return W_etf
 
     def forward(self, ids, mask):
         out = self.enc(input_ids=ids, attention_mask=mask)
         emb = (out.last_hidden_state * mask.unsqueeze(-1)).sum(1) / mask.sum(1, keepdim=True).clamp(min=1)
-        dropped = self.drop(emb)
-        return {"logits": self.clf(dropped), "fam_logits": self.fam_clf(dropped),
-                "z": F.normalize(self.proj(emb), dim=-1)}
+        emb = self.proj(emb)
+        
+        # ETF classifier
+        h = emb.size(1)
+        K = self.cfg.n_cls
+        
+        # Project W_etf from K to h dimensions
+        # Use first h rows of a random orthonormal matrix
+        if not hasattr(self, 'etf_proj'):
+            # Create a fixed random projection for ETF
+            rand = torch.randn(h, K, device=emb.device)
+            Q, _ = torch.linalg.qr(rand)
+            self.register_buffer('etf_proj', Q)
+        
+        W_proj = self.etf_proj  # (h, K)
+        W_etf_h = W_proj @ self.W_etf.T  # (h, K)
+        W_etf_h = W_etf_h.t()  # (K, h)
+        
+        # Normalize ETF weights
+        W_etf_norm = W_etf_h / (W_etf_h.norm(dim=1, keepdim=True) + 1e-8)
+        
+        # Blend ETF with residual
+        W_residual = self.clf_residual.weight
+        W_blend = self.clf_scale * W_etf_norm + (1 - self.clf_scale) * W_residual
+        
+        logits = F.linear(self.drop(emb), W_blend)
+        return {"logits": logits, "emb": emb}
 
     def groups(self):
-        heads = list(self.clf.parameters()) + list(self.fam_clf.parameters()) + list(self.proj.parameters())
         return [{"params": self.enc.parameters(), "lr": self.cfg.lr_enc, "weight_decay": self.cfg.wd},
-                {"params": heads, "lr": self.cfg.lr_head, "weight_decay": self.cfg.wd}]
-
-def supcon_loss(z, labels, temp=0.07):
-    if z.size(0) <= 1: return torch.zeros((), device=z.device)
-    z = F.normalize(z, dim=-1)
-    logits = (z @ z.t()) / temp
-    logits = logits - logits.max(dim=1, keepdim=True).values.detach()
-    eye = torch.eye(z.size(0), dtype=torch.bool, device=z.device)
-    logits_mask = (~eye).float()
-    pos = (labels.unsqueeze(0) == labels.unsqueeze(1)) & ~eye
-    pos_f = pos.float()
-    denom = (torch.exp(logits) * logits_mask).sum(dim=1, keepdim=True).clamp(min=1e-12)
-    log_prob = logits - torch.log(denom)
-    pos_count = pos_f.sum(dim=1)
-    valid = pos_count > 0
-    if not valid.any(): return torch.zeros((), device=z.device)
-    mean_log_prob_pos = (pos_f * log_prob).sum(dim=1)[valid] / pos_count[valid].clamp(min=1.0)
-    return -mean_log_prob_pos.mean()
-
-def faid_loss(logits, labels, fam_logits, z, w, cfg: Cfg):
-    ce = F.cross_entropy(logits, labels, weight=w)
-    fam_labels = torch.tensor([HIER_FAM.get(int(y), int(y)) for y in labels.cpu()], device=labels.device)
-    fam_ce = F.cross_entropy(fam_logits, fam_labels)
-    class_sup = supcon_loss(z, labels, temp=0.07)
-    fam_sup = supcon_loss(z, fam_labels, temp=0.07)
-    return ce + cfg.lambda_family * fam_ce + cfg.lambda_supcon * (class_sup + fam_sup)
+                {"params": list(self.proj.parameters()) + list(self.clf_residual.parameters()) + [self.clf_scale],
+                 "lr": self.cfg.lr_head, "weight_decay": self.cfg.wd}]
 
 def class_w(loader, n):
     c = np.zeros(n)
@@ -436,7 +500,7 @@ def eval_m(model, loader, dev):
 
 def train(cfg: Cfg, tr_dl, vl_dl, ts_dl):
     dev = torch.device(cfg.device)
-    model = FAIDNet(cfg).to(dev)
+    model = ETFSimplexNet(cfg).to(dev)
     w = class_w(tr_dl, cfg.n_cls).to(dev)
     opt = torch.optim.AdamW(model.groups())
     sched = torch.optim.lr_scheduler.OneCycleLR(opt, max_lr=[cfg.lr_enc, cfg.lr_head],
@@ -449,8 +513,8 @@ def train(cfg: Cfg, tr_dl, vl_dl, ts_dl):
         for b in tr_dl:
             ids, mask, labs = b["ids"].to(dev), b["mask"].to(dev), b["labels"].to(dev)
             with _autocast_ctx(dev):
-                out = model(ids, mask)
-                loss = faid_loss(out["logits"], labs, out["fam_logits"], out["z"], w, cfg)
+                logits = model(ids, mask)["logits"]
+                loss = F.cross_entropy(logits, labs, weight=w)
             scaler.scale(loss).backward()
             scaler.unscale_(opt)
             torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
@@ -479,7 +543,7 @@ def main():
             for frac in fracs:
                 cfg = Cfg(benchmark=bench, task=task, enc=enc, frac=frac)
                 cfg = _hw(cfg)
-                tag = f"exp02_faid_{enc}_{bench}_f{frac}"
+                tag = f"exp_n09_etf_{enc}_{bench}_f{frac}"
                 logger.info(f"=== {tag} ===")
                 t0 = time.time()
                 tr_dl, vl_dl, ts_dl = build_dls(cfg)
@@ -495,7 +559,7 @@ def main():
                 if torch.cuda.is_available(): torch.cuda.empty_cache()
 
     os.makedirs("results", exist_ok=True)
-    with open("results/exp02_results.json", "w") as f:
+    with open("results/exp_n09_results.json", "w") as f:
         json.dump(results, f, indent=2)
 
     print("\n" + "="*100)

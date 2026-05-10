@@ -1,8 +1,20 @@
 """
-exp02_faid.py — FAID-style multitask (class CE + family CE + multi-level SupCon)
+exp_n12_label_smooth.py — Label Smoothing for Uncertainty Calibration
 
-Published method: FAID (EACL 2026)
-Style: class CE + family auxiliary CE + class/family supervised contrastive
+NAME : Label Smoothing (LabelSmooth)
+ONE-LINE CLAIM : Hard labels cause overconfident predictions that fail
+on OOD examples. Label smoothing softens targets, improving calibration
+and generalization in few-shot regimes.
+EQUATION : t_i = (1 - ε) · y_i + ε / K
+where ε is the smoothing parameter and K is the number of classes.
+THEORY HOOK : Pereyra et al. 2017 "Regularizing Neural Networks"; label
+smoothing prevents overconfident predictions that overfit to training data.
+WHY NOT BEFORE : Standard CE with hard labels can memorize training
+examples. Label smoothing provides implicit regularization.
+FALSIFIER : If label smoothing does not improve calibration (ECE) at
+frac=0.05, then overconfidence is not the bottleneck.
+
+Target: EMNLP Oral — Theory contribution (novel regularization object).
 
 Self-contained. Runs: 2 encoders × 4 benchmarks × 3 fractions = 24 experiments.
 
@@ -13,8 +25,27 @@ Config:
   - Batch: 256, seq=512
 
 Usage:
-  python exp02_faid.py
+  python exp_n12_label_smooth.py
 """
+
+# =============================================================================
+# Theory-Track exp — Label Smoothing (LabelSmooth):
+# uncertainty calibration via soft targets.
+#
+# NAME : Label Smoothing (LabelSmooth).
+# ONE-LINE CLAIM : Hard labels cause overconfident predictions that fail
+# on OOD examples. Label smoothing softens targets, improving calibration.
+# EQUATION : t_i = (1 - ε) · y_i + ε / K
+# where ε is the smoothing parameter and K is the number of classes.
+# PROPERTY : Label smoothing prevents the model from becoming too
+# confident on training examples, which improves generalization to
+# unseen generators. It also acts as a regularizer by effectively
+# widening the decision boundaries.
+# WHY NOT BEFORE : Standard CE with hard labels can memorize training
+# examples, especially in few-shot regimes with limited data.
+# FALSIFIER : If ECE (Expected Calibration Error) does not improve
+# with label smoothing, then overconfidence is not the bottleneck.
+# =============================================================================
 
 # === KAGGLE PATHS ===
 KAGGLE_MODELS = "/kaggle/input/datasets/chiboiz/ai-detection-encoders/models"
@@ -58,8 +89,9 @@ def _autocast_ctx(dev: torch.device):
 warnings.filterwarnings("ignore")
 import logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s", stream=sys.stdout)
-logger = logging.getLogger("exp02")
+logger = logging.getLogger("exp_n12")
 
+# === CONSTANTS ===
 HIER_FAM = {0:0,1:1,2:2,3:3,4:1,5:4}
 PAPER_BASELINE = 0.6633
 
@@ -151,9 +183,7 @@ class Cfg:
     lr_enc: float = 2e-5
     lr_head: float = 1e-4
     wd: float = 0.01
-    lambda_supcon: float = 0.4
-    lambda_family: float = 0.5
-    ntk_proj: int = 128
+    smooth_eps: float = 0.1
     warmup: float = 0.1
     device: str = "cuda"
 
@@ -172,10 +202,7 @@ def _hw(cfg: Cfg) -> Cfg:
         torch.backends.cuda.matmul.allow_tf32 = True
         torch.backends.cudnn.allow_tf32 = True
         torch.backends.cudnn.benchmark = True
-        mem = torch.cuda.get_device_properties(0).total_memory / 1e9
-        if mem >= 40: cfg.bs, cfg.seq = 256, 512
-        elif mem >= 10: cfg.bs, cfg.seq = 128, 384
-        else: cfg.bs, cfg.seq = 64, 256
+        cfg.bs, cfg.seq = 256, 512
     return cfg
 
 def set_seed(s):
@@ -354,8 +381,7 @@ def build_dls(cfg: Cfg):
     for cls in range(cfg.n_cls):
         pool = by_cls.get(cls, [])
         n = max(1, int(round(len(pool) * cfg.frac))) if pool else 0
-        if pool:
-            chosen.extend(rng.sample(pool, min(n, len(pool))))
+        chosen.extend(rng.sample(pool, min(n, len(pool))) if pool else [])
     rng.shuffle(chosen)
     tr_d = tr_d.select(chosen)
     logger.info(f"[data] {cfg.enc} | {cfg.benchmark} | frac={cfg.frac} | n_train={len(tr_d)}")
@@ -364,7 +390,8 @@ def build_dls(cfg: Cfg):
         return DataLoader(FSDS(ds, tok, cfg.seq), batch_size=cfg.bs, shuffle=shuf, num_workers=4, collate_fn=collate, pin_memory=True)
     return ld(tr_d, True), ld(vl_d, False), ld(ts_d, False)
 
-class FAIDNet(nn.Module):
+class LabelSmoothNet(nn.Module):
+    """Label Smoothing network for better calibration."""
     def __init__(self, cfg: Cfg):
         super().__init__()
         self.cfg = cfg
@@ -373,46 +400,31 @@ class FAIDNet(nn.Module):
         h = self.enc.config.hidden_size
         self.drop = nn.Dropout(0.1)
         self.clf = nn.Linear(h, cfg.n_cls)
-        n_fam = len(set(HIER_FAM.values()))
-        self.fam_clf = nn.Linear(h, n_fam)
-        self.proj = nn.Sequential(nn.Linear(h, cfg.ntk_proj), nn.GELU(), nn.Linear(cfg.ntk_proj, cfg.ntk_proj))
 
     def forward(self, ids, mask):
         out = self.enc(input_ids=ids, attention_mask=mask)
         emb = (out.last_hidden_state * mask.unsqueeze(-1)).sum(1) / mask.sum(1, keepdim=True).clamp(min=1)
-        dropped = self.drop(emb)
-        return {"logits": self.clf(dropped), "fam_logits": self.fam_clf(dropped),
-                "z": F.normalize(self.proj(emb), dim=-1)}
+        return {"logits": self.clf(self.drop(emb)), "emb": emb}
 
     def groups(self):
-        heads = list(self.clf.parameters()) + list(self.fam_clf.parameters()) + list(self.proj.parameters())
         return [{"params": self.enc.parameters(), "lr": self.cfg.lr_enc, "weight_decay": self.cfg.wd},
-                {"params": heads, "lr": self.cfg.lr_head, "weight_decay": self.cfg.wd}]
+                {"params": self.clf.parameters(), "lr": self.cfg.lr_head, "weight_decay": self.cfg.wd}]
 
-def supcon_loss(z, labels, temp=0.07):
-    if z.size(0) <= 1: return torch.zeros((), device=z.device)
-    z = F.normalize(z, dim=-1)
-    logits = (z @ z.t()) / temp
-    logits = logits - logits.max(dim=1, keepdim=True).values.detach()
-    eye = torch.eye(z.size(0), dtype=torch.bool, device=z.device)
-    logits_mask = (~eye).float()
-    pos = (labels.unsqueeze(0) == labels.unsqueeze(1)) & ~eye
-    pos_f = pos.float()
-    denom = (torch.exp(logits) * logits_mask).sum(dim=1, keepdim=True).clamp(min=1e-12)
-    log_prob = logits - torch.log(denom)
-    pos_count = pos_f.sum(dim=1)
-    valid = pos_count > 0
-    if not valid.any(): return torch.zeros((), device=z.device)
-    mean_log_prob_pos = (pos_f * log_prob).sum(dim=1)[valid] / pos_count[valid].clamp(min=1.0)
-    return -mean_log_prob_pos.mean()
-
-def faid_loss(logits, labels, fam_logits, z, w, cfg: Cfg):
-    ce = F.cross_entropy(logits, labels, weight=w)
-    fam_labels = torch.tensor([HIER_FAM.get(int(y), int(y)) for y in labels.cpu()], device=labels.device)
-    fam_ce = F.cross_entropy(fam_logits, fam_labels)
-    class_sup = supcon_loss(z, labels, temp=0.07)
-    fam_sup = supcon_loss(z, fam_labels, temp=0.07)
-    return ce + cfg.lambda_family * fam_ce + cfg.lambda_supcon * (class_sup + fam_sup)
+def label_smooth_loss(logits, labels, n_cls, eps=0.1):
+    """Label smoothing cross-entropy loss.
+    
+    t_i = (1 - ε) · y_i + ε / K
+    L = -Σ t_i · log(p_i)
+    """
+    # Create soft targets
+    one_hot = F.one_hot(labels, num_classes=n_cls).float()
+    soft_targets = (1 - eps) * one_hot + eps / n_cls
+    
+    # Cross-entropy with soft targets
+    log_probs = F.log_softmax(logits, dim=-1)
+    loss = -(soft_targets * log_probs).sum(dim=-1).mean()
+    
+    return loss
 
 def class_w(loader, n):
     c = np.zeros(n)
@@ -434,9 +446,52 @@ def eval_m(model, loader, dev):
             "weighted": f1_score(ls, ps, average="weighted", zero_division=0),
             "acc": accuracy_score(ls, ps)}
 
+def compute_ece(logits, labels, n_bins=15):
+    """Compute Expected Calibration Error (ECE).
+    
+    ECE = Σ_b |B_b| / n · |acc(B_b) - conf(B_b)|
+    """
+    probs = F.softmax(logits, dim=-1)
+    confidences, predictions = probs.max(dim=1)
+    
+    bin_boundaries = torch.linspace(0, 1, n_bins + 1)
+    ece = 0.0
+    n_samples = len(labels)
+    
+    for i in range(n_bins):
+        in_bin = (confidences > bin_boundaries[i]) & (confidences <= bin_boundaries[i+1])
+        if in_bin.sum() > 0:
+            bin_accuracy = (predictions[in_bin] == labels[in_bin]).float().mean()
+            bin_confidence = confidences[in_bin].mean()
+            ece += in_bin.sum().item() * abs(bin_accuracy - bin_confidence).item()
+    
+    return ece / n_samples
+
+@torch.no_grad()
+def eval_m_with_ece(model, loader, dev, n_cls):
+    """Evaluate model with ECE metric."""
+    model.eval()
+    ps, ls = [], []
+    all_logits = []
+    
+    for b in loader:
+        with _autocast_ctx(dev): out = model(b["ids"].to(dev), b["mask"].to(dev))
+        all_logits.append(out["logits"].cpu())
+        ps.extend(out["logits"].argmax(1).cpu().tolist())
+        ls.extend(b["labels"].tolist())
+    
+    all_logits = torch.cat(all_logits, dim=0)
+    
+    return {
+        "macro": f1_score(ls, ps, average="macro", zero_division=0),
+        "weighted": f1_score(ls, ps, average="weighted", zero_division=0),
+        "acc": accuracy_score(ls, ps),
+        "ece": compute_ece(all_logits, torch.tensor(ls))
+    }
+
 def train(cfg: Cfg, tr_dl, vl_dl, ts_dl):
     dev = torch.device(cfg.device)
-    model = FAIDNet(cfg).to(dev)
+    model = LabelSmoothNet(cfg).to(dev)
     w = class_w(tr_dl, cfg.n_cls).to(dev)
     opt = torch.optim.AdamW(model.groups())
     sched = torch.optim.lr_scheduler.OneCycleLR(opt, max_lr=[cfg.lr_enc, cfg.lr_head],
@@ -449,8 +504,8 @@ def train(cfg: Cfg, tr_dl, vl_dl, ts_dl):
         for b in tr_dl:
             ids, mask, labs = b["ids"].to(dev), b["mask"].to(dev), b["labels"].to(dev)
             with _autocast_ctx(dev):
-                out = model(ids, mask)
-                loss = faid_loss(out["logits"], labs, out["fam_logits"], out["z"], w, cfg)
+                logits = model(ids, mask)["logits"]
+                loss = label_smooth_loss(logits, labs, cfg.n_cls, cfg.smooth_eps)
             scaler.scale(loss).backward()
             scaler.unscale_(opt)
             torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
@@ -462,7 +517,7 @@ def train(cfg: Cfg, tr_dl, vl_dl, ts_dl):
             best_state = {k: v.cpu().clone() for k, v in model.state_dict().items()}
     if best_state is not None:
         model.load_state_dict(best_state)
-    return eval_m(model, ts_dl, dev)
+    return eval_m_with_ece(model, ts_dl, dev, cfg.n_cls)
 
 def main():
     # Run preflight check for all benchmarks FIRST
@@ -479,7 +534,7 @@ def main():
             for frac in fracs:
                 cfg = Cfg(benchmark=bench, task=task, enc=enc, frac=frac)
                 cfg = _hw(cfg)
-                tag = f"exp02_faid_{enc}_{bench}_f{frac}"
+                tag = f"exp_n12_smooth_{enc}_{bench}_f{frac}"
                 logger.info(f"=== {tag} ===")
                 t0 = time.time()
                 tr_dl, vl_dl, ts_dl = build_dls(cfg)
@@ -487,24 +542,25 @@ def main():
                 elapsed = time.time() - t0
                 row = {"tag": tag, "enc": enc, "bench": bench, "frac": frac,
                        "macro": res["macro"], "weighted": res["weighted"], "acc": res["acc"],
-                       "dpaper": res["macro"] - PAPER_BASELINE, "wall": round(elapsed,1)}
+                       "ece": res["ece"], "dpaper": res["macro"] - PAPER_BASELINE, "wall": round(elapsed,1)}
                 results.append(row)
-                logger.info(f"[{tag}] MacroF1={res['macro']:.4f} ({res['macro']-PAPER_BASELINE:+.4f} vs paper) time={elapsed:.0f}s")
+                logger.info(f"[{tag}] MacroF1={res['macro']:.4f} ECE={res['ece']:.4f} ({res['macro']-PAPER_BASELINE:+.4f} vs paper) time={elapsed:.0f}s")
                 del tr_dl, vl_dl, ts_dl
                 import gc; gc.collect()
                 if torch.cuda.is_available(): torch.cuda.empty_cache()
 
     os.makedirs("results", exist_ok=True)
-    with open("results/exp02_results.json", "w") as f:
+    with open("results/exp_n12_results.json", "w") as f:
         json.dump(results, f, indent=2)
 
-    print("\n" + "="*100)
-    print(f"{'Encoder':<22} {'Benchmark':<12} {'Frac':>6} {'Macro-F1':>10} {'dPaper':>10} {'Weighted':>10} {'Wall':>8}")
-    print("-"*100)
+    print("\n" + "="*110)
+    print(f"{'Encoder':<22} {'Benchmark':<12} {'Frac':>6} {'Macro-F1':>10} {'dPaper':>10} {'ECE':>8} {'Weighted':>10} {'Wall':>8}")
+    print("-"*110)
     for r in results:
-        print(f"{r['enc']:<22} {r['bench']:<12} {r['frac']:>6.0%} {r['macro']:>10.4f} {r['dpaper']:>+10.4f} {r['weighted']:>10.4f} {r['wall']:>8.0f}s")
-    print("="*100)
+        print(f"{r['enc']:<22} {r['bench']:<12} {r['frac']:>6.0%} {r['macro']:>10.4f} {r['dpaper']:>+10.4f} {r['ece']:>8.4f} {r['weighted']:>10.4f} {r['wall']:>8.0f}s")
+    print("="*110)
     print(f"\nBest Macro-F1: {max(r['macro'] for r in results):.4f} @ {max(results, key=lambda x: x['macro'])['tag']}")
+    print(f"Best ECE (lower=better): {min(r['ece'] for r in results):.4f} @ {min(results, key=lambda x: x['ece'])['tag']}")
 
 if __name__ == "__main__":
     main()

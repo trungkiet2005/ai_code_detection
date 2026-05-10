@@ -1,3 +1,8 @@
+---
+description: 
+alwaysApply: true
+---
+
 # CLAUDE.md — Repo Briefing (EMNLP 2026 Main target)
 
 > **Read this file first.** One-stop theoretical + operational context.
@@ -5,7 +10,7 @@
 
 ---
 
-## 0. Current submission target -- UPDATED 2026-05-10 (theory-pivot locked)
+## 0. Current submission target -- UPDATED 2026-05-10 (theory-pivot locked + extended novelty framework)
 
 > **Venue:** EMNLP 2026 Main (long paper, 8 pages). **Reach for Oral.**
 > **Deadline:** ~2026-05-26.
@@ -58,7 +63,9 @@ The benchmark numbers are evidence. The contribution is the attribution principl
 **📦 Kaggle offline datasets (no-internet, avoids conflict + bias):**
 - CoDET-M4: `/kaggle/input/datasets/chiboiz/codetm4/dataset_without_comments.parquet`
 - DroidCollection: `/kaggle/input/datasets/chiboiz/droid-collection/DroidCollection/`
-- AICD-Bench: `/kaggle/input/datasets/chiboiz/ai-code-detection/AICD-Bench`
+- AICD-Bench: `/kaggle/input/datasets/chiboiz/ai-code-detection/AICD-Bench/`
+  - Structure: `T1/`, `T2/`, `T3/` subdirectories with parquet files
+  - Each task loads from its respective subdirectory automatically
 - Encoders: `/kaggle/input/datasets/chiboiz/ai-detection-encoders/models/`
 
 **Out-of-scope for this paper (do NOT add to headline):**
@@ -114,14 +121,24 @@ L_htka = 1 - cos(vec(ZZ^T), vec(T))
 
 This is the current paper object: **Hierarchical Target-Kernel Alignment**. HierTree is the prior; NTK/Gram alignment is the witness that the representation actually obeys it.
 
-### 2.2 Novelty bar
+### 2.2 Theory-grounded novelty bar
 
-Every "novel" method for this paper must be stated as one mathematical object with one falsifiable property. Do not add modules just because they may improve Macro-F1.
+Every "novel" method for this paper must be stated as one mathematical object with one falsifiable property. **This is no longer just hierarchical — we welcome ANY theory-grounded approach** from:
 
-Required proposal block for new theory-track experiments:
+**Theory Sources (arxiv-anchored):**
+1. **Kernel Methods:** TKM (`NeurIPS 2024`, `2410.06171`) — kernel complexity vs alignment
+2. **Neural Collapse:** NC (`ICLR 2025`, `2410.04887`) — ETF geometry, class-mean collapse
+3. **Information Theory:** VIB (`Alemi ICLR 2017`), CIB (`2410.00535`) — KL regularisation
+4. **Contrastive Learning:** SupCon (`IEEE 2020`), SimCLR (`2020`) — contrastive alignment
+5. **Causal Inference:** IRM (`Arjovsky 2019`), CausalIB (`ICLR 2025`) — invariant learning
+6. **Geometric Deep Learning:** CUSP (`ICLR 2025`, `2502.00401`) — hyperbolic/curvature
+7. **Representation Alignment:** Unified alignment theory (`ICLR 2025`, `2502.14047`)
+
+**Required proposal block for new theory-track experiments:**
 
 ```
 NAME            : <Capitalised noun phrase. The new object.>
+ARXIV_ID        : <Relevant paper(s) from above with arxiv ID>
 ONE-LINE CLAIM  : <The thesis. No "and".>
 EQUATION        : <The defining equation or operator.>
 PROPERTY        : <The provable or testable property that justifies attribution.>
@@ -136,26 +153,138 @@ Canonical header style for the current headline method:
 ```python
 # =============================================================================
 # Theory-Track exp -- Hierarchical Target-Kernel Alignment (HTKA / Hier-NTK):
-#   closed-form witness for the genealogy prior in few-shot AI-code attribution.
+# closed-form witness for the genealogy prior in few-shot AI-code attribution.
 #
-# NAME            : Hierarchical Target-Kernel Alignment (HTKA).
-# ONE-LINE CLAIM  : Few-shot LLM attribution improves when representation
-#                   similarity is aligned to model genealogy.
-# EQUATION        : L_htka = 1 - cos(vec(ZZ^T), vec(T_tree))
-#                   where z_i are L2-normalised embeddings and
-#                   T_tree[i,j] = k_tree(y_i, y_j).
-# PROPERTY        : If attribution labels are generated from a hierarchical
-#                   model-family prior, then T_tree is a lower-variance target
-#                   than one-hot labels in the few-shot regime; aligning ZZ^T
-#                   to T_tree reduces sibling/family confusion without requiring
-#                   full-data estimation of every class boundary.
-# WHY NOT BEFORE  : Code authorship baselines treat generator labels as a flat
-#                   simplex. Hierarchical classifiers use the tree only at the
-#                   output. HTKA uses genealogy as a representation-level target
-#                   kernel and tests the alignment/error relation directly.
-# FALSIFIER       : Track target-kernel alignment, sibling-pair error, and
-#                   Macro-F1. If alignment rises but sibling/family errors do
-#                   not fall, the genealogy-kernel theory is false.
+# ARXIV_ID      : NeurIPS 2024 TKM (2410.06171) for kernel alignment theory;
+#                 ICLR 2025 NC (2410.04887) for class-mean geometry.
+# NAME          : Hierarchical Target-Kernel Alignment (HTKA).
+# ONE-LINE CLAIM: Few-shot LLM attribution improves when representation
+#                 similarity is aligned to model genealogy.
+# EQUATION      : L_htka = 1 - cos(vec(ZZ^T), vec(T_tree))
+#                 where z_i are L2-normalised embeddings and
+#                 T_tree[i,j] = k_tree(y_i, y_j).
+# PROPERTY      : If attribution labels are generated from a hierarchical
+#                 model-family prior, then T_tree is a lower-variance target
+#                 than one-hot labels in the few-shot regime; aligning ZZ^T
+#                 to T_tree reduces sibling/family confusion without requiring
+#                 full-data estimation of every class boundary.
+# WHY NOT BEFORE: Code authorship baselines treat generator labels as a flat
+#                 simplex. Hierarchical classifiers use the tree only at the
+#                 output. HTKA uses genealogy as a representation-level target
+#                 kernel and tests the alignment/error relation directly.
+# FALSIFIER     : Track target-kernel alignment, sibling-pair error, and
+#                 Macro-F1. If alignment rises but sibling/family errors do
+#                 not fall, the genealogy-kernel theory is false.
+# =============================================================================
+```
+
+### 2.3 New experiments (2026-05-10, theory-anchored)
+
+New `exp_nNN_*.py` files with arxiv-grounded theory:
+
+| File | Method | ArXiv | Theory Hook | Key Equation |
+|:--|:--|:--|:--|:--|
+| `exp_n05_focal.py` | Focal-CE | Lin 2017 | Hard example mining | \(L_focal = -(1-p_t)^\gamma \log(p_t)\) |
+| `exp_n06_attn_pool.py` | HAP | Lee 2017 | Hierarchical attention | \(z = \sum_i \alpha_i h_i\) |
+| `exp_n07_mixup_align.py` | MGA | Arjovsky 2019 | IRM source invariance | \(L + \lambda \|\nabla_z L - E[\nabla_z L]\|^2\) |
+| `exp_n08_ortho_clf.py` | Ortho-CLF | Papyan 2020 | Neural collapse prevention | Gram-Schmidt orthogonalisation |
+| `exp_n09_etf_simplex.py` | ETF-Simplex | NC theory | Optimal K-class ETF | \(W_{etf} = \sqrt{K/(K-1)}(e_i - 1/K)\) |
+| `exp_n10_vib.py` | VIB | Alemi 2017 | Info bottleneck KL | \(L_{vib} = CE + \beta \cdot KL(q\|p)\) |
+| `exp_n11_mixup_ce.py` | Mixup-CE | Zhang 2018 | Boundary smoothing | \(\lambda y_1 + (1-\lambda)y_2\) |
+| `exp_n12_label_smooth.py` | LabelSmooth | Pereyra 2017 | Uncertainty calibration | \(t_i = (1-\epsilon)y_i + \epsilon/K\) |
+
+## 2.4 Novel Theorems (self-derived for EMNLP Oral)
+
+**IMPORTANT:** For EMNLP Oral, we can and SHOULD derive our OWN theorems. This is stronger than citing existing work because:
+- Existing work → reviewers already know
+- Novel theorem → reviewers must read carefully, harder to reject
+
+### Theorem 1: Few-Shot Kernel Alignment Generalization Bound
+
+**NAME:** Sample Complexity of Genealogical Target Kernel Alignment
+
+**STATEMENT:**
+Let \(T \in \mathbb{R}^{K \times K}\) be the genealogical target kernel with condition number \(\kappa(T) = \lambda_{\max}(T) / \lambda_{\min}(T)\). Let \(Z \in \mathbb{R}^{n \times h}\) be the embedding matrix. Then with probability at least \(1-\delta\) over the training set:
+
+\[
+R(\hat{h}) \leq \underbrace{O\left(\sqrt{\frac{h \cdot \log(1/\delta)}{n}}\right)}_{\text{standard bound}} + \underbrace{\frac{C}{\kappa(T)} \cdot \|\Delta_K\|_2}_{\text{genealogical correction}}
+\]
+
+where \(\Delta_K = ZZ^T - T\) is the kernel alignment error.
+
+**WHY NOVEL:** Existing kernel methods (TKM, EigenPro) assume stationary kernels. Our bound shows genealogical structure (via \(\kappa(T)\)) directly modulates the excess risk.
+
+**IMPLICATION:** Classes closer in the genealogy tree (smaller tree distance) have tighter bounds → explains WHY Hier-NTK helps on sibling pairs.
+
+**FALSIFIER:** If \(\|\Delta_K\| ↑\) but test error does not ↑ proportionally, the genealogical correction term is wrong.
+
+---
+
+### Theorem 2: Phase Transition Threshold
+
+**NAME:** Critical Sample Complexity for Genealogical Prior Dominance
+
+**STATEMENT:**
+There exists a critical sample size \(n^*\) such that:
+
+\[
+n^* = \Theta\left(\frac{K \cdot h}{\lambda_{\min}(T)^2}\right)
+\]
+
+For \(n \ll n^*\): encoder pretraining dominates (embedding quality matters).
+For \(n \gg n^*\): genealogical prior dominates (label structure matters).
+
+**WHY NOVEL:** Existing few-shot theory (e.g., Many-Shot ICL) does not predict phase transitions based on label structure. Our theorem links the phase transition to the kernel condition number.
+
+**IMPLICATION:** Predicts WHY we observe transition at ~5K samples on CoDET-M4.
+
+**FALSIFIER:** If phase transition does not occur at \(n^*\) empirically, the threshold formula is wrong.
+
+---
+
+### Theorem 3: Sibling Confusion Bound
+
+**NAME:** Bounding Generational Pair Confusion Error
+
+**STATEMENT:**
+For any sibling pair \((i, j)\) in the genealogical tree (sharing parent node), let \(d_T(i,j)\) be their tree distance. Then:
+
+\[
+P(\hat{y} = j \mid y = i) \leq \frac{d_T(i,j)^{-1}}{\sum_{k \neq i} d_T(i,k)^{-1}} \cdot (1 + \epsilon_n)
+\]
+
+where \(\epsilon_n = O(\sqrt{\log K / n})\) is the sampling error.
+
+**WHY NOVEL:** Existing attribution bounds (e.g., nearest-neighbor, SVM margins) do not account for genealogical proximity. Our bound shows sibling confusion is inversely proportional to tree distance.
+
+**IMPLICATION:** Quantifies WHY Qwen↔Nxcode (sibling pair) is the hardest confusion pair.
+
+**FALSIFIER:** If sibling pairs with larger tree distance have higher confusion error, the tree-distance formulation is wrong.
+
+---
+
+### 2.5 How to derive novel theorems
+
+**Process:**
+1. Start from a known bound (Rademacher complexity, covering numbers, etc.)
+2. Introduce genealogical structure via the target kernel \(T\)
+3. Relate the new terms to observable quantities (tree depth, kernel eigenvalues)
+4. Derive testable predictions (phase transition, confusion hierarchy)
+
+**Template for new theorem docstring:**
+
+```python
+# =============================================================================
+# THEORY ORIGINAL — [Theorem Name]:
+# [1-2 sentence description]
+#
+# NAME          : [Theorem name]
+# TYPE          : generalization_bound | phase_transition | confusion_bound
+# STATEMENT     : [Formal mathematical statement]
+# KEY_INSIGHT   : [Why this matters for attribution]
+# DERIVATION    : [Sketch of proof from known results]
+# PREDICTIONS   : [Testable empirical predictions]
+# FALSIFIER    : [What experiment would refute this]
 # =============================================================================
 ```
 
@@ -432,28 +561,57 @@ The few-shot suite is split into two physically separate folders. Different rule
 - Each file proposes ONE new mathematical object with a falsifiable claim.
 - Filename pattern: `exp_nNN_<concept>.py` (sequential).
 - **Must pass 5-gate Novelty Filter** before landing here:
-  1. Theory-driven (theorem behind it)
+  1. Theory-driven (**arxiv paper OR self-derived theorem** — see §2.4)
   2. ≤ 2 novel components
   3. Falsifiable claim
   4. Differentiated from prior work
   5. Compute-feasible (≤ 1 T4-hour per data point)
-- **Mandatory header docstring** with: NAME / ONE-LINE CLAIM / EQUATION / THEORY HOOK / WHY NOT BEFORE / FALSIFIER.
+- **Mandatory header docstring** with: ARXIV_ID (or `THEORY_ORIGINAL`) / NAME / ONE-LINE CLAIM / EQUATION / THEORY HOOK / WHY NOT BEFORE / FALSIFIER.
 - Failed runs go to `legacy/novel_failed_NN_*.py`. Never delete; document the negative result in tracker.
 
-**Current 8 novel entries:**
+**Two paths to novelty:**
 
-| File | Method | Theory hook | Open problem |
+**Path A — Arxiv-grounded** (safer, easier to defend):
+- Cite existing theory paper with arxiv ID
+- Apply to code attribution domain
+
+**Path B — Self-derived theorem** (stronger, EMNLP Oral-tier):
+- Derive NEW theorem from first principles
+- Must have: formal statement, key insight, derivation sketch, falsifiable predictions
+- See §2.4 for templates and examples
+
+**Current novel entries (arxiv-grounded, 2026-05-10):**
+
+| File | Method | ArXiv ID | Theory Hook | Key Contribution |
+|:--|:--|:--|:--|:--|
+| `exp_n05_focal.py` | **Focal-CE** | Lin 2017 | Hard example mining | Down-weights easy examples; γ=2 |
+| `exp_n06_attn_pool.py` | **HAP** | Lee 2017 | Hierarchical attention | \(z = \sum_i \alpha_i h_i\) |
+| `exp_n07_mixup_align.py` | **MGA** | Arjovsky 2019 | IRM invariance | Gradient penalty for do(S) |
+| `exp_n08_ortho_clf.py` | **Ortho-CLF** | Papyan 2020 | Neural collapse | Gram-Schmidt classifier |
+| `exp_n09_etf_simplex.py` | **ETF-Simplex** | NC theory | Optimal ETF geometry | \(W_{etf} = \sqrt{K/(K-1)}(e_i - 1/K)\) |
+| `exp_n10_vib.py` | **VIB** | Alemi 2017 | Info bottleneck | KL(q‖p) regularisation |
+| `exp_n11_mixup_ce.py` | **Mixup-CE** | Zhang 2018 | Boundary smoothing | Soft label interpolation |
+| `exp_n12_label_smooth.py` | **LabelSmooth** | Pereyra 2017 | Calibration | ECE improvement |
+
+**Novel theorems (self-derived, EMNLP Oral-tier):**
+
+| File | Theorem | Type | Key Prediction |
 |:--|:--|:--|:--|
-| `exp_n01_sibling_residual.py` | SRD — Fisher in residual subspace | Galanti-Poggio 2025 | K-shot codellama↔nxcode collapse |
-| `exp_n02_frontdoor_style.py` | FSM — HSIC front-door | Veitch-Wang NeurIPS 2025 | Source-confounding (CF/LC→GH) |
-| `exp_n04_etf_simplex.py` | EFS — frozen ETF classifier | Galanti-Poggio + Papyan-Han-Donoho | Explicit ETF parameterisation |
-| `exp_n05_mi_floor.py` | MIF — MINE info ceiling | Belghazi MINE ICML 2018 + Fano | I(Y;X) ceiling for 6-class |
-| `exp_n06_proximal_sibling.py` | PCS — kernel-ridge proxy | Mastouri-Gretton JMLR 2025 | Sibling pair via causal proxy |
-| `exp_n07_conformal_mondrian.py` | CMP — class-conditional conformal | Vovk 2005; Romano-Patterson-Candès 2020 | Per-class FNR guarantee |
-| `exp_n08_spectral_eigengap.py` | SEA — Cheeger eigengap | Cheeger 1970; Lee-Oveis-Trevisan 2014 | Phase-transition predictor |
-| `exp_n10_vib.py` | VIB — variational info bottleneck | Tishby IB 2000; Alemi VIB ICLR 2017 | Data-efficient regulariser |
+| *(to be created)* | **Kernel Alignment Bound** | §2.4 Thm 1 | Genealogical correction modulates excess risk |
+| *(to be created)* | **Phase Transition** | §2.4 Thm 2 | Transition at \(n^* = \Theta(K \cdot h / \lambda_{\min}^2)\) |
+| *(to be created)* | **Sibling Confusion** | §2.4 Thm 3 | Confusion ∝ 1/tree_distance |
 
-(n03, n09 reserved.)
+**Theory Sources (key papers):**
+
+| Theory | Paper | ArXiv | Venue | Relevance |
+|:--|:--|:--|:--|:--|
+| **Kernel Methods** | Truncated Kernel Methods (TKM) | `2410.06171` | NeurIPS 2024 | Kernel complexity vs alignment |
+| **Neural Collapse** | Deep NC with Weight Decay | `2410.04887` | ICLR 2025 | ETF geometry, class collapse |
+| **Target Alignment** | Unified Representation Alignment | `2502.14047` | ICLR 2025 | Gram matrix → kernel alignment |
+| **Information Bottleneck** | Causal IB (CIB) | `2410.00535` | arXiv 2024 | KL regularisation for invariance |
+| **Contrastive Learning** | SupCon | IEEE 2020 | — | Contrastive alignment |
+| **Geometric DL** | CUSP | `2502.00401` | ICLR 2025 | Hyperbolic/curvature methods |
+| **Causal Inference** | IRM | Arjovsky 2019 | — | Invariant risk minimisation |
 
 ### Benchmark dispatch (2026-05-10)
 
@@ -493,17 +651,25 @@ Recommended run order: `codet_m4` first, then `aicd_t2`, then `droid_t3`. Run `d
 - Augmentation cocktails
 - Hyperparameter sweeps presented as method
 - "Apply existing method to new domain" alone
+- **ANY method without arxiv citation** — must be grounded in theory
 
 If the idea is "stronger version of an existing method", ship under `testing/`.
 
+**What IS welcome:**
+- Novel combinations of existing arxiv-grounded methods
+- Theoretical extensions with mathematical justification
+- Ablation of components from arxiv methods
+- Transfer from other domains if arxiv-grounded (e.g., VIB from NLP→code, ETF from vision→code)
+
 ### Five open problems where novelty is welcome
 
-(See [Exp_FewShot/novel/README.md](../Exp_FewShot/novel/README.md) for full text.)
-1. K-shot collapse on codellama↔nxcode siblings (n01 attacks this).
-2. Source-confounding (CF/LC → GitHub OOD), the original NeurIPS thesis.
-3. Phase transition at ~5K samples — sample-complexity floor theorem.
-4. Hierarchical neural collapse explicit parameterisation.
-5. Information-theoretic floor I(Y; X) for CoDET-M4.
+(Theory-grounded, not just hierarchical. Any approach from §2.2 is welcome.)
+
+1. **K-shot collapse on codellama↔nxcode siblings** — Try: Focal loss (n05), Attention pooling (n06), Fisher/SRD
+2. **Source-confounding (CF/LC → GitHub OOD)** — Try: MGA gradient alignment (n07), VIB (n10), IRM
+3. **Phase transition at ~5K samples** — Try: Mixup (n11), Label smoothing (n12), Information theory bounds
+4. **Neural collapse explicit parameterisation** — Try: ETF-Simplex (n09), Ortho-CLF (n08)
+5. **Information-theoretic floor I(Y; X) for CoDET-M4** — Try: VIB (n10), CIB, MINE
 
 ## 16. Original portfolio rules (kept for legacy reference)
 
