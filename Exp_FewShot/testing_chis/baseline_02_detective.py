@@ -48,6 +48,13 @@ try:
 except ImportError:
     from torch.cuda.amp import autocast as _ac, GradScaler
 
+def _autocast_ctx(dev: torch.device):
+    enabled = (dev.type == "cuda")
+    try:
+        return _ac(device_type=dev.type, enabled=enabled)
+    except TypeError:
+        return _ac(enabled=enabled)
+
 warnings.filterwarnings("ignore")
 import logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s", stream=sys.stdout)
@@ -82,7 +89,7 @@ class Cfg:
         elif self.benchmark in ("droid_t3",):
             self.n_cls = 3; self.task = "t3"
         elif self.benchmark == "droid_t4":
-            self.n_cls = 2; self.task = "t4"
+            self.n_cls = 4; self.task = "t4"
 
 def _hw(cfg: Cfg) -> Cfg:
     if torch.cuda.is_available():
@@ -268,7 +275,7 @@ def eval_m(model, loader, dev):
     model.eval()
     ps, ls = [], []
     for b in loader:
-        with _ac(dev): logits = model(b["ids"].to(dev), b["mask"].to(dev))["logits"]
+        with _autocast_ctx(dev): logits = model(b["ids"].to(dev), b["mask"].to(dev))["logits"]
         ps.extend(logits.argmax(1).cpu().tolist())
         ls.extend(b["labels"].tolist())
     return {"macro": f1_score(ls, ps, average="macro", zero_division=0),
@@ -282,15 +289,16 @@ def train(cfg: Cfg, tr_dl, vl_dl, ts_dl):
     opt = torch.optim.AdamW(model.groups())
     sched = torch.optim.lr_scheduler.OneCycleLR(opt, max_lr=[cfg.lr_enc, cfg.lr_head],
         steps_per_epoch=len(tr_dl), epochs=cfg.epochs, pct_start=cfg.warmup)
-    scaler = GradScaler()
+    scaler = GradScaler(enabled=(dev.type == "cuda"))
     best_val, best_state = 0, None
 
     for ep in range(cfg.epochs):
         model.train()
         for b in tr_dl:
             ids, mask, labs = b["ids"].to(dev), b["mask"].to(dev), b["labels"].to(dev)
-            with _ac(dev): out = model(ids, mask)
-            loss = det_loss(out["logits"], labs, out["z"], w, cfg)
+            with _autocast_ctx(dev):
+                out = model(ids, mask)
+                loss = det_loss(out["logits"], labs, out["z"], w, cfg)
             scaler.scale(loss).backward()
             scaler.unscale_(opt)
             torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
@@ -300,7 +308,8 @@ def train(cfg: Cfg, tr_dl, vl_dl, ts_dl):
         if vr["macro"] > best_val:
             best_val = vr["macro"]
             best_state = {k: v.cpu().clone() for k, v in model.state_dict().items()}
-    model.load_state_dict(best_state)
+    if best_state is not None:
+        model.load_state_dict(best_state)
     return eval_m(model, ts_dl, dev)
 
 def main():
