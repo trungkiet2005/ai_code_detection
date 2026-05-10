@@ -47,11 +47,11 @@
 **⚡ RTX6000 Ada Lovelace (48GB) speedup:** Detected automatically → bs=64, bf16, seq=512. **~3-4× faster** than T4.
 **⚡ RTX 96GB speedup:** Detected automatically → bs=128, bf16, seq=512. **~6-8× faster** than T4.
 
-**📦 Offline loading (no-internet):** All models and datasets loaded from Kaggle input paths:
-- Encoders: `/kaggle/input/datasets/chiboiz/ai-detection-encoders/models/`
+**📦 Kaggle offline datasets (no-internet, avoids conflict + bias):**
 - CoDET-M4: `/kaggle/input/datasets/chiboiz/codetm4/dataset_without_comments.parquet`
 - DroidCollection: `/kaggle/input/datasets/chiboiz/droid-collection/DroidCollection/`
-No HuggingFace download → eliminates conflict/bias from model caching on shared Kaggle instances.
+- AICD-Bench: `/kaggle/input/datasets/chiboiz/ai-code-detection/AICD-Bench`
+- Encoders: `/kaggle/input/datasets/chiboiz/ai-detection-encoders/models/`
 
 **Out-of-scope for this paper (do NOT add to headline):**
 - Zero-shot detection (Exp_ZeroShot, **moved to legacy/** — reproduction gap −32 pt vs paper Fast-DetectGPT).

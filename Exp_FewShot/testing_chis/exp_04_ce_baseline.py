@@ -1,0 +1,313 @@
+"""
+exp13_ce_baseline.py — Cross-Entropy baseline only (no HierTree, no NTK)
+
+Self-contained. Runs: 2 encoders × 4 benchmarks × 3 fractions = 24 experiments.
+
+Config:
+  - Encoders: ModernBERT-base, unixcoder-base
+  - Benchmarks: codet_m4 (headline), aicd_t2 (stress), droid_t3, droid_t4
+  - Fractions: 0.01, 0.05, 0.20
+  - Batch: 256, seq=512
+
+Usage:
+  python exp13_ce_baseline.py
+"""
+
+# === KAGGLE PATHS ===
+KAGGLE_MODELS = "/kaggle/input/datasets/chiboiz/ai-detection-encoders/models"
+KAGGLE_CODET = "/kaggle/input/datasets/chiboiz/codetm4/dataset_without_comments.parquet"
+KAGGLE_DROID = "/kaggle/input/datasets/chiboiz/droid-collection/DroidCollection"
+KAGGLE_AICD = "/kaggle/input/datasets/chiboiz/ai-code-detection/AICD-Bench"
+
+from __future__ import annotations
+import os, sys, time, json, random, subprocess, importlib.util, warnings, glob
+from collections import defaultdict
+from dataclasses import dataclass
+
+os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
+
+def _ensure(pkg):
+    if importlib.util.find_spec(pkg.split(".")[0]) is None:
+        subprocess.check_call([sys.executable, "-m", "pip", "install", "-q", pkg])
+
+_ensure("numpy"); _ensure("torch"); _ensure("datasets")
+_ensure("transformers"); _ensure("scikit-learn")
+
+import numpy as np
+import torch, torch.nn as nn, torch.nn.functional as F
+from datasets import load_dataset
+from sklearn.metrics import accuracy_score, f1_score
+from torch.utils.data import Dataset as TD, DataLoader
+from transformers import AutoModel, AutoTokenizer
+
+try:
+    from torch.amp import autocast as _ac, GradScaler
+except ImportError:
+    from torch.cuda.amp import autocast as _ac, GradScaler
+
+warnings.filterwarnings("ignore")
+import logging
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s", stream=sys.stdout)
+logger = logging.getLogger("exp13")
+
+PAPER_BASELINE = 0.6633
+
+@dataclass
+class Cfg:
+    benchmark: str = "codet_m4"
+    task: str = "author"
+    enc: str = "ModernBERT-base"
+    frac: float = 0.05
+    n_cls: int = 6
+    seed: int = 42
+    bs: int = 256
+    seq: int = 512
+    epochs: int = 3
+    lr_enc: float = 2e-5
+    lr_head: float = 1e-4
+    wd: float = 0.01
+    warmup: float = 0.1
+    device: str = "cuda"
+
+    def __post_init__(self):
+        if self.benchmark == "codet_m4":
+            self.n_cls = 6 if self.task == "author" else 2
+        elif self.benchmark == "aicd_t2":
+            self.n_cls = 12; self.task = "t2"
+        elif self.benchmark in ("droid_t3",):
+            self.n_cls = 3; self.task = "t3"
+        elif self.benchmark == "droid_t4":
+            self.n_cls = 2; self.task = "t4"
+
+def _hw(cfg: Cfg) -> Cfg:
+    if torch.cuda.is_available():
+        torch.backends.cuda.matmul.allow_tf32 = True
+        torch.backends.cudnn.allow_tf32 = True
+        torch.backends.cudnn.benchmark = True
+        cfg.bs, cfg.seq = 256, 512  # Force 256 batch size
+    return cfg
+
+def set_seed(s):
+    random.seed(s); np.random.seed(s); torch.manual_seed(s)
+    if torch.cuda.is_available(): torch.cuda.manual_seed_all(s)
+
+def _is_human(t):
+    return str(t or "").strip().lower() in {"human","human_written","human-generated"}
+
+def _vocab(train):
+    names = {str(r.get("model","") or "").strip() for r in train
+             if not _is_human(r.get("target","")) and r.get("model","")}
+    return {n:i+1 for i,n in enumerate(sorted(names))}
+
+def _conv_codet(split, task, vocab):
+    def row(r):
+        code = ""
+        for f in ("cleaned_code","code"):
+            v = r.get(f,"")
+            if isinstance(v,str) and v.strip(): code = v; break
+        if task == "binary": label = 0 if _is_human(r.get("target","")) else 1
+        else:
+            if _is_human(r.get("target","")): label = 0
+            else: label = vocab.get(str(r.get("model","") or "").strip(), -1)
+        return {"code":code,"label":label,"lang":str(r.get("language","")).strip().lower()}
+    out = split.map(row, remove_columns=split.column_names)
+    return out.filter(lambda x: x["label"]>=0 and len(x["code"].strip())>0)
+
+def _conv_droid(split, task):
+    lm = {"HUMAN_GENERATED":0,"HUMAN":0,"MACHINE_GENERATED":1,"AI_GENERATED":1,
+          "MACHINE_REFINED":2,"REFINED":2,"ADVERSARIAL":3,"ADVERSARIALLY_HUMANISED":3}
+    def row(r):
+        code = str(r.get("code","")).strip()
+        raw = r.get("label",-1)
+        label = lm.get(str(raw).strip().upper(), int(raw) if isinstance(raw,int) else -1)
+        if task == "t3": label = 1 if label == 3 else label
+        return {"code":code,"label":label,"lang":str(r.get("language","")).strip().lower()}
+    out = split.map(row, remove_columns=split.column_names)
+    return out.filter(lambda x: x["label"]>=0 and len(x["code"].strip())>0)
+
+def _conv_aicd(split):
+    def row(r): return {"code":str(r.get("code","")).strip(),"label":int(r.get("label",-1)),"lang":str(r.get("language","")).strip().lower()}
+    out = split.map(row, remove_columns=split.column_names)
+    return out.filter(lambda x: x["label"]>=0 and len(x["code"].strip())>0)
+
+def _load_codet():
+    ds = load_dataset("parquet", data_files=KAGGLE_CODET, split="train")
+    if "split" in ds.column_names:
+        tr = ds.filter(lambda x: str(x.get("split","")).lower()=="train")
+        vl = ds.filter(lambda x: str(x.get("split","")).lower() in {"val","validation","dev"})
+        ts = ds.filter(lambda x: str(x.get("split","")).lower()=="test")
+    else:
+        s = ds.train_test_split(test_size=0.1, seed=42)
+        s2 = s["train"].train_test_split(test_size=1/9, seed=42)
+        return s2["train"], s2["test"], s["test"]
+    return tr, vl, ts
+
+def _load_droid():
+    files = sorted(glob.glob(os.path.join(KAGGLE_DROID, "**","*.parquet"), recursive=True))
+    ds = load_dataset("parquet", data_files=files, split="train") if files else load_dataset(KAGGLE_DROID, split="train")
+    s = ds.train_test_split(test_size=0.1, seed=42)
+    s2 = s["train"].train_test_split(test_size=1/9, seed=42)
+    return s2["train"], s2["test"], s["test"]
+
+def _load_aicd(task):
+    cfg_map = {"t2":"T2","t3":"T3","t1":"T1"}
+    if os.path.isdir(KAGGLE_AICD):
+        return (load_dataset(KAGGLE_AICD, name=cfg_map.get(task,"T2"), split=s) for s in ["train","validation","test"])
+    return (load_dataset("AICD-bench/AICD-Bench", name=cfg_map.get(task,"T2"), split=s) for s in ["train","validation","test"])
+
+class FSDS(TD):
+    def __init__(self, hf, tok, max_len):
+        self.hf = hf; self.tok = tok; self.max_len = max_len
+    def __len__(self): return len(self.hf)
+    def __getitem__(self, i):
+        r = self.hf[i]
+        enc = self.tok(r["code"], max_length=self.max_len, truncation=True, padding="max_length", return_tensors="pt")
+        return {"ids":enc["input_ids"].squeeze(0),"mask":enc["attention_mask"].squeeze(0),"label":int(r["label"])}
+
+def collate(b):
+    return {"ids":torch.stack([x["ids"] for x in b]),"mask":torch.stack([x["mask"] for x in b]),
+            "labels":torch.tensor([x["label"] for x in b], dtype=torch.long)}
+
+def build_dls(cfg: Cfg):
+    set_seed(cfg.seed)
+    enc_path = os.path.join(KAGGLE_MODELS, cfg.enc)
+    tok = AutoTokenizer.from_pretrained(enc_path, local_files_only=True)
+
+    if cfg.benchmark == "codet_m4":
+        tr_raw, vl_raw, ts_raw = _load_codet()
+        vocab = _vocab(tr_raw) if cfg.task == "author" else {}
+        tr_d = _conv_codet(tr_raw, cfg.task, vocab)
+        vl_d = _conv_codet(vl_raw, cfg.task, vocab)
+        ts_d = _conv_codet(ts_raw, cfg.task, vocab)
+    elif cfg.benchmark.startswith("droid"):
+        tr_raw, vl_raw, ts_raw = _load_droid()
+        tr_d = _conv_droid(tr_raw, cfg.task)
+        vl_d = _conv_droid(vl_raw, cfg.task)
+        ts_d = _conv_droid(ts_raw, cfg.task)
+    else:
+        tr_raw, vl_raw, ts_raw = _load_aicd(cfg.task)
+        tr_d = _conv_aicd(tr_raw); vl_d = _conv_aicd(vl_raw); ts_d = _conv_aicd(ts_raw)
+
+    by_cls = defaultdict(list)
+    for i, lab in enumerate(tr_d["label"]): by_cls[int(lab)].append(i)
+    rng = random.Random(cfg.seed)
+    chosen = []
+    for cls in range(cfg.n_cls):
+        pool = by_cls.get(cls, [])
+        n = max(1, int(round(len(pool) * cfg.frac))) if pool else 0
+        chosen.extend(rng.sample(pool, min(n, len(pool))) if pool else [])
+    rng.shuffle(chosen)
+    tr_d = tr_d.select(chosen)
+    logger.info(f"[data] {cfg.enc} | {cfg.benchmark} | frac={cfg.frac} | n_train={len(tr_d)}")
+
+    def ld(ds, shuf):
+        return DataLoader(FSDS(ds, tok, cfg.seq), batch_size=cfg.bs, shuffle=shuf, num_workers=4, collate_fn=collate, pin_memory=True)
+    return ld(tr_d, True), ld(vl_d, False), ld(ts_d, False)
+
+class CENet(nn.Module):
+    def __init__(self, cfg: Cfg):
+        super().__init__()
+        self.cfg = cfg
+        enc_path = os.path.join(KAGGLE_MODELS, cfg.enc)
+        self.enc = AutoModel.from_pretrained(enc_path, local_files_only=True)
+        h = self.enc.config.hidden_size
+        self.drop = nn.Dropout(0.1)
+        self.clf = nn.Linear(h, cfg.n_cls)
+
+    def forward(self, ids, mask):
+        out = self.enc(input_ids=ids, attention_mask=mask)
+        emb = (out.last_hidden_state * mask.unsqueeze(-1)).sum(1) / mask.sum(1, keepdim=True).clamp(min=1)
+        return {"logits": self.clf(self.drop(emb))}
+
+    def groups(self):
+        return [{"params": self.enc.parameters(), "lr": self.cfg.lr_enc, "weight_decay": self.cfg.wd},
+                {"params": self.clf.parameters(), "lr": self.cfg.lr_head, "weight_decay": self.cfg.wd}]
+
+def class_w(loader, n):
+    c = np.zeros(n)
+    for b in loader:
+        for l in b["labels"].tolist(): c[l] += 1
+    c = np.maximum(c, 1)
+    w = 1.0 / c
+    return torch.tensor(w/w.sum()*n, dtype=torch.float32)
+
+@torch.no_grad()
+def eval_m(model, loader, dev):
+    model.eval()
+    ps, ls = [], []
+    for b in loader:
+        with _ac(dev): logits = model(b["ids"].to(dev), b["mask"].to(dev))["logits"]
+        ps.extend(logits.argmax(1).cpu().tolist())
+        ls.extend(b["labels"].tolist())
+    return {"macro": f1_score(ls, ps, average="macro", zero_division=0),
+            "weighted": f1_score(ls, ps, average="weighted", zero_division=0),
+            "acc": accuracy_score(ls, ps)}
+
+def train(cfg: Cfg, tr_dl, vl_dl, ts_dl):
+    dev = torch.device(cfg.device)
+    model = CENet(cfg).to(dev)
+    w = class_w(tr_dl, cfg.n_cls).to(dev)
+    opt = torch.optim.AdamW(model.groups())
+    sched = torch.optim.lr_scheduler.OneCycleLR(opt, max_lr=[cfg.lr_enc, cfg.lr_head],
+        steps_per_epoch=len(tr_dl), epochs=cfg.epochs, pct_start=cfg.warmup)
+    scaler = GradScaler()
+    best_val, best_state = 0, None
+
+    for ep in range(cfg.epochs):
+        model.train()
+        for b in tr_dl:
+            ids, mask, labs = b["ids"].to(dev), b["mask"].to(dev), b["labels"].to(dev)
+            with _ac(dev): logits = model(ids, mask)["logits"]
+            loss = F.cross_entropy(logits, labs, weight=w)
+            scaler.scale(loss).backward()
+            scaler.unscale_(opt)
+            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+            scaler.step(opt); scaler.update(); opt.zero_grad()
+            sched.step()
+        vr = eval_m(model, vl_dl, dev)
+        if vr["macro"] > best_val:
+            best_val = vr["macro"]
+            best_state = {k: v.cpu().clone() for k, v in model.state_dict().items()}
+    model.load_state_dict(best_state)
+    return eval_m(model, ts_dl, dev)
+
+def main():
+    encoders = ["ModernBERT-base", "unixcoder-base"]
+    benchmarks = [("codet_m4","author"), ("aicd_t2","t2"), ("droid_t3","t3"), ("droid_t4","t4")]
+    fracs = [0.01, 0.05, 0.20]
+
+    results = []
+    for enc in encoders:
+        for bench, task in benchmarks:
+            for frac in fracs:
+                cfg = Cfg(benchmark=bench, task=task, enc=enc, frac=frac)
+                cfg = _hw(cfg)
+                tag = f"exp13_ce_{enc}_{bench}_f{frac}"
+                logger.info(f"=== {tag} ===")
+                t0 = time.time()
+                tr_dl, vl_dl, ts_dl = build_dls(cfg)
+                res = train(cfg, tr_dl, vl_dl, ts_dl)
+                elapsed = time.time() - t0
+                row = {"tag": tag, "enc": enc, "bench": bench, "frac": frac,
+                       "macro": res["macro"], "weighted": res["weighted"], "acc": res["acc"],
+                       "dpaper": res["macro"] - PAPER_BASELINE, "wall": round(elapsed,1)}
+                results.append(row)
+                logger.info(f"[{tag}] MacroF1={res['macro']:.4f} ({res['macro']-PAPER_BASELINE:+.4f} vs paper) time={elapsed:.0f}s")
+                del tr_dl, vl_dl, ts_dl
+                import gc; gc.collect()
+                if torch.cuda.is_available(): torch.cuda.empty_cache()
+
+    os.makedirs("results", exist_ok=True)
+    with open("results/exp13_results.json", "w") as f:
+        json.dump(results, f, indent=2)
+
+    print("\n" + "="*100)
+    print(f"{'Encoder':<22} {'Benchmark':<12} {'Frac':>6} {'Macro-F1':>10} {'dPaper':>10} {'Weighted':>10} {'Wall':>8}")
+    print("-"*100)
+    for r in results:
+        print(f"{r['enc']:<22} {r['bench']:<12} {r['frac']:>6.0%} {r['macro']:>10.4f} {r['dpaper']:>+10.4f} {r['weighted']:>10.4f} {r['wall']:>8.0f}s")
+    print("="*100)
+    print(f"\nBest Macro-F1: {max(r['macro'] for r in results):.4f} @ {max(results, key=lambda x: x['macro'])['tag']}")
+
+if __name__ == "__main__":
+    main()

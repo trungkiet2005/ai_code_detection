@@ -47,12 +47,13 @@ python Exp_FewShot/exp_fs_01_ntkalign.py
 
 ### Offline mode (no-internet, avoids conflict + bias)
 
-All data loaded from Kaggle input paths (no HuggingFace download):
+All 3 datasets loaded from Kaggle input paths (no HuggingFace download):
 
 ```python
-# Models: /kaggle/input/datasets/chiboiz/ai-detection-encoders/models/
-# CoDET-M4: /kaggle/input/datasets/chiboiz/codetm4/dataset_without_comments.parquet
-# DroidCollection: /kaggle/input/datasets/chiboiz/droid-collection/DroidCollection/
+# CoDET-M4 (6-class Author IID): /kaggle/input/datasets/chiboiz/codetm4/dataset_without_comments.parquet
+# DroidCollection (3-class / 4-class adversarial): /kaggle/input/datasets/chiboiz/droid-collection/DroidCollection/
+# AICD-Bench: /kaggle/input/datasets/chiboiz/ai-code-detection/AICD-Bench
+# Encoders: /kaggle/input/datasets/chiboiz/ai-detection-encoders/models/
 tokenizer = AutoTokenizer.from_pretrained(path, local_files_only=True)
 model = AutoModel.from_pretrained(path, local_files_only=True)
 ```
