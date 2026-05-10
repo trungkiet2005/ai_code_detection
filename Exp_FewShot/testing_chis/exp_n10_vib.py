@@ -1,8 +1,19 @@
 """
-exp02_faid.py — FAID-style multitask (class CE + family CE + multi-level SupCon)
+exp_n10_vib.py — Variational Information Bottleneck for Data Efficiency
 
-Published method: FAID (EACL 2026)
-Style: class CE + family auxiliary CE + class/family supervised contrastive
+NAME : Variational Information Bottleneck (VIB)
+ONE-LINE CLAIM : VIB adds a KL penalty that forces the representation
+to forget source-specific noise while preserving generator signal,
+achieving better generalization in few-shot regimes.
+EQUATION : L_vib = CE(q(y|z), y) + β · KL(q(z|x) || p(z))
+THEORY HOOK : Alemi et al. 2017 VIB; information-theoretic regularizer
+that removes nuisance variables while keeping task-relevant signal.
+WHY NOT BEFORE : Standard fine-tuning keeps all features, including
+source-specific noise. VIB explicitly forgets this, critical for OOD.
+FALSIFIER : If VIB does not improve generalization at frac=0.05,
+then source noise is not the bottleneck.
+
+Target: EMNLP Oral — Theory contribution (novel information-theoretic object).
 
 Self-contained. Runs: 2 encoders × 4 benchmarks × 3 fractions = 24 experiments.
 
@@ -13,8 +24,26 @@ Config:
   - Batch: 256, seq=512
 
 Usage:
-  python exp02_faid.py
+  python exp_n10_vib.py
 """
+
+# =============================================================================
+# Theory-Track exp — Variational Information Bottleneck (VIB):
+# information-theoretic regularization for source-invariant representations.
+#
+# NAME : Variational Information Bottleneck (VIB).
+# ONE-LINE CLAIM : VIB adds a KL penalty forcing representations to forget
+# source-specific noise while preserving generator signal.
+# EQUATION : L_vib = CE(q(y|z), y) + β · KL(q(z|x) || p(z))
+# where q(z|x) = N(μ(x), σ(x)) and p(z) = N(0, I).
+# PROPERTY : The KL term regularizes representations to be compact and
+# source-invariant. This is an information-theoretic implementation of
+# the do(S)-invariance hypothesis from our causal model.
+# WHY NOT BEFORE : Standard fine-tuning keeps all encoder features,
+# including source-specific noise. VIB explicitly removes this.
+# FALSIFIER : If VIB does not improve OOD generalization (GH split),
+# then source noise is not the bottleneck.
+# =============================================================================
 
 # === KAGGLE PATHS ===
 KAGGLE_MODELS = "/kaggle/input/datasets/chiboiz/ai-detection-encoders/models"
@@ -58,8 +87,9 @@ def _autocast_ctx(dev: torch.device):
 warnings.filterwarnings("ignore")
 import logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s", stream=sys.stdout)
-logger = logging.getLogger("exp02")
+logger = logging.getLogger("exp_n10")
 
+# === CONSTANTS ===
 HIER_FAM = {0:0,1:1,2:2,3:3,4:1,5:4}
 PAPER_BASELINE = 0.6633
 
@@ -151,9 +181,8 @@ class Cfg:
     lr_enc: float = 2e-5
     lr_head: float = 1e-4
     wd: float = 0.01
-    lambda_supcon: float = 0.4
-    lambda_family: float = 0.5
-    ntk_proj: int = 128
+    vib_beta: float = 1e-3
+    z_dim: int = 128
     warmup: float = 0.1
     device: str = "cuda"
 
@@ -354,8 +383,7 @@ def build_dls(cfg: Cfg):
     for cls in range(cfg.n_cls):
         pool = by_cls.get(cls, [])
         n = max(1, int(round(len(pool) * cfg.frac))) if pool else 0
-        if pool:
-            chosen.extend(rng.sample(pool, min(n, len(pool))))
+        chosen.extend(rng.sample(pool, min(n, len(pool))) if pool else [])
     rng.shuffle(chosen)
     tr_d = tr_d.select(chosen)
     logger.info(f"[data] {cfg.enc} | {cfg.benchmark} | frac={cfg.frac} | n_train={len(tr_d)}")
@@ -364,7 +392,12 @@ def build_dls(cfg: Cfg):
         return DataLoader(FSDS(ds, tok, cfg.seq), batch_size=cfg.bs, shuffle=shuf, num_workers=4, collate_fn=collate, pin_memory=True)
     return ld(tr_d, True), ld(vl_d, False), ld(ts_d, False)
 
-class FAIDNet(nn.Module):
+class VIBNet(nn.Module):
+    """Variational Information Bottleneck network.
+    
+    Encodes inputs to stochastic latent variables with KL regularization,
+    forcing representations to be compact and source-invariant.
+    """
     def __init__(self, cfg: Cfg):
         super().__init__()
         self.cfg = cfg
@@ -372,47 +405,54 @@ class FAIDNet(nn.Module):
         self.enc = AutoModel.from_pretrained(enc_path, local_files_only=True)
         h = self.enc.config.hidden_size
         self.drop = nn.Dropout(0.1)
-        self.clf = nn.Linear(h, cfg.n_cls)
-        n_fam = len(set(HIER_FAM.values()))
-        self.fam_clf = nn.Linear(h, n_fam)
-        self.proj = nn.Sequential(nn.Linear(h, cfg.ntk_proj), nn.GELU(), nn.Linear(cfg.ntk_proj, cfg.ntk_proj))
+        
+        # VIB: stochastic encoder
+        self.z_mean = nn.Linear(h, cfg.z_dim)
+        self.z_logvar = nn.Linear(h, cfg.z_dim)
+        
+        # Classifier
+        self.clf = nn.Linear(cfg.z_dim, cfg.n_cls)
 
-    def forward(self, ids, mask):
+    def forward(self, ids, mask, training=True):
         out = self.enc(input_ids=ids, attention_mask=mask)
         emb = (out.last_hidden_state * mask.unsqueeze(-1)).sum(1) / mask.sum(1, keepdim=True).clamp(min=1)
-        dropped = self.drop(emb)
-        return {"logits": self.clf(dropped), "fam_logits": self.fam_clf(dropped),
-                "z": F.normalize(self.proj(emb), dim=-1)}
+        
+        # VIB: compute latent distribution
+        mu = self.z_mean(emb)
+        logvar = self.z_logvar(emb)
+        std = torch.exp(0.5 * logvar)
+        
+        if training:
+            # Reparameterization trick
+            eps = torch.randn_like(std)
+            z = mu + eps * std
+        else:
+            z = mu  # Use mean at test time
+        
+        logits = self.clf(self.drop(z))
+        return {"logits": logits, "z": z, "mu": mu, "logvar": logvar}
 
     def groups(self):
-        heads = list(self.clf.parameters()) + list(self.fam_clf.parameters()) + list(self.proj.parameters())
         return [{"params": self.enc.parameters(), "lr": self.cfg.lr_enc, "weight_decay": self.cfg.wd},
-                {"params": heads, "lr": self.cfg.lr_head, "weight_decay": self.cfg.wd}]
+                {"params": list(self.z_mean.parameters()) + list(self.z_logvar.parameters()) + list(self.clf.parameters()),
+                 "lr": self.cfg.lr_head, "weight_decay": self.cfg.wd}]
 
-def supcon_loss(z, labels, temp=0.07):
-    if z.size(0) <= 1: return torch.zeros((), device=z.device)
-    z = F.normalize(z, dim=-1)
-    logits = (z @ z.t()) / temp
-    logits = logits - logits.max(dim=1, keepdim=True).values.detach()
-    eye = torch.eye(z.size(0), dtype=torch.bool, device=z.device)
-    logits_mask = (~eye).float()
-    pos = (labels.unsqueeze(0) == labels.unsqueeze(1)) & ~eye
-    pos_f = pos.float()
-    denom = (torch.exp(logits) * logits_mask).sum(dim=1, keepdim=True).clamp(min=1e-12)
-    log_prob = logits - torch.log(denom)
-    pos_count = pos_f.sum(dim=1)
-    valid = pos_count > 0
-    if not valid.any(): return torch.zeros((), device=z.device)
-    mean_log_prob_pos = (pos_f * log_prob).sum(dim=1)[valid] / pos_count[valid].clamp(min=1.0)
-    return -mean_log_prob_pos.mean()
-
-def faid_loss(logits, labels, fam_logits, z, w, cfg: Cfg):
+def vib_loss(logits, labels, mu, logvar, w, beta=1e-3):
+    """VIB loss: cross-entropy + KL divergence.
+    
+    L_vib = CE(q(y|z), y) + β · KL(q(z|x) || p(z))
+    
+    The KL term encourages z to be close to the prior N(0, I),
+    which regularizes the representation to forget source-specific info.
+    """
+    # Cross-entropy
     ce = F.cross_entropy(logits, labels, weight=w)
-    fam_labels = torch.tensor([HIER_FAM.get(int(y), int(y)) for y in labels.cpu()], device=labels.device)
-    fam_ce = F.cross_entropy(fam_logits, fam_labels)
-    class_sup = supcon_loss(z, labels, temp=0.07)
-    fam_sup = supcon_loss(z, fam_labels, temp=0.07)
-    return ce + cfg.lambda_family * fam_ce + cfg.lambda_supcon * (class_sup + fam_sup)
+    
+    # KL divergence: KL(N(μ,σ) || N(0,I))
+    # = -0.5 * Σ (1 + log(σ²) - μ² - σ²)
+    kl = -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp(), dim=-1).mean()
+    
+    return ce + beta * kl
 
 def class_w(loader, n):
     c = np.zeros(n)
@@ -427,7 +467,7 @@ def eval_m(model, loader, dev):
     model.eval()
     ps, ls = [], []
     for b in loader:
-        with _autocast_ctx(dev): logits = model(b["ids"].to(dev), b["mask"].to(dev))["logits"]
+        with _autocast_ctx(dev): logits = model(b["ids"].to(dev), b["mask"].to(dev), training=False)["logits"]
         ps.extend(logits.argmax(1).cpu().tolist())
         ls.extend(b["labels"].tolist())
     return {"macro": f1_score(ls, ps, average="macro", zero_division=0),
@@ -436,7 +476,7 @@ def eval_m(model, loader, dev):
 
 def train(cfg: Cfg, tr_dl, vl_dl, ts_dl):
     dev = torch.device(cfg.device)
-    model = FAIDNet(cfg).to(dev)
+    model = VIBNet(cfg).to(dev)
     w = class_w(tr_dl, cfg.n_cls).to(dev)
     opt = torch.optim.AdamW(model.groups())
     sched = torch.optim.lr_scheduler.OneCycleLR(opt, max_lr=[cfg.lr_enc, cfg.lr_head],
@@ -449,8 +489,8 @@ def train(cfg: Cfg, tr_dl, vl_dl, ts_dl):
         for b in tr_dl:
             ids, mask, labs = b["ids"].to(dev), b["mask"].to(dev), b["labels"].to(dev)
             with _autocast_ctx(dev):
-                out = model(ids, mask)
-                loss = faid_loss(out["logits"], labs, out["fam_logits"], out["z"], w, cfg)
+                out = model(ids, mask, training=True)
+                loss = vib_loss(out["logits"], labs, out["mu"], out["logvar"], w, cfg.vib_beta)
             scaler.scale(loss).backward()
             scaler.unscale_(opt)
             torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
@@ -479,7 +519,7 @@ def main():
             for frac in fracs:
                 cfg = Cfg(benchmark=bench, task=task, enc=enc, frac=frac)
                 cfg = _hw(cfg)
-                tag = f"exp02_faid_{enc}_{bench}_f{frac}"
+                tag = f"exp_n10_vib_{enc}_{bench}_f{frac}"
                 logger.info(f"=== {tag} ===")
                 t0 = time.time()
                 tr_dl, vl_dl, ts_dl = build_dls(cfg)
@@ -495,7 +535,7 @@ def main():
                 if torch.cuda.is_available(): torch.cuda.empty_cache()
 
     os.makedirs("results", exist_ok=True)
-    with open("results/exp02_results.json", "w") as f:
+    with open("results/exp_n10_results.json", "w") as f:
         json.dump(results, f, indent=2)
 
     print("\n" + "="*100)

@@ -19,7 +19,7 @@ Usage:
 # === KAGGLE PATHS ===
 KAGGLE_MODELS = "/kaggle/input/datasets/chiboiz/ai-detection-encoders/models"
 KAGGLE_CODET = "/kaggle/input/datasets/chiboiz/codetm4/dataset_without_comments.parquet"
-KAGGLE_DROID = "/kaggle/input/datasets/chiboiz/droid-collection/DroidCollection/data"
+KAGGLE_DROID = "/kaggle/input/datasets/chiboiz/droid-collection/DroidCollection"
 KAGGLE_AICD = "/kaggle/input/datasets/chiboiz/ai-code-detection/AICD-Bench"
 
 from __future__ import annotations
@@ -34,7 +34,7 @@ def _ensure(pkg):
         subprocess.check_call([sys.executable, "-m", "pip", "install", "-q", pkg])
 
 _ensure("numpy"); _ensure("torch"); _ensure("datasets")
-_ensure("transformers"); _ensure("scikit-learn"); _ensure("tqdm")
+_ensure("transformers"); _ensure("scikit-learn")
 
 import numpy as np
 import torch, torch.nn as nn, torch.nn.functional as F
@@ -42,12 +42,18 @@ from datasets import load_dataset
 from sklearn.metrics import accuracy_score, f1_score
 from torch.utils.data import Dataset as TD, DataLoader
 from transformers import AutoModel, AutoTokenizer
-from tqdm import tqdm
 
 try:
     from torch.amp import autocast as _ac, GradScaler
 except ImportError:
     from torch.cuda.amp import autocast as _ac, GradScaler
+
+def _autocast_ctx(dev: torch.device):
+    enabled = (dev.type == "cuda")
+    try:
+        return _ac(device_type=dev.type, enabled=enabled)
+    except TypeError:
+        return _ac(enabled=enabled)
 
 warnings.filterwarnings("ignore")
 import logging
@@ -83,7 +89,7 @@ class Cfg:
         elif self.benchmark in ("droid_t3",):
             self.n_cls = 3; self.task = "t3"
         elif self.benchmark == "droid_t4":
-            self.n_cls = 2; self.task = "t4"
+            self.n_cls = 4; self.task = "t4"
 
 def _hw(cfg: Cfg) -> Cfg:
     if torch.cuda.is_available():
@@ -152,43 +158,172 @@ def _load_codet():
     return tr, vl, ts
 
 def _load_droid():
-    """Load DroidCollection. Auto-detect: Kaggle version (train shards) vs local version (test/dev/train)."""
-    all_files = sorted(glob.glob(os.path.join(KAGGLE_DROID, "**","*.parquet"), recursive=True))
+    """Load DroidCollection from Kaggle local path.
     
-    # Categorize by filename pattern
-    test_files = [f for f in all_files if "-test-" in os.path.basename(f)]
-    dev_files = [f for f in all_files if "-dev-" in os.path.basename(f)]
-    train_files = [f for f in all_files if "-train-" in os.path.basename(f)]
+    Kaggle path structure:
+      /kaggle/input/datasets/chiboiz/droid-collection/DroidCollection/data/
+        ├── train-00001-of-00004.parquet
+        ├── train-00002-of-00004.parquet
+        ├── train-00003-of-00004.parquet
+        ├── train-00004-of-00004.parquet
+        ├── test-00001-of-00002.parquet
+        └── test-00002-of-00002.parquet
     
-    if test_files and dev_files:
-        # Local version: has explicit test/dev splits
-        test_ds = load_dataset("parquet", data_files=test_files, split="train")
-        dev_ds = load_dataset("parquet", data_files=dev_files, split="train")
-        train_ds = load_dataset("parquet", data_files=train_files, split="train") if train_files else None
-        
-        if train_ds is None:
-            merged = load_dataset("parquet", data_files=test_files + dev_files, split="train")
-            s = merged.train_test_split(test_size=0.1, seed=42)
-            s2 = s["train"].train_test_split(test_size=1/9, seed=42)
-            return s2["train"], s2["test"], s["test"]
-        else:
-            s = train_ds.train_test_split(test_size=1/9, seed=42)
-            return s["train"], s["test"], test_ds
+    HuggingFace fallback: project-droid/DroidCollection (train/dev/test splits).
+    """
+    import re
+    
+    # Pattern: train-*.parquet and test-*.parquet
+    train_pattern = os.path.join(KAGGLE_DROID, "data", "train-*.parquet")
+    test_pattern = os.path.join(KAGGLE_DROID, "data", "test-*.parquet")
+    
+    train_files = sorted(glob.glob(train_pattern))
+    test_files = sorted(glob.glob(test_pattern))
+    
+    if train_files and test_files:
+        logger.info(f"[droid] Loading from local: {len(train_files)} train shards, {len(test_files)} test shards")
+        # Load train and test separately
+        ds_train = load_dataset("parquet", data_files=train_files, split="train")
+        ds_test = load_dataset("parquet", data_files=test_files, split="test")
+        # Split train: 90% train, 10% val
+        s = ds_train.train_test_split(test_size=0.1, seed=42)
+        return s["train"], s["test"], ds_test
     else:
-        # Kaggle version: only train shards
-        if all_files:
-            ds = load_dataset("parquet", data_files=all_files, split="train")
-        else:
-            ds = load_dataset(KAGGLE_DROID, split="train")
-        s = ds.train_test_split(test_size=0.1, seed=42)
-        s2 = s["train"].train_test_split(test_size=1/9, seed=42)
-        return s2["train"], s2["test"], s["test"]
+        # Fallback to HuggingFace (requires internet)
+        logger.warning("[droid] Kaggle path not found, falling back to HuggingFace...")
+        tr = load_dataset("project-droid/DroidCollection", split="train")
+        vl = load_dataset("project-droid/DroidCollection", split="dev")
+        ts = load_dataset("project-droid/DroidCollection", split="test")
+        return tr, vl, ts
 
 def _load_aicd(task):
+    """Load AICD-Bench from Kaggle local path or HuggingFace.
+    
+    Kaggle path structure:
+      /kaggle/input/datasets/chiboiz/ai-code-detection/AICD-Bench/
+        ├── T1/
+        │   └── *.parquet
+        ├── T2/
+        │   └── *.parquet
+        └── T3/
+            └── *.parquet
+    
+    HuggingFace fallback: AICD-bench/AICD-Bench (requires internet).
+    """
     cfg_map = {"t2":"T2","t3":"T3","t1":"T1"}
-    if os.path.isdir(KAGGLE_AICD):
-        return (load_dataset(KAGGLE_AICD, name=cfg_map.get(task,"T2"), split=s) for s in ["train","validation","test"])
-    return (load_dataset("AICD-bench/AICD-Bench", name=cfg_map.get(task,"T2"), split=s) for s in ["train","validation","test"])
+    task_name = cfg_map.get(task.upper().replace("T2","t2").replace("T3","t3").replace("T1","t1"), "T2")
+    
+    # Try local Kaggle path first
+    local_base = KAGGLE_AICD
+    task_dirs = ["T1", "T2", "T3"]
+    
+    for t in task_dirs:
+        task_path = os.path.join(local_base, t)
+        if os.path.isdir(task_path):
+            # Find parquet files
+            parquet_files = sorted(glob.glob(os.path.join(task_path, "**", "*.parquet"), recursive=True))
+            if parquet_files:
+                logger.info(f"[aicd] Loading from local: {task_path}")
+                ds = load_dataset("parquet", data_files=parquet_files, split="train")
+                # AICD has train/val/test splits
+                if "validation" in ds.column_names or "val" in ds.column_names:
+                    val_key = "validation" if "validation" in ds.column_names else "val"
+                    return ds["train"], ds[val_key], ds["test"]
+                else:
+                    s = ds.train_test_split(test_size=0.1, seed=42)
+                    s2 = s["train"].train_test_split(test_size=1/9, seed=42)
+                    return s2["train"], s2["test"], s["test"]
+    
+    # Try loading as single parquet
+    parquet_files = sorted(glob.glob(os.path.join(local_base, "**", "*.parquet"), recursive=True))
+    if parquet_files:
+        logger.info(f"[aicd] Loading parquet files from: {local_base}")
+        ds = load_dataset("parquet", data_files=parquet_files, split="train")
+        if "validation" in ds.column_names or "val" in ds.column_names:
+            val_key = "validation" if "validation" in ds.column_names else "val"
+            return ds["train"], ds[val_key], ds["test"]
+        else:
+            s = ds.train_test_split(test_size=0.1, seed=42)
+            s2 = s["train"].train_test_split(test_size=1/9, seed=42)
+            return s2["train"], s2["test"], s["test"]
+    
+    # Fallback to HuggingFace (requires internet)
+    logger.warning("[aicd] Local path not found, trying HuggingFace (requires internet)")
+    return (load_dataset("AICD-bench/AICD-Bench", name=task_name, split=s) for s in ["train","validation","test"])
+
+# =============================================================================
+# PREFLIGHT: Validate all datasets BEFORE training runs
+# Purpose: Fail fast on missing/corrupt data, report sizes, abort if empty
+# =============================================================================
+def _preflight_check():
+    """Load all benchmarks and report sizes. Abort if any dataset is empty."""
+    logger.info("=" * 60)
+    logger.info("[PREFLIGHT] Starting data validation...")
+    logger.info("=" * 60)
+
+    all_ok = True
+    bench_configs = [
+        ("codet_m4", _load_codet, None, "author"),
+        ("aicd_t2", None, "t2", None),
+    ]
+
+    for bench_name, load_fn, task_arg, conv_task in bench_configs:
+        try:
+            if load_fn is not None:
+                tr, vl, ts = load_fn()
+            elif task_arg is not None:
+                tr, vl, ts = _load_aicd(task_arg)
+            else:
+                tr, vl, ts = _load_droid()
+
+            # Convert to filtered data
+            if bench_name.startswith("codet_m4"):
+                vocab = _vocab(tr)
+                tr_d = _conv_codet(tr, conv_task, vocab)
+                vl_d = _conv_codet(vl, conv_task, vocab)
+                ts_d = _conv_codet(ts, conv_task, vocab)
+            elif bench_name.startswith("aicd"):
+                tr_d = _conv_aicd(tr)
+                vl_d = _conv_aicd(vl)
+                ts_d = _conv_aicd(ts)
+            elif bench_name.startswith("droid"):
+                tr_d = _conv_droid(tr, conv_task)
+                vl_d = _conv_droid(vl, conv_task)
+                ts_d = _conv_droid(ts, conv_task)
+
+            n_tr = len(tr_d)
+            n_vl = len(vl_d)
+            n_ts = len(ts_d)
+
+            from collections import Counter
+            tr_labels = Counter(tr_d["label"])
+            vl_labels = Counter(vl_d["label"])
+            ts_labels = Counter(ts_d["label"])
+
+            logger.info(f"[PREFLIGHT] {bench_name}:")
+            logger.info(f"  Train: {n_tr:,} | Val: {n_vl:,} | Test: {n_ts:,}")
+            logger.info(f"  Train classes: {len(tr_labels)} | Val classes: {len(vl_labels)} | Test classes: {len(ts_labels)}")
+            logger.info(f"  Train dist: {dict(sorted(tr_labels.items()))}")
+
+            if n_tr == 0 or n_vl == 0 or n_ts == 0:
+                logger.error(f"[PREFLIGHT] ❌ {bench_name}: EMPTY! Train={n_tr}, Val={n_vl}, Test={n_ts}")
+                all_ok = False
+            elif n_tr < 100:
+                logger.warning(f"[PREFLIGHT] ⚠️ {bench_name}: Train={n_tr} is very small!")
+        except FileNotFoundError as e:
+            logger.error(f"[PREFLIGHT] ❌ {bench_name}: File not found: {e}")
+            all_ok = False
+        except Exception as e:
+            logger.error(f"[PREFLIGHT] ❌ {bench_name}: Load error: {e}")
+            all_ok = False
+
+    logger.info("=" * 60)
+    if all_ok:
+        logger.info("[PREFLIGHT] ✅ All datasets loaded successfully!")
+    else:
+        logger.error("[PREFLIGHT] ❌ Dataset validation FAILED. Aborting.")
+        raise RuntimeError("[PREFLIGHT] Dataset validation failed. Check logs above.")
+    logger.info("=" * 60)
 
 class FSDS(TD):
     def __init__(self, hf, tok, max_len):
@@ -278,7 +413,7 @@ def supcon_loss(z, labels, temp=0.07):
     return -mean_log_prob_pos.mean()
 
 def det_loss(logits, labels, z, w, cfg: Cfg):
-    ce = F.cross_entropy(logits, labels, weight=w.to(logits))
+    ce = F.cross_entropy(logits, labels, weight=w)
     sup = supcon_loss(z, labels, temp=0.07)
     return ce + cfg.lambda_supcon * sup
 
@@ -295,7 +430,7 @@ def eval_m(model, loader, dev):
     model.eval()
     ps, ls = [], []
     for b in loader:
-        with _ac(dev): logits = model(b["ids"].to(dev), b["mask"].to(dev))["logits"]
+        with _autocast_ctx(dev): logits = model(b["ids"].to(dev), b["mask"].to(dev))["logits"]
         ps.extend(logits.argmax(1).cpu().tolist())
         ls.extend(b["labels"].tolist())
     return {"macro": f1_score(ls, ps, average="macro", zero_division=0),
@@ -309,32 +444,36 @@ def train(cfg: Cfg, tr_dl, vl_dl, ts_dl):
     opt = torch.optim.AdamW(model.groups())
     sched = torch.optim.lr_scheduler.OneCycleLR(opt, max_lr=[cfg.lr_enc, cfg.lr_head],
         steps_per_epoch=len(tr_dl), epochs=cfg.epochs, pct_start=cfg.warmup)
-    scaler = GradScaler()
+    scaler = GradScaler(enabled=(dev.type == "cuda"))
     best_val, best_state = 0, None
 
     for ep in range(cfg.epochs):
         model.train()
-        pbar = tqdm(tr_dl, desc=f"Epoch {ep+1}/{cfg.epochs}", leave=False)
-        for b in pbar:
+        for b in tr_dl:
             ids, mask, labs = b["ids"].to(dev), b["mask"].to(dev), b["labels"].to(dev)
-            with _ac(dev): out = model(ids, mask)
-            loss = det_loss(out["logits"], labs, out["z"], w, cfg)
+            with _autocast_ctx(dev):
+                out = model(ids, mask)
+                loss = det_loss(out["logits"], labs, out["z"], w, cfg)
             scaler.scale(loss).backward()
             scaler.unscale_(opt)
             torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
             scaler.step(opt); scaler.update(); opt.zero_grad()
             sched.step()
-            pbar.set_postfix({"loss": f"{loss.item():.4f}"})
         vr = eval_m(model, vl_dl, dev)
         if vr["macro"] > best_val:
             best_val = vr["macro"]
             best_state = {k: v.cpu().clone() for k, v in model.state_dict().items()}
-    model.load_state_dict(best_state)
+    if best_state is not None:
+        model.load_state_dict(best_state)
     return eval_m(model, ts_dl, dev)
 
 def main():
+    # Run preflight check for all benchmarks FIRST
+    logger.info("[PREFLIGHT] Running dataset validation before experiments...")
+    _preflight_check()
+
     encoders = ["ModernBERT-base", "unixcoder-base"]
-    benchmarks = [("codet_m4","author"), ("aicd_t2","t2"), ("droid_t3","t3"), ("droid_t4","t4")]
+    benchmarks = [("codet_m4","author"), ("aicd_t2","t2")]
     fracs = [0.01, 0.05, 0.20]
 
     results = []

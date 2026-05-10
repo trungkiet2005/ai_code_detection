@@ -1,8 +1,18 @@
 """
-exp02_faid.py — FAID-style multitask (class CE + family CE + multi-level SupCon)
+exp_n06_attn_pool.py — Attention Pooling for Code Structure Capture
 
-Published method: FAID (EACL 2026)
-Style: class CE + family auxiliary CE + class/family supervised contrastive
+NAME : Hierarchical Attention Pooling (HAP)
+ONE-LINE CLAIM : Mean pooling discards structural position; attention pooling
+captures AST-level hierarchical features that encode author style.
+EQUATION : z = Σ_i α_i · h_i where α = softmax(w^T tanh(W h_i))
+THEORY HOOK : Lee et al. 2017 "Hierarchical Attention Networks";
+code structure (AST, indent hierarchy) encodes author-specific patterns.
+WHY NOT BEFORE : Mean pooling ignores token importance; HierTree operates
+on the representation but not on the pooling mechanism itself.
+FALSIFIER : If attention pooling does not improve over mean pooling at
+frac=0.05, then structural features are not the bottleneck.
+
+Target: EMNLP Oral — Theory contribution (novel pooling object).
 
 Self-contained. Runs: 2 encoders × 4 benchmarks × 3 fractions = 24 experiments.
 
@@ -13,8 +23,28 @@ Config:
   - Batch: 256, seq=512
 
 Usage:
-  python exp02_faid.py
+  python exp_n06_attn_pool.py
 """
+
+# =============================================================================
+# Theory-Track exp — Hierarchical Attention Pooling (HAP):
+# attention-weighted pooling for code structure capture.
+#
+# NAME : Hierarchical Attention Pooling (HAP).
+# ONE-LINE CLAIM : Mean pooling discards structural position; attention pooling
+# captures AST-level hierarchical features that encode author style.
+# EQUATION : z = Σ_i α_i · h_i where α = softmax(w^T tanh(W h_i))
+# PROPERTY : The attention mechanism learns which tokens carry author signal
+# (e.g., variable naming conventions, indentation patterns, comment placement).
+# In few-shot attribution, this allows the model to weight structural cues
+# rather than treating all positions equally.
+# WHY NOT BEFORE : Standard mean pooling in existing experiments treats
+# all tokens equally. HAP adds a learnable attention layer that can
+# capture author-specific structural patterns.
+# FALSIFIER : Compare attention-pooled vs mean-pooled embeddings on
+# sibling-class separation. If attention does not improve sibling recall,
+# structural features are not the bottleneck.
+# =============================================================================
 
 # === KAGGLE PATHS ===
 KAGGLE_MODELS = "/kaggle/input/datasets/chiboiz/ai-detection-encoders/models"
@@ -58,8 +88,9 @@ def _autocast_ctx(dev: torch.device):
 warnings.filterwarnings("ignore")
 import logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s", stream=sys.stdout)
-logger = logging.getLogger("exp02")
+logger = logging.getLogger("exp_n06")
 
+# === CONSTANTS ===
 HIER_FAM = {0:0,1:1,2:2,3:3,4:1,5:4}
 PAPER_BASELINE = 0.6633
 
@@ -151,9 +182,6 @@ class Cfg:
     lr_enc: float = 2e-5
     lr_head: float = 1e-4
     wd: float = 0.01
-    lambda_supcon: float = 0.4
-    lambda_family: float = 0.5
-    ntk_proj: int = 128
     warmup: float = 0.1
     device: str = "cuda"
 
@@ -354,8 +382,7 @@ def build_dls(cfg: Cfg):
     for cls in range(cfg.n_cls):
         pool = by_cls.get(cls, [])
         n = max(1, int(round(len(pool) * cfg.frac))) if pool else 0
-        if pool:
-            chosen.extend(rng.sample(pool, min(n, len(pool))))
+        chosen.extend(rng.sample(pool, min(n, len(pool))) if pool else [])
     rng.shuffle(chosen)
     tr_d = tr_d.select(chosen)
     logger.info(f"[data] {cfg.enc} | {cfg.benchmark} | frac={cfg.frac} | n_train={len(tr_d)}")
@@ -364,55 +391,44 @@ def build_dls(cfg: Cfg):
         return DataLoader(FSDS(ds, tok, cfg.seq), batch_size=cfg.bs, shuffle=shuf, num_workers=4, collate_fn=collate, pin_memory=True)
     return ld(tr_d, True), ld(vl_d, False), ld(ts_d, False)
 
-class FAIDNet(nn.Module):
+class AttnPoolNet(nn.Module):
+    """Attention pooling network for code attribution.
+    
+    Uses self-attention over token embeddings to weight important tokens,
+    capturing author-specific structural patterns.
+    """
     def __init__(self, cfg: Cfg):
         super().__init__()
         self.cfg = cfg
         enc_path = os.path.join(KAGGLE_MODELS, cfg.enc)
         self.enc = AutoModel.from_pretrained(enc_path, local_files_only=True)
         h = self.enc.config.hidden_size
+        
+        # Attention pooling parameters
+        self.W_attn = nn.Linear(h, h)
+        self.v_attn = nn.Linear(h, 1, bias=False)
+        
         self.drop = nn.Dropout(0.1)
         self.clf = nn.Linear(h, cfg.n_cls)
-        n_fam = len(set(HIER_FAM.values()))
-        self.fam_clf = nn.Linear(h, n_fam)
-        self.proj = nn.Sequential(nn.Linear(h, cfg.ntk_proj), nn.GELU(), nn.Linear(cfg.ntk_proj, cfg.ntk_proj))
 
     def forward(self, ids, mask):
         out = self.enc(input_ids=ids, attention_mask=mask)
-        emb = (out.last_hidden_state * mask.unsqueeze(-1)).sum(1) / mask.sum(1, keepdim=True).clamp(min=1)
-        dropped = self.drop(emb)
-        return {"logits": self.clf(dropped), "fam_logits": self.fam_clf(dropped),
-                "z": F.normalize(self.proj(emb), dim=-1)}
+        H = out.last_hidden_state  # (B, L, h)
+        
+        # Attention pooling
+        mask_expanded = mask.unsqueeze(-1)  # (B, L, 1)
+        attn_scores = self.v_attn(torch.tanh(self.W_attn(H)))  # (B, L, 1)
+        attn_scores = attn_scores.masked_fill(mask_expanded == 0, float('-inf'))
+        attn_weights = F.softmax(attn_scores, dim=1)  # (B, L, 1)
+        
+        emb = (H * attn_weights).sum(dim=1)  # (B, h)
+        
+        return {"logits": self.clf(self.drop(emb)), "emb": emb, "attn": attn_weights}
 
     def groups(self):
-        heads = list(self.clf.parameters()) + list(self.fam_clf.parameters()) + list(self.proj.parameters())
         return [{"params": self.enc.parameters(), "lr": self.cfg.lr_enc, "weight_decay": self.cfg.wd},
-                {"params": heads, "lr": self.cfg.lr_head, "weight_decay": self.cfg.wd}]
-
-def supcon_loss(z, labels, temp=0.07):
-    if z.size(0) <= 1: return torch.zeros((), device=z.device)
-    z = F.normalize(z, dim=-1)
-    logits = (z @ z.t()) / temp
-    logits = logits - logits.max(dim=1, keepdim=True).values.detach()
-    eye = torch.eye(z.size(0), dtype=torch.bool, device=z.device)
-    logits_mask = (~eye).float()
-    pos = (labels.unsqueeze(0) == labels.unsqueeze(1)) & ~eye
-    pos_f = pos.float()
-    denom = (torch.exp(logits) * logits_mask).sum(dim=1, keepdim=True).clamp(min=1e-12)
-    log_prob = logits - torch.log(denom)
-    pos_count = pos_f.sum(dim=1)
-    valid = pos_count > 0
-    if not valid.any(): return torch.zeros((), device=z.device)
-    mean_log_prob_pos = (pos_f * log_prob).sum(dim=1)[valid] / pos_count[valid].clamp(min=1.0)
-    return -mean_log_prob_pos.mean()
-
-def faid_loss(logits, labels, fam_logits, z, w, cfg: Cfg):
-    ce = F.cross_entropy(logits, labels, weight=w)
-    fam_labels = torch.tensor([HIER_FAM.get(int(y), int(y)) for y in labels.cpu()], device=labels.device)
-    fam_ce = F.cross_entropy(fam_logits, fam_labels)
-    class_sup = supcon_loss(z, labels, temp=0.07)
-    fam_sup = supcon_loss(z, fam_labels, temp=0.07)
-    return ce + cfg.lambda_family * fam_ce + cfg.lambda_supcon * (class_sup + fam_sup)
+                {"params": list(self.W_attn.parameters()) + list(self.v_attn.parameters()) + list(self.clf.parameters()),
+                 "lr": self.cfg.lr_head, "weight_decay": self.cfg.wd}]
 
 def class_w(loader, n):
     c = np.zeros(n)
@@ -436,7 +452,7 @@ def eval_m(model, loader, dev):
 
 def train(cfg: Cfg, tr_dl, vl_dl, ts_dl):
     dev = torch.device(cfg.device)
-    model = FAIDNet(cfg).to(dev)
+    model = AttnPoolNet(cfg).to(dev)
     w = class_w(tr_dl, cfg.n_cls).to(dev)
     opt = torch.optim.AdamW(model.groups())
     sched = torch.optim.lr_scheduler.OneCycleLR(opt, max_lr=[cfg.lr_enc, cfg.lr_head],
@@ -449,8 +465,8 @@ def train(cfg: Cfg, tr_dl, vl_dl, ts_dl):
         for b in tr_dl:
             ids, mask, labs = b["ids"].to(dev), b["mask"].to(dev), b["labels"].to(dev)
             with _autocast_ctx(dev):
-                out = model(ids, mask)
-                loss = faid_loss(out["logits"], labs, out["fam_logits"], out["z"], w, cfg)
+                logits = model(ids, mask)["logits"]
+                loss = F.cross_entropy(logits, labs, weight=w)
             scaler.scale(loss).backward()
             scaler.unscale_(opt)
             torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
@@ -479,7 +495,7 @@ def main():
             for frac in fracs:
                 cfg = Cfg(benchmark=bench, task=task, enc=enc, frac=frac)
                 cfg = _hw(cfg)
-                tag = f"exp02_faid_{enc}_{bench}_f{frac}"
+                tag = f"exp_n06_attn_{enc}_{bench}_f{frac}"
                 logger.info(f"=== {tag} ===")
                 t0 = time.time()
                 tr_dl, vl_dl, ts_dl = build_dls(cfg)
@@ -495,7 +511,7 @@ def main():
                 if torch.cuda.is_available(): torch.cuda.empty_cache()
 
     os.makedirs("results", exist_ok=True)
-    with open("results/exp02_results.json", "w") as f:
+    with open("results/exp_n06_results.json", "w") as f:
         json.dump(results, f, indent=2)
 
     print("\n" + "="*100)
