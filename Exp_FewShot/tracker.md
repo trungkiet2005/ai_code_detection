@@ -6,129 +6,114 @@
 
 ---
 
-## 1. Leaderboards
+## 1. Leaderboard
 
-**Unified source:** `results/summary.json` from:
+**Unified source:** `results/summary.json`, regenerated from:
 
 ```bash
 python Exp_FewShot/aggregate_fs_results.py results
 ```
 
-**Column Trk:** `test` = `Exp_FewShot/testing/` (`exp_fs_*`); `novel` = `Exp_FewShot/novel/` (`exp_n*`). **d vs paper** = test Macro-F1 minus UniXcoder full-data **0.6633**.
+**Column notes:** `Trk` = `test` for `Exp_FewShot/testing/` and `novel` for `Exp_FewShot/novel/`. `d vs paper` = test Macro-F1 minus UniXcoder full-data **0.6633**. `n` is JSON count in that `(method, regime)` cell; duplicated downloads can inflate `n` without adding independent seeds.
 
-**Coverage:** **104** JSON files ingested -> **87** `(method, regime)` cells in `summary.json`. Duplicate filenames `*__dup*.json` repeat the same metrics (ignore as extra seeds). **`exp_fs_00`** baseline CE (**0.1836**) appears only in Section 6 run history -- **no** `exp_fs_00_*.json` in `results/` yet. **`exp_fs_99_K128_seed42.json`** is an incomplete stub (`method=Test`) -- **excluded** from the `K=128` table below; delete or fix it for clean aggregates.
+**Coverage:** **107** JSON files ingested -> **91** `(method, regime)` cells in `summary.json`; **90** paper-usable cells after excluding the incomplete `method=Test` stub. New since the previous tracker: `FS-TreeWassersteinGenealogy` entries are now included. `exp_fs_99_K128_seed42.json` is still an incomplete stub (`method=Test`) and should be deleted or fixed for clean aggregates.
 
-No JSON yet for scripts not listed under Canonical JSON (example: `exp_n20_*` if never run).
+| Rank | Trk | Regime | Train | Method | Test | Std | Min | Max | Val | Gap | d vs paper | n | JSON files |
+|:-:|:-:|:-:|:-:|:--|-:|-:|-:|-:|-:|-:|-:|-:|:--|
+| 1 | novel | `frac=0.0500` | ~25K | FS-ConformalMondrian | 0.6721 | 0.0000 | 0.6721 | 0.6721 | 0.7147 | +0.0426 | +0.0088 | 1 | `exp_n07_conformal_mondrian_frac0.05_seed42.json` |
+| 2 | test | `frac=0.0500` | ~25K | FS-Hier-NTK | 0.6709 | 0.0000 | 0.6709 | 0.6709 | 0.7041 | +0.0332 | +0.0076 | 2 | `exp_fs_inline_hier_ntk_frac0.05_seed42.json`<br>`exp_fs_inline_hier_ntk_frac0.05_seed42__dup1.json` |
+| 3 | test | `frac=0.0500` | ~25K | FS-HierTree | 0.6682 | 0.0000 | 0.6682 | 0.6682 | 0.6824 | +0.0142 | +0.0049 | 2 | `exp_fs_inline_hier_frac0.05_seed42.json`<br>`exp_fs_inline_hier_frac0.05_seed42__dup1.json` |
+| 4 | novel | `frac=0.0500` | ~25K | FS-SlicedWassersteinClass | 0.6666 | 0.0000 | 0.6666 | 0.6666 | 0.7129 | +0.0463 | +0.0033 | 1 | `exp_n14_sliced_wasserstein_frac0.05_seed42.json` |
+| 5 | novel | `frac=0.0500` | ~25K | FS-FrontDoor-StyleMediator | 0.6661 | 0.0000 | 0.6661 | 0.6661 | 0.7103 | +0.0442 | +0.0028 | 1 | `exp_n02_frontdoor_style_frac0.05_seed42.json` |
+| 6 | novel | `frac=0.0500` | ~25K | FS-VIB | 0.6659 | 0.0000 | 0.6659 | 0.6659 | 0.7006 | +0.0347 | +0.0026 | 1 | `exp_n10_vib_frac0.05_seed42.json` |
+| 7 | novel | `frac=0.0500` | ~25K | FS-VarianceInvariantSource | 0.6654 | 0.0000 | 0.6654 | 0.6654 | 0.6899 | +0.0246 | +0.0021 | 1 | `exp_n11_vic_source_frac0.05_seed42.json` |
+| 8 | test | `frac=0.0500` | ~25K | FS-NTKAlign | 0.6652 | 0.0000 | 0.6652 | 0.6652 | 0.7071 | +0.0419 | +0.0019 | 1 | `exp_fs_inline_ntkalign_frac0.05_seed42.json` |
+| 9 | novel | `frac=0.0500` | ~25K | FS-TENT-TTA | 0.6651 | 0.0000 | 0.6651 | 0.6651 | 0.6857 | +0.0207 | +0.0018 | 1 | `exp_n15_tent_tta_frac0.05_seed42.json` |
+| 10 | test | `frac=0.0500` | ~25K | FS-Focal | 0.6616 | 0.0000 | 0.6616 | 0.6616 | 0.6975 | +0.0359 | -0.0017 | 3 | `exp_fs_inline_focal_frac0.05_seed42.json`<br>`exp_fs_inline_focal_frac0.05_seed42__dup1.json`<br>`exp_fs_inline_focal_frac0.05_seed42__dup2.json` |
+| 11 | novel | `frac=0.0500` | ~25K | FS-EnergyOOD | 0.6551 | 0.0000 | 0.6551 | 0.6551 | 0.6753 | +0.0203 | -0.0082 | 1 | `exp_n16_energy_ood_frac0.05_seed42.json` |
+| 12 | test | `frac=0.0500` | ~25K | FS-Baseline-UniXcoder | 0.6512 | 0.0000 | 0.6512 | 0.6512 | 0.6912 | +0.0400 | -0.0121 | 1 | `exp_fs_baseline_unixcoder_frac0.05_seed42.json` |
+| 13 | novel | `frac=0.0500` | ~25K | FS-DataMapsCurriculum | 0.6481 | 0.0000 | 0.6481 | 0.6481 | 0.6849 | +0.0368 | -0.0152 | 1 | `exp_n18_datamaps_curriculum_frac0.05_seed42.json` |
+| 14 | novel | `frac=0.0500` | ~25K | FS-TreeWassersteinGenealogy | 0.6467 | 0.0000 | 0.6467 | 0.6467 | 0.6702 | +0.0235 | -0.0166 | 1 | `exp_n13_tree_wasserstein_frac0.05_seed42.json` |
+| 15 | novel | `frac=0.0500` | ~25K | FS-IRM | 0.6430 | 0.0000 | 0.6430 | 0.6430 | 0.6672 | +0.0242 | -0.0203 | 1 | `exp_n19_irm_frac0.05_seed42.json` |
+| 16 | novel | `frac=0.0500` | ~25K | FS-PACBayes-SampleFloor | 0.6341 | 0.0000 | 0.6341 | 0.6341 | 0.6835 | +0.0494 | -0.0292 | 1 | `exp_n09_pac_bayes_floor_frac0.05_seed42.json` |
+| 17 | novel | `frac=0.0500` | ~25K | FS-SRD-SiblingResidual | 0.6202 | 0.0000 | 0.6202 | 0.6202 | 0.6742 | +0.0540 | -0.0431 | 2 | `exp_n01_sibling_residual_frac0.05_seed42.json`<br>`exp_n01_sibling_residual_frac0.05_seed42__dup1.json` |
+| 18 | test | `frac=0.0500` | ~25K | FS-Baseline-CodeBERT | 0.5977 | 0.0000 | 0.5977 | 0.5977 | 0.6469 | +0.0492 | -0.0656 | 1 | `exp_fs_baseline_codebert_frac0.05_seed42.json` |
+| 19 | test | `frac=0.0500` | ~25K | FS-Baseline-GraphCodeBERT | 0.5951 | 0.0000 | 0.5951 | 0.5951 | 0.6856 | +0.0905 | -0.0682 | 1 | `exp_fs_baseline_graphcodebert_frac0.05_seed42.json` |
+| 20 | novel | `frac=0.0100` | ~5K | FS-ConformalMondrian | 0.5750 | 0.0000 | 0.5750 | 0.5750 | 0.5944 | +0.0194 | -0.0883 | 1 | `exp_n07_conformal_mondrian_frac0.01_seed42.json` |
+| 21 | test | `frac=0.0100` | ~5K | FS-Baseline-UniXcoder | 0.5744 | 0.0000 | 0.5744 | 0.5744 | 0.5839 | +0.0095 | -0.0889 | 1 | `exp_fs_baseline_unixcoder_frac0.01_seed42.json` |
+| 22 | novel | `frac=0.0100` | ~5K | FS-SlicedWassersteinClass | 0.5729 | 0.0000 | 0.5729 | 0.5729 | 0.5884 | +0.0155 | -0.0904 | 1 | `exp_n14_sliced_wasserstein_frac0.01_seed42.json` |
+| 23 | novel | `frac=0.0100` | ~5K | FS-VarianceInvariantSource | 0.5701 | 0.0000 | 0.5701 | 0.5701 | 0.5766 | +0.0065 | -0.0932 | 1 | `exp_n11_vic_source_frac0.01_seed42.json` |
+| 24 | test | `frac=0.0100` | ~5K | FS-NTKAlign | 0.5697 | 0.0000 | 0.5697 | 0.5697 | 0.5614 | -0.0083 | -0.0936 | 1 | `exp_fs_inline_ntkalign_frac0.01_seed42.json` |
+| 25 | novel | `frac=0.0100` | ~5K | FS-DataMapsCurriculum | 0.5669 | 0.0000 | 0.5669 | 0.5669 | 0.6070 | +0.0401 | -0.0964 | 1 | `exp_n18_datamaps_curriculum_frac0.01_seed42.json` |
+| 26 | novel | `frac=0.0100` | ~5K | FS-FrontDoor-StyleMediator | 0.5658 | 0.0000 | 0.5658 | 0.5658 | 0.5963 | +0.0305 | -0.0975 | 1 | `exp_n02_frontdoor_style_frac0.01_seed42.json` |
+| 27 | test | `frac=0.0100` | ~5K | FS-HierTree | 0.5654 | 0.0000 | 0.5654 | 0.5654 | 0.5971 | +0.0317 | -0.0979 | 2 | `exp_fs_inline_hier_frac0.01_seed42.json`<br>`exp_fs_inline_hier_frac0.01_seed42__dup1.json` |
+| 28 | novel | `frac=0.0500` | ~25K | FS-SpectralEigengap | 0.5645 | 0.0000 | 0.5645 | 0.5645 | 0.6119 | +0.0474 | -0.0988 | 1 | `exp_n08_spectral_eigengap_frac0.05_seed42.json` |
+| 29 | novel | `frac=0.0100` | ~5K | FS-VIB | 0.5628 | 0.0000 | 0.5628 | 0.5628 | 0.5764 | +0.0135 | -0.1005 | 1 | `exp_n10_vib_frac0.01_seed42.json` |
+| 30 | test | `frac=0.0100` | ~5K | FS-Hier-NTK | 0.5608 | 0.0000 | 0.5608 | 0.5608 | 0.5708 | +0.0099 | -0.1025 | 2 | `exp_fs_inline_hier_ntk_frac0.01_seed42.json`<br>`exp_fs_inline_hier_ntk_frac0.01_seed42__dup1.json` |
+| 31 | novel | `frac=0.0100` | ~5K | FS-TENT-TTA | 0.5596 | 0.0000 | 0.5596 | 0.5596 | 0.5631 | +0.0034 | -0.1037 | 1 | `exp_n15_tent_tta_frac0.01_seed42.json` |
+| 32 | novel | `frac=0.0100` | ~5K | FS-PACBayes-SampleFloor | 0.5574 | 0.0000 | 0.5574 | 0.5574 | 0.5848 | +0.0274 | -0.1059 | 1 | `exp_n09_pac_bayes_floor_frac0.01_seed42.json` |
+| 33 | test | `frac=0.0100` | ~5K | FS-Focal | 0.5565 | 0.0000 | 0.5565 | 0.5565 | 0.5765 | +0.0200 | -0.1068 | 3 | `exp_fs_inline_focal_frac0.01_seed42.json`<br>`exp_fs_inline_focal_frac0.01_seed42__dup1.json`<br>`exp_fs_inline_focal_frac0.01_seed42__dup2.json` |
+| 34 | novel | `frac=0.0100` | ~5K | FS-TreeWassersteinGenealogy | 0.5425 | 0.0000 | 0.5425 | 0.5425 | 0.5460 | +0.0035 | -0.1208 | 1 | `exp_n13_tree_wasserstein_frac0.01_seed42.json` |
+| 35 | novel | `frac=0.0100` | ~5K | FS-SRD-SiblingResidual | 0.5417 | 0.0000 | 0.5417 | 0.5417 | 0.5784 | +0.0367 | -0.1216 | 2 | `exp_n01_sibling_residual_frac0.01_seed42.json`<br>`exp_n01_sibling_residual_frac0.01_seed42__dup1.json` |
+| 36 | novel | `frac=0.0100` | ~5K | FS-EnergyOOD | 0.5178 | 0.0000 | 0.5178 | 0.5178 | 0.5240 | +0.0062 | -0.1455 | 1 | `exp_n16_energy_ood_frac0.01_seed42.json` |
+| 37 | test | `frac=0.0100` | ~5K | FS-Baseline-GraphCodeBERT | 0.5014 | 0.0000 | 0.5014 | 0.5014 | 0.5760 | +0.0746 | -0.1619 | 1 | `exp_fs_baseline_graphcodebert_frac0.01_seed42.json` |
+| 38 | test | `frac=0.0100` | ~5K | FS-Baseline-CodeBERT | 0.5007 | 0.0000 | 0.5007 | 0.5007 | 0.5831 | +0.0824 | -0.1626 | 1 | `exp_fs_baseline_codebert_frac0.01_seed42.json` |
+| 39 | novel | `frac=0.0100` | ~5K | FS-SpectralEigengap | 0.4822 | 0.0000 | 0.4822 | 0.4822 | 0.5039 | +0.0217 | -0.1811 | 1 | `exp_n08_spectral_eigengap_frac0.01_seed42.json` |
+| 40 | novel | `frac=0.0100` | ~5K | FS-IRM | 0.4693 | 0.0000 | 0.4693 | 0.4693 | 0.4831 | +0.0138 | -0.1940 | 1 | `exp_n19_irm_frac0.01_seed42.json` |
+| 41 | test | `frac=0.0500` | ~25K | FS-NTKAlign-Frozen | 0.4608 | 0.0000 | 0.4608 | 0.4608 | 0.4947 | +0.0339 | -0.2025 | 1 | `exp_fs_04_frac0.05_seed42.json` |
+| 42 | test | `frac=0.0500` | ~25K | FS-SupCon-Frozen | 0.4607 | 0.0000 | 0.4607 | 0.4607 | 0.4947 | +0.0340 | -0.2026 | 1 | `exp_fs_05_frac0.05_seed42.json` |
+| 43 | test | `frac=0.0100` | ~5K | FS-SupCon-Frozen | 0.4038 | 0.0000 | 0.4038 | 0.4038 | 0.4221 | +0.0183 | -0.2595 | 1 | `exp_fs_05_frac0.01_seed42.json` |
+| 44 | test | `frac=0.0100` | ~5K | FS-NTKAlign-Frozen | 0.4037 | 0.0000 | 0.4037 | 0.4037 | 0.4220 | +0.0183 | -0.2596 | 1 | `exp_fs_04_frac0.01_seed42.json` |
+| 45 | test | `K=128` | ~768 | FS-Focal | 0.3749 | 0.0000 | 0.3749 | 0.3749 | 0.3378 | -0.0371 | -0.2884 | 3 | `exp_fs_inline_focal_K128_seed42.json`<br>`exp_fs_inline_focal_K128_seed42__dup1.json`<br>`exp_fs_inline_focal_K128_seed42__dup2.json` |
+| 46 | test | `K=128` | ~768 | FS-Baseline-UniXcoder | 0.3727 | 0.0000 | 0.3727 | 0.3727 | 0.3968 | +0.0241 | -0.2906 | 1 | `exp_fs_baseline_unixcoder_K128_seed42.json` |
+| 47 | novel | `K=128` | ~768 | FS-VIB | 0.3510 | 0.0000 | 0.3510 | 0.3510 | 0.3487 | -0.0023 | -0.3123 | 1 | `exp_n10_vib_K128_seed42.json` |
+| 48 | test | `K=128` | ~768 | FS-HierTree | 0.3492 | 0.0000 | 0.3492 | 0.3492 | 0.3089 | -0.0403 | -0.3141 | 2 | `exp_fs_inline_hier_K128_seed42.json`<br>`exp_fs_inline_hier_K128_seed42__dup1.json` |
+| 49 | novel | `K=128` | ~768 | FS-SlicedWassersteinClass | 0.3453 | 0.0000 | 0.3453 | 0.3453 | 0.3354 | -0.0100 | -0.3180 | 1 | `exp_n14_sliced_wasserstein_K128_seed42.json` |
+| 50 | novel | `K=128` | ~768 | FS-DataMapsCurriculum | 0.3397 | 0.0000 | 0.3397 | 0.3397 | 0.3119 | -0.0278 | -0.3236 | 1 | `exp_n18_datamaps_curriculum_K128_seed42.json` |
+| 51 | novel | `K=128` | ~768 | FS-FrontDoor-StyleMediator | 0.3373 | 0.0000 | 0.3373 | 0.3373 | 0.3052 | -0.0321 | -0.3260 | 1 | `exp_n02_frontdoor_style_K128_seed42.json` |
+| 52 | novel | `K=128` | ~768 | FS-ConformalMondrian | 0.3338 | 0.0000 | 0.3338 | 0.3338 | 0.3244 | -0.0094 | -0.3295 | 1 | `exp_n07_conformal_mondrian_K128_seed42.json` |
+| 53 | novel | `K=128` | ~768 | FS-TENT-TTA | 0.3176 | 0.0000 | 0.3176 | 0.3176 | 0.3025 | -0.0151 | -0.3457 | 1 | `exp_n15_tent_tta_K128_seed42.json` |
+| 54 | novel | `K=128` | ~768 | FS-TreeWassersteinGenealogy | 0.3165 | 0.0000 | 0.3165 | 0.3165 | 0.2834 | -0.0331 | -0.3468 | 1 | `exp_n13_tree_wasserstein_K128_seed42.json` |
+| 55 | novel | `K=128` | ~768 | FS-IRM | 0.3160 | 0.0000 | 0.3160 | 0.3160 | 0.3163 | +0.0003 | -0.3473 | 1 | `exp_n19_irm_K128_seed42.json` |
+| 56 | novel | `K=128` | ~768 | FS-SRD-SiblingResidual | 0.3130 | 0.0000 | 0.3130 | 0.3130 | 0.3018 | -0.0113 | -0.3503 | 2 | `exp_n01_sibling_residual_K128_seed42.json`<br>`exp_n01_sibling_residual_K128_seed42__dup1.json` |
+| 57 | novel | `K=128` | ~768 | FS-PACBayes-SampleFloor | 0.2930 | 0.0000 | 0.2930 | 0.2930 | 0.3221 | +0.0292 | -0.3703 | 1 | `exp_n09_pac_bayes_floor_K128_seed42.json` |
+| 58 | test | `K=128` | ~768 | FS-NTKAlign | 0.2929 | 0.0000 | 0.2929 | 0.2929 | 0.3348 | +0.0419 | -0.3704 | 1 | `exp_fs_inline_ntkalign_K128_seed42.json` |
+| 59 | novel | `K=128` | ~768 | FS-VarianceInvariantSource | 0.2848 | 0.0000 | 0.2848 | 0.2848 | 0.3118 | +0.0270 | -0.3785 | 1 | `exp_n11_vic_source_K128_seed42.json` |
+| 60 | test | `K=128` | ~768 | FS-Hier-NTK | 0.2775 | 0.0000 | 0.2775 | 0.2775 | 0.3139 | +0.0364 | -0.3858 | 2 | `exp_fs_inline_hier_ntk_K128_seed42.json`<br>`exp_fs_inline_hier_ntk_K128_seed42__dup1.json` |
+| 61 | test | `K=128` | ~768 | FS-Baseline-CodeBERT | 0.2651 | 0.0000 | 0.2651 | 0.2651 | 0.2946 | +0.0295 | -0.3982 | 1 | `exp_fs_baseline_codebert_K128_seed42.json` |
+| 62 | novel | `K=128` | ~768 | FS-EnergyOOD | 0.2404 | 0.0000 | 0.2404 | 0.2404 | 0.2946 | +0.0543 | -0.4229 | 1 | `exp_n16_energy_ood_K128_seed42.json` |
+| 63 | novel | `K=128` | ~768 | FS-SpectralEigengap | 0.2331 | 0.0000 | 0.2331 | 0.2331 | 0.2181 | -0.0149 | -0.4302 | 1 | `exp_n08_spectral_eigengap_K128_seed42.json` |
+| 64 | test | `K=128` | ~768 | FS-Baseline-GraphCodeBERT | 0.2191 | 0.0000 | 0.2191 | 0.2191 | 0.3059 | +0.0868 | -0.4442 | 1 | `exp_fs_baseline_graphcodebert_K128_seed42.json` |
+| 65 | novel | `K=32` | ~192 | FS-TreeWassersteinGenealogy | 0.1907 | 0.0000 | 0.1907 | 0.1907 | 0.2039 | +0.0132 | -0.4726 | 1 | `exp_n13_tree_wasserstein_K32_seed42.json` |
+| 66 | novel | `frac=0.0500` | ~25K | FS-Prototypical | 0.1904 | 0.0000 | 0.1904 | 0.1904 | 0.2274 | +0.0370 | -0.4729 | 1 | `exp_n17_prototypical_frac0.05_seed42.json` |
+| 67 | novel | `K=32` | ~192 | FS-ConformalMondrian | 0.1897 | 0.0000 | 0.1897 | 0.1897 | 0.2225 | +0.0328 | -0.4736 | 1 | `exp_n07_conformal_mondrian_K32_seed42.json` |
+| 68 | novel | `K=32` | ~192 | FS-SRD-SiblingResidual | 0.1894 | 0.0000 | 0.1894 | 0.1894 | 0.1949 | +0.0055 | -0.4739 | 2 | `exp_n01_sibling_residual_K32_seed42.json`<br>`exp_n01_sibling_residual_K32_seed42__dup1.json` |
+| 69 | test | `K=32` | ~192 | FS-NTKAlign | 0.1831 | 0.0000 | 0.1831 | 0.1831 | 0.2280 | +0.0449 | -0.4802 | 1 | `exp_fs_inline_ntkalign_K32_seed42.json` |
+| 70 | novel | `K=32` | ~192 | FS-DataMapsCurriculum | 0.1812 | 0.0000 | 0.1812 | 0.1812 | 0.2226 | +0.0414 | -0.4821 | 1 | `exp_n18_datamaps_curriculum_K32_seed42.json` |
+| 71 | novel | `K=32` | ~192 | FS-VIB | 0.1803 | 0.0000 | 0.1803 | 0.1803 | 0.2229 | +0.0427 | -0.4830 | 1 | `exp_n10_vib_K32_seed42.json` |
+| 72 | novel | `K=32` | ~192 | FS-PACBayes-SampleFloor | 0.1753 | 0.0000 | 0.1753 | 0.1753 | 0.2388 | +0.0635 | -0.4880 | 1 | `exp_n09_pac_bayes_floor_K32_seed42.json` |
+| 73 | novel | `K=32` | ~192 | FS-VarianceInvariantSource | 0.1635 | 0.0000 | 0.1635 | 0.1635 | 0.2181 | +0.0546 | -0.4998 | 1 | `exp_n11_vic_source_K32_seed42.json` |
+| 74 | novel | `K=32` | ~192 | FS-SpectralEigengap | 0.1522 | 0.0000 | 0.1522 | 0.1522 | 0.1676 | +0.0154 | -0.5111 | 1 | `exp_n08_spectral_eigengap_K32_seed42.json` |
+| 75 | novel | `K=32` | ~192 | FS-SlicedWassersteinClass | 0.1499 | 0.0000 | 0.1499 | 0.1499 | 0.1923 | +0.0424 | -0.5134 | 1 | `exp_n14_sliced_wasserstein_K32_seed42.json` |
+| 76 | test | `K=128` | ~768 | FS-SupCon-Frozen | 0.1493 | 0.0000 | 0.1493 | 0.1493 | 0.2522 | +0.1029 | -0.5140 | 1 | `exp_fs_05_K128_seed42.json` |
+| 77 | novel | `K=32` | ~192 | FS-FrontDoor-StyleMediator | 0.1484 | 0.0000 | 0.1484 | 0.1484 | 0.2260 | +0.0776 | -0.5149 | 1 | `exp_n02_frontdoor_style_K32_seed42.json` |
+| 78 | test | `K=128` | ~768 | FS-NTKAlign-Frozen | 0.1479 | 0.0000 | 0.1479 | 0.1479 | 0.2465 | +0.0986 | -0.5154 | 1 | `exp_fs_04_K128_seed42.json` |
+| 79 | novel | `K=32` | ~192 | FS-TENT-TTA | 0.1409 | 0.0000 | 0.1409 | 0.1409 | 0.2089 | +0.0680 | -0.5224 | 1 | `exp_n15_tent_tta_K32_seed42.json` |
+| 80 | test | `K=32` | ~192 | FS-NTKAlign-Frozen | 0.1348 | 0.0000 | 0.1348 | 0.1348 | 0.1338 | -0.0010 | -0.5285 | 1 | `exp_fs_04_K32_seed42.json` |
+| 81 | test | `K=32` | ~192 | FS-SupCon-Frozen | 0.1347 | 0.0000 | 0.1347 | 0.1347 | 0.1338 | -0.0009 | -0.5286 | 1 | `exp_fs_05_K32_seed42.json` |
+| 82 | novel | `frac=0.0100` | ~5K | FS-Prototypical | 0.1224 | 0.0000 | 0.1224 | 0.1224 | 0.1537 | +0.0312 | -0.5409 | 1 | `exp_n17_prototypical_frac0.01_seed42.json` |
+| 83 | novel | `K=32` | ~192 | FS-IRM | 0.1186 | 0.0000 | 0.1186 | 0.1186 | 0.1625 | +0.0439 | -0.5447 | 1 | `exp_n19_irm_K32_seed42.json` |
+| 84 | novel | `K=32` | ~192 | FS-EnergyOOD | 0.1069 | 0.0000 | 0.1069 | 0.1069 | 0.1433 | +0.0364 | -0.5564 | 1 | `exp_n16_energy_ood_K32_seed42.json` |
+| 85 | novel | `frac=0.0500` | ~25K | FS-ETF-FrozenSimplex | 0.0859 | 0.0000 | 0.0859 | 0.0859 | 0.1020 | +0.0161 | -0.5774 | 1 | `exp_n04_etf_simplex_frac0.05_seed42.json` |
+| 86 | novel | `K=128` | ~768 | FS-Prototypical | 0.0683 | 0.0000 | 0.0683 | 0.0683 | 0.0741 | +0.0058 | -0.5950 | 1 | `exp_n17_prototypical_K128_seed42.json` |
+| 87 | novel | `frac=0.0100` | ~5K | FS-ETF-FrozenSimplex | 0.0491 | 0.0000 | 0.0491 | 0.0491 | 0.0623 | +0.0132 | -0.6142 | 1 | `exp_n04_etf_simplex_frac0.01_seed42.json` |
+| 88 | novel | `K=128` | ~768 | FS-ETF-FrozenSimplex | 0.0339 | 0.0000 | 0.0339 | 0.0339 | 0.0476 | +0.0137 | -0.6294 | 1 | `exp_n04_etf_simplex_K128_seed42.json` |
+| 89 | novel | `K=32` | ~192 | FS-ETF-FrozenSimplex | 0.0339 | 0.0000 | 0.0339 | 0.0339 | 0.0476 | +0.0137 | -0.6294 | 1 | `exp_n04_etf_simplex_K32_seed42.json` |
+| 90 | novel | `K=32` | ~192 | FS-Prototypical | 0.0339 | 0.0000 | 0.0339 | 0.0339 | 0.0476 | +0.0137 | -0.6294 | 1 | `exp_n17_prototypical_K32_seed42.json` |
 
-
-### Regime `frac=0.05` (~25K train, 3 epochs)
-
-| Rank | Trk | Method | Test | d vs paper | Val | Gap | Canonical JSON |
-|:-:|:-:|:-:|-:|:-:|:-:|:-:|:--|
-| 1 | novel | FS-ConformalMondrian | 0.6721 | +0.0088 | 0.7147 | +0.0426 | `exp_n07_conformal_mondrian_frac0.05_seed42.json` |
-| 2 | test | FS-Hier-NTK | 0.6709 | +0.0076 | 0.7041 | +0.0332 | `exp_fs_inline_hier_ntk_frac0.05_seed42.json` |
-| 3 | test | FS-HierTree | 0.6682 | +0.0049 | 0.6824 | +0.0142 | `exp_fs_inline_hier_frac0.05_seed42.json` |
-| 4 | novel | FS-SlicedWassersteinClass | 0.6666 | +0.0033 | 0.7129 | +0.0463 | `exp_n14_sliced_wasserstein_frac0.05_seed42.json` |
-| 5 | novel | FS-FrontDoor-StyleMediator | 0.6661 | +0.0028 | 0.7103 | +0.0442 | `exp_n02_frontdoor_style_frac0.05_seed42.json` |
-| 6 | novel | FS-VIB | 0.6659 | +0.0026 | 0.7006 | +0.0347 | `exp_n10_vib_frac0.05_seed42.json` |
-| 7 | novel | FS-VarianceInvariantSource | 0.6654 | +0.0021 | 0.6899 | +0.0246 | `exp_n11_vic_source_frac0.05_seed42.json` |
-| 8 | test | FS-NTKAlign | 0.6652 | +0.0019 | 0.7071 | +0.0419 | `exp_fs_inline_ntkalign_frac0.05_seed42.json` |
-| 9 | novel | FS-TENT-TTA | 0.6651 | +0.0018 | 0.6857 | +0.0207 | `exp_n15_tent_tta_frac0.05_seed42.json` |
-| 10 | test | FS-Focal | 0.6616 | -0.0017 | 0.6975 | +0.0359 | `exp_fs_inline_focal_frac0.05_seed42.json` |
-| 11 | novel | FS-EnergyOOD | 0.6551 | -0.0082 | 0.6753 | +0.0203 | `exp_n16_energy_ood_frac0.05_seed42.json` |
-| 12 | test | FS-Baseline-UniXcoder | 0.6512 | -0.0121 | 0.6912 | +0.0400 | `exp_fs_baseline_unixcoder_frac0.05_seed42.json` |
-| 13 | novel | FS-DataMapsCurriculum | 0.6481 | -0.0152 | 0.6849 | +0.0368 | `exp_n18_datamaps_curriculum_frac0.05_seed42.json` |
-| 14 | novel | FS-IRM | 0.6430 | -0.0203 | 0.6672 | +0.0242 | `exp_n19_irm_frac0.05_seed42.json` |
-| 15 | novel | FS-PACBayes-SampleFloor | 0.6341 | -0.0292 | 0.6835 | +0.0494 | `exp_n09_pac_bayes_floor_frac0.05_seed42.json` |
-| 16 | novel | FS-SRD-SiblingResidual | 0.6202 | -0.0431 | 0.6742 | +0.0540 | `exp_n01_sibling_residual_frac0.05_seed42.json` |
-| 17 | test | FS-Baseline-CodeBERT | 0.5977 | -0.0656 | 0.6469 | +0.0492 | `exp_fs_baseline_codebert_frac0.05_seed42.json` |
-| 18 | test | FS-Baseline-GraphCodeBERT | 0.5951 | -0.0682 | 0.6856 | +0.0905 | `exp_fs_baseline_graphcodebert_frac0.05_seed42.json` |
-| 19 | novel | FS-SpectralEigengap | 0.5645 | -0.0988 | 0.6119 | +0.0474 | `exp_n08_spectral_eigengap_frac0.05_seed42.json` |
-| 20 | test | FS-NTKAlign-Frozen | 0.4608 | -0.2025 | 0.4947 | +0.0339 | `exp_fs_04_frac0.05_seed42.json` |
-| 21 | test | FS-SupCon-Frozen | 0.4607 | -0.2026 | 0.4947 | +0.0340 | `exp_fs_05_frac0.05_seed42.json` |
-| 22 | novel | FS-Prototypical | 0.1904 | -0.4729 | 0.2274 | +0.0370 | `exp_n17_prototypical_frac0.05_seed42.json` |
-| 23 | novel | FS-ETF-FrozenSimplex | 0.0859 | -0.5774 | 0.1020 | +0.0161 | `exp_n04_etf_simplex_frac0.05_seed42.json` |
-
-### Regime `frac=0.01` (~5K train)
-
-| Rank | Trk | Method | Test | d vs paper | Val | Gap | Canonical JSON |
-|:-:|:-:|:-:|-:|:-:|:-:|:-:|:--|
-| 1 | novel | FS-ConformalMondrian | 0.5750 | -0.0883 | 0.5944 | +0.0194 | `exp_n07_conformal_mondrian_frac0.01_seed42.json` |
-| 2 | test | FS-Baseline-UniXcoder | 0.5744 | -0.0889 | 0.5839 | +0.0095 | `exp_fs_baseline_unixcoder_frac0.01_seed42.json` |
-| 3 | novel | FS-SlicedWassersteinClass | 0.5729 | -0.0904 | 0.5884 | +0.0155 | `exp_n14_sliced_wasserstein_frac0.01_seed42.json` |
-| 4 | novel | FS-VarianceInvariantSource | 0.5701 | -0.0932 | 0.5766 | +0.0065 | `exp_n11_vic_source_frac0.01_seed42.json` |
-| 5 | test | FS-NTKAlign | 0.5697 | -0.0936 | 0.5614 | -0.0083 | `exp_fs_inline_ntkalign_frac0.01_seed42.json` |
-| 6 | novel | FS-DataMapsCurriculum | 0.5669 | -0.0964 | 0.6070 | +0.0401 | `exp_n18_datamaps_curriculum_frac0.01_seed42.json` |
-| 7 | novel | FS-FrontDoor-StyleMediator | 0.5658 | -0.0975 | 0.5963 | +0.0305 | `exp_n02_frontdoor_style_frac0.01_seed42.json` |
-| 8 | test | FS-HierTree | 0.5654 | -0.0979 | 0.5971 | +0.0317 | `exp_fs_inline_hier_frac0.01_seed42.json` |
-| 9 | novel | FS-VIB | 0.5628 | -0.1005 | 0.5764 | +0.0135 | `exp_n10_vib_frac0.01_seed42.json` |
-| 10 | test | FS-Hier-NTK | 0.5608 | -0.1025 | 0.5708 | +0.0099 | `exp_fs_inline_hier_ntk_frac0.01_seed42.json` |
-| 11 | novel | FS-TENT-TTA | 0.5596 | -0.1037 | 0.5631 | +0.0034 | `exp_n15_tent_tta_frac0.01_seed42.json` |
-| 12 | novel | FS-PACBayes-SampleFloor | 0.5574 | -0.1059 | 0.5848 | +0.0274 | `exp_n09_pac_bayes_floor_frac0.01_seed42.json` |
-| 13 | test | FS-Focal | 0.5565 | -0.1068 | 0.5765 | +0.0200 | `exp_fs_inline_focal_frac0.01_seed42.json` |
-| 14 | novel | FS-SRD-SiblingResidual | 0.5417 | -0.1216 | 0.5784 | +0.0367 | `exp_n01_sibling_residual_frac0.01_seed42.json` |
-| 15 | novel | FS-EnergyOOD | 0.5178 | -0.1455 | 0.5240 | +0.0062 | `exp_n16_energy_ood_frac0.01_seed42.json` |
-| 16 | test | FS-Baseline-GraphCodeBERT | 0.5014 | -0.1619 | 0.5760 | +0.0746 | `exp_fs_baseline_graphcodebert_frac0.01_seed42.json` |
-| 17 | test | FS-Baseline-CodeBERT | 0.5007 | -0.1626 | 0.5831 | +0.0824 | `exp_fs_baseline_codebert_frac0.01_seed42.json` |
-| 18 | novel | FS-SpectralEigengap | 0.4822 | -0.1811 | 0.5039 | +0.0217 | `exp_n08_spectral_eigengap_frac0.01_seed42.json` |
-| 19 | novel | FS-IRM | 0.4693 | -0.1940 | 0.4831 | +0.0138 | `exp_n19_irm_frac0.01_seed42.json` |
-| 20 | test | FS-SupCon-Frozen | 0.4038 | -0.2595 | 0.4221 | +0.0183 | `exp_fs_05_frac0.01_seed42.json` |
-| 21 | test | FS-NTKAlign-Frozen | 0.4037 | -0.2596 | 0.4220 | +0.0183 | `exp_fs_04_frac0.01_seed42.json` |
-| 22 | novel | FS-Prototypical | 0.1224 | -0.5409 | 0.1537 | +0.0312 | `exp_n17_prototypical_frac0.01_seed42.json` |
-| 23 | novel | FS-ETF-FrozenSimplex | 0.0491 | -0.6142 | 0.0623 | +0.0132 | `exp_n04_etf_simplex_frac0.01_seed42.json` |
-
-### Regime `K=128` (~768 train)
-
-| Rank | Trk | Method | Test | d vs paper | Val | Gap | Canonical JSON |
-|:-:|:-:|:-:|-:|:-:|:-:|:-:|:--|
-| 1 | test | FS-Focal | 0.3749 | -0.2884 | 0.3378 | -0.0371 | `exp_fs_inline_focal_K128_seed42.json` |
-| 2 | test | FS-Baseline-UniXcoder | 0.3727 | -0.2906 | 0.3968 | +0.0241 | `exp_fs_baseline_unixcoder_K128_seed42.json` |
-| 3 | novel | FS-VIB | 0.3510 | -0.3123 | 0.3487 | -0.0023 | `exp_n10_vib_K128_seed42.json` |
-| 4 | test | FS-HierTree | 0.3492 | -0.3141 | 0.3089 | -0.0403 | `exp_fs_inline_hier_K128_seed42.json` |
-| 5 | novel | FS-SlicedWassersteinClass | 0.3453 | -0.3180 | 0.3354 | -0.0100 | `exp_n14_sliced_wasserstein_K128_seed42.json` |
-| 6 | novel | FS-DataMapsCurriculum | 0.3397 | -0.3236 | 0.3119 | -0.0278 | `exp_n18_datamaps_curriculum_K128_seed42.json` |
-| 7 | novel | FS-FrontDoor-StyleMediator | 0.3373 | -0.3260 | 0.3052 | -0.0321 | `exp_n02_frontdoor_style_K128_seed42.json` |
-| 8 | novel | FS-ConformalMondrian | 0.3338 | -0.3295 | 0.3244 | -0.0094 | `exp_n07_conformal_mondrian_K128_seed42.json` |
-| 9 | novel | FS-TENT-TTA | 0.3176 | -0.3457 | 0.3025 | -0.0151 | `exp_n15_tent_tta_K128_seed42.json` |
-| 10 | novel | FS-IRM | 0.3160 | -0.3473 | 0.3163 | +0.0003 | `exp_n19_irm_K128_seed42.json` |
-| 11 | novel | FS-SRD-SiblingResidual | 0.3130 | -0.3503 | 0.3018 | -0.0113 | `exp_n01_sibling_residual_K128_seed42.json` |
-| 12 | novel | FS-PACBayes-SampleFloor | 0.2930 | -0.3703 | 0.3221 | +0.0292 | `exp_n09_pac_bayes_floor_K128_seed42.json` |
-| 13 | test | FS-NTKAlign | 0.2929 | -0.3704 | 0.3348 | +0.0419 | `exp_fs_inline_ntkalign_K128_seed42.json` |
-| 14 | novel | FS-VarianceInvariantSource | 0.2848 | -0.3785 | 0.3118 | +0.0270 | `exp_n11_vic_source_K128_seed42.json` |
-| 15 | test | FS-Hier-NTK | 0.2775 | -0.3858 | 0.3139 | +0.0364 | `exp_fs_inline_hier_ntk_K128_seed42.json` |
-| 16 | test | FS-Baseline-CodeBERT | 0.2651 | -0.3982 | 0.2946 | +0.0295 | `exp_fs_baseline_codebert_K128_seed42.json` |
-| 17 | novel | FS-EnergyOOD | 0.2404 | -0.4229 | 0.2946 | +0.0543 | `exp_n16_energy_ood_K128_seed42.json` |
-| 18 | novel | FS-SpectralEigengap | 0.2331 | -0.4302 | 0.2181 | -0.0149 | `exp_n08_spectral_eigengap_K128_seed42.json` |
-| 19 | test | FS-Baseline-GraphCodeBERT | 0.2191 | -0.4442 | 0.3059 | +0.0868 | `exp_fs_baseline_graphcodebert_K128_seed42.json` |
-| 20 | test | FS-SupCon-Frozen | 0.1493 | -0.5140 | 0.2522 | +0.1029 | `exp_fs_05_K128_seed42.json` |
-| 21 | test | FS-NTKAlign-Frozen | 0.1479 | -0.5154 | 0.2465 | +0.0986 | `exp_fs_04_K128_seed42.json` |
-| 22 | novel | FS-Prototypical | 0.0683 | -0.5950 | 0.0741 | +0.0058 | `exp_n17_prototypical_K128_seed42.json` |
-| 23 | novel | FS-ETF-FrozenSimplex | 0.0339 | -0.6294 | 0.0476 | +0.0137 | `exp_n04_etf_simplex_K128_seed42.json` |
-
-### Regime `K=32` (~192 train)
-
-| Rank | Trk | Method | Test | d vs paper | Val | Gap | Canonical JSON |
-|:-:|:-:|:-:|-:|:-:|:-:|:-:|:--|
-| 1 | novel | FS-ConformalMondrian | 0.1897 | -0.4736 | 0.2225 | +0.0328 | `exp_n07_conformal_mondrian_K32_seed42.json` |
-| 2 | novel | FS-SRD-SiblingResidual | 0.1894 | -0.4739 | 0.1949 | +0.0055 | `exp_n01_sibling_residual_K32_seed42.json` |
-| 3 | test | FS-NTKAlign | 0.1831 | -0.4802 | 0.2280 | +0.0449 | `exp_fs_inline_ntkalign_K32_seed42.json` |
-| 4 | novel | FS-DataMapsCurriculum | 0.1812 | -0.4821 | 0.2226 | +0.0414 | `exp_n18_datamaps_curriculum_K32_seed42.json` |
-| 5 | novel | FS-VIB | 0.1803 | -0.4830 | 0.2229 | +0.0427 | `exp_n10_vib_K32_seed42.json` |
-| 6 | novel | FS-PACBayes-SampleFloor | 0.1753 | -0.4880 | 0.2388 | +0.0635 | `exp_n09_pac_bayes_floor_K32_seed42.json` |
-| 7 | novel | FS-VarianceInvariantSource | 0.1635 | -0.4998 | 0.2181 | +0.0546 | `exp_n11_vic_source_K32_seed42.json` |
-| 8 | novel | FS-SpectralEigengap | 0.1522 | -0.5111 | 0.1676 | +0.0154 | `exp_n08_spectral_eigengap_K32_seed42.json` |
-| 9 | novel | FS-SlicedWassersteinClass | 0.1499 | -0.5134 | 0.1923 | +0.0424 | `exp_n14_sliced_wasserstein_K32_seed42.json` |
-| 10 | novel | FS-FrontDoor-StyleMediator | 0.1484 | -0.5149 | 0.2260 | +0.0776 | `exp_n02_frontdoor_style_K32_seed42.json` |
-| 11 | novel | FS-TENT-TTA | 0.1409 | -0.5224 | 0.2089 | +0.0680 | `exp_n15_tent_tta_K32_seed42.json` |
-| 12 | test | FS-NTKAlign-Frozen | 0.1348 | -0.5285 | 0.1338 | -0.0010 | `exp_fs_04_K32_seed42.json` |
-| 13 | test | FS-SupCon-Frozen | 0.1347 | -0.5286 | 0.1338 | -0.0009 | `exp_fs_05_K32_seed42.json` |
-| 14 | novel | FS-IRM | 0.1186 | -0.5447 | 0.1625 | +0.0439 | `exp_n19_irm_K32_seed42.json` |
-| 15 | novel | FS-EnergyOOD | 0.1069 | -0.5564 | 0.1433 | +0.0364 | `exp_n16_energy_ood_K32_seed42.json` |
-| 16 | novel | FS-ETF-FrozenSimplex | 0.0339 | -0.6294 | 0.0476 | +0.0137 | `exp_n04_etf_simplex_K32_seed42.json` |
-| 17 | novel | FS-Prototypical | 0.0339 | -0.6294 | 0.0476 | +0.0137 | `exp_n17_prototypical_K32_seed42.json` |
+**Reading:** the strongest paper-facing slice remains `frac=0.05`: `FS-ConformalMondrian` (0.6721) narrowly leads overall, while `FS-Hier-NTK` (0.6709) remains the best testing-track method. `FS-TreeWassersteinGenealogy` is newly visible in the aggregate but does not change the headline cluster.
 
 ---
-
 ## 2. Narrative
 
 ### Headline (EMNLP claim)
