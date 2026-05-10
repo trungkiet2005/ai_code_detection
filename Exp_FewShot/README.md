@@ -18,6 +18,18 @@ Few-shot is the higher-impact framing if we can hit ≥ 65 Author F1 at K ≤ 64
 | `exp_fs_01_ntkalign.py` | Method: CE + NTK target-kernel alignment |
 | `tracker.md` | Leaderboard + run history (append-only) |
 
+## Hardware
+
+| GPU | VRAM | Batch | Precision | Seq length | Speed |
+|:--|:--|:--|:--|:--|:--|
+| **RTX 96GB** | 96GB | **128** | **bf16** | **512** | **~6-8× faster than T4** |
+| **RTX Pro 6000 Ada** | 48GB | **64** | **bf16** | **512** | **~3-4× faster than T4** |
+| T4 | 16GB | 16 | fp16 | 384 | baseline |
+| H100 | 80GB | 32-64 | bf16 | 512 | fast |
+
+RTX96GB: `mem_gb >= 90` → bs=128
+RTX6000: `"RTX Pro 6000" in gpu or "RTX 6000 Ada" in gpu or mem_gb >= 40` → bs=64
+
 ## Run
 
 ```bash
@@ -27,6 +39,36 @@ FS_K_SHOT=8 python Exp_FewShot/exp_fs_01_ntkalign.py
 
 # Kaggle T4 — auto-detected, no flags needed
 python Exp_FewShot/exp_fs_01_ntkalign.py
+
+# RTX6000 / RTX 96GB — auto-detected
+# RTX6000: bs=64, bf16, seq=512 (~3-4× faster than T4)
+# RTX 96GB: bs=128, bf16, seq=512 (~6-8× faster than T4)
+```
+
+### Offline mode (no-internet, avoids conflict + bias)
+
+All data loaded from Kaggle input paths (no HuggingFace download):
+
+```python
+# Models: /kaggle/input/datasets/chiboiz/ai-detection-encoders/models/
+# CoDET-M4: /kaggle/input/datasets/chiboiz/codetm4/dataset_without_comments.parquet
+# DroidCollection: /kaggle/input/datasets/chiboiz/droid-collection/DroidCollection/
+tokenizer = AutoTokenizer.from_pretrained(path, local_files_only=True)
+model = AutoModel.from_pretrained(path, local_files_only=True)
+```
+
+### Merge code strategy (run multiple configs in one cell)
+
+For rapid iteration on RTX6000, chain multiple configs sequentially:
+
+```python
+# Run Hier-NTK × 3 encoders × 3 fractions in one cell
+import os
+os.environ["FS_ENCODER"] = "ModernBERT-base,codebert-base,unixcoder-base"
+os.environ["FS_SWEEP_FRACS"] = "0.01,0.05,0.20"
+os.environ["FS_SEED"] = "42"
+os.environ["FS_BENCHMARK"] = "codet_m4"
+# Then run: python Exp_FewShot/testing_chis/run_hier_ntk_portfolio.py
 ```
 
 Every run emits a `BEGIN_FS_TABLE ... END_FS_TABLE` block; paste into `tracker.md`.

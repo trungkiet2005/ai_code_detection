@@ -161,7 +161,17 @@ No JSON yet for scripts not listed under Canonical JSON (example: `exp_n20_*` if
 
 ## 3. Protocol, targets, gate
 
-**Hardware:** Kaggle **T4**, bs=16, fp16, seq=384; 1 epoch (K-shot) or 3 epochs + cosine LR (% train). H100/A100 optional.
+### Hardware profiles
+
+| GPU | VRAM | Batch | Precision | Seq length | Speed |
+|:--|:--|:--|:--|:--|:--|
+| **RTX 96GB** | 96GB | **128** | **bf16** | **512** | **~6-8× faster than T4** |
+| **RTX Pro 6000 Ada** | 48GB | **64** | **bf16** | **512** | **~3-4× faster than T4** |
+| T4 | 16GB | 16 | fp16 | 384 | baseline |
+| H100 | 80GB | 32-64 | bf16 | 512 | fast |
+
+RTX96GB detection: `mem_gb >= 90` → bs=128
+RTX6000 detection: `"RTX Pro 6000" in gpu or "RTX 6000 Ada" in gpu or mem_gb >= 40`
 
 **Sampling:** Stratified K-shot on TRAIN; mini-val from VAL (n/class=64); **TEST** full IID split. Log **`fs_seed`**.
 
@@ -183,7 +193,24 @@ python Exp_FewShot/aggregate_fs_results.py results
 python Exp_FewShot/aggregate_fs_results.py results --csv
 ```
 
-**Rules:** Suite standalone — no imports from `Exp_Climb/` / `Exp_DM/` / `Exp_CodeDet/`. No tree-sitter / spectral in few-shot files. **fp16** on T4. One method per file; knobs via env (`FS_K_SHOT`, `FS_TRAIN_FRACTION`, `FS_BENCHMARK`, ...).
+**Offline mode (no-internet, avoids conflict + bias):**
+- Models: `/kaggle/input/datasets/chiboiz/ai-detection-encoders/models/`
+- CoDET-M4: `/kaggle/input/datasets/chiboiz/codetm4/dataset_without_comments.parquet`
+- DroidCollection: `/kaggle/input/datasets/chiboiz/droid-collection/DroidCollection/`
+- All loaders use `local_files_only=True` → no HuggingFace download
+
+**Merge code strategy (rapid iteration on RTX6000):**
+For running multiple configs sequentially in one cell:
+```bash
+FS_ENCODER=ModernBERT-base,codebert-base,unixcoder-base
+FS_SWEEP_FRACS=0.01,0.05,0.20
+FS_SEED=42
+FS_BENCHMARK=codet_m4
+python Exp_FewShot/testing_chis/run_hier_ntk_portfolio.py
+```
+Uses RTX6000 auto-detection → bs=64, bf16, seq=512 (~3-4× faster than T4).
+
+**Rules:** Suite standalone — no imports from `Exp_Climb/` / `Exp_DM/` / `Exp_CodeDet/`. No tree-sitter / spectral in few-shot files. **fp16** on T4, **bf16** on RTX6000/H100. One method per file; knobs via env (`FS_K_SHOT`, `FS_TRAIN_FRACTION`, `FS_BENCHMARK`, ...).
 
 **CPU smoke:** `FS_K_SHOT=8 python Exp_FewShot/exp_fs_00_baseline.py` (and analogous for other scripts).
 
