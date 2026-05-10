@@ -302,11 +302,14 @@ def mine_loss(outputs, labels, mine, lambda_mine=0.1, class_weights=None):
         "summary_metric": "i_lower_avg",
         "env_var": "FS_LAMBDA_MINE",
         "default_value": "0.1",
-        "extra_setup": '''    mine_disc = MINEDiscriminator(cfg.ntk_proj_dim, cfg.n_classes).to(dev)
-    # Add MINE discriminator params to the existing optimiser as a third group
-    # (separate LR, no weight decay) so the bound is actually trained.
-    opt.add_param_group({"params": list(mine_disc.parameters()),
-                         "lr": 1e-4, "weight_decay": 0.0})
+        "pre_optimizer_setup": '''    mine_disc = MINEDiscriminator(cfg.ntk_proj_dim, cfg.n_classes).to(dev)
+    param_groups = model.param_groups() + [{
+        "params": list(mine_disc.parameters()),
+        "lr": 1e-4,
+        "weight_decay": 0.0,
+    }]''',
+        "optimizer_expr": "param_groups",
+        "extra_setup": '''    # MINE params are included before scheduler creation, so LR groups stay aligned.
     logger.info(f"[mine] discriminator dim={cfg.ntk_proj_dim} K={cfg.n_classes} "
                 f"params={sum(p.numel() for p in mine_disc.parameters())}")''',
     },
@@ -646,24 +649,31 @@ def vib_loss(outputs, labels, beta=0.01, class_weights=None):
     if n_a < 2 or n_n < 2:
         return {"total": ce, "ce": ce, "pcs": z.new_zeros(()),
                 "n_aer": n_a, "n_grd": n_n}
-    z_a = z[is_codellama]                                  # (n_a, D)
-    z_n = z[is_nxcode]                                      # (n_n, D)
-    # Stage 1: linear ridge regression z_a = z_n_pad @ W (broadcast via mean).
-    mu_n = z_n.mean(0, keepdim=True)
-    mu_a = z_a.mean(0, keepdim=True)
-    cov_nn = (z_n - mu_n).t() @ (z_n - mu_n) / max(1, n_n - 1)
-    cov_an = (z_a - mu_a).t() @ (z_n - mu_n) / max(1, min(n_a, n_n) - 1)
-    # W: D x D, predicts E[z_a | z_n] up to mean.
-    reg = ridge * torch.eye(z.size(-1), device=z.device)
-    W = torch.linalg.solve(cov_nn + reg, cov_an.t()).t()    # solve (cov_nn) X^T = cov_an^T
-    # Predicted z_a from z_n: project nxcode samples through W.
-    z_a_pred = (z_n - mu_n) @ W.t() + mu_a                  # (n_n, D)
-    z_n_pred = (z_a - mu_a) @ torch.linalg.solve(
-        cov_an + reg, cov_nn.t()).t().t() + mu_n            # symmetric direction
-    # Residuals.
     n_pair = min(n_a, n_n)
-    r_a = z_a[:n_pair] - z_a_pred[:n_pair]                  # (n_pair, D)
-    r_n = z_n[:n_pair] - z_n_pred[:n_pair]
+    z_a = z[is_codellama][:n_pair].float()                  # (n_pair, D)
+    z_n = z[is_nxcode][:n_pair].float()                     # (n_pair, D)
+
+    def _ridge_predict(src, tgt):
+        """Predict E[tgt | src] with pair-aligned linear ridge regression."""
+        mu_src = src.mean(0, keepdim=True)
+        mu_tgt = tgt.mean(0, keepdim=True)
+        xc = src - mu_src
+        yc = tgt - mu_tgt
+        denom = max(1, src.size(0) - 1)
+        cov_xx = xc.t() @ xc / denom
+        cov_yx = yc.t() @ xc / denom
+        reg = ridge * torch.eye(src.size(-1), device=src.device, dtype=src.dtype)
+        # W maps centered source features to centered target features.
+        W = torch.linalg.solve(cov_xx + reg, cov_yx.t()).t()
+        return xc @ W.t() + mu_tgt
+
+    # Stage 1: symmetric proxy regressions on pair-aligned sibling samples.
+    z_a_pred = _ridge_predict(z_n, z_a)
+    z_n_pred = _ridge_predict(z_a, z_n)
+
+    # Stage 2: residual classification proxy signal.
+    r_a = z_a - z_a_pred
+    r_n = z_n - z_n_pred
     # Negative-control proxies: residuals should be ANTI-CORRELATED.
     pcs = (r_a * r_n).sum(-1).mean()                        # scalar; want NEGATIVE
     return {"total": ce + lambda_pcs * F.relu(pcs), "ce": ce,
@@ -1594,6 +1604,19 @@ def render(spec, src_text):
     # Defensive: any remaining srd-specific log line.
     out = re.sub(r'.*srd=\{losses\[\'srd\'\]\.item.*\n', '', out)
     out = re.sub(r'.*s_b=\{losses\[\'s_b\'\]\.item.*\n', '', out)
+
+    # 9b) Some methods need extra train-time state before the optimizer is
+    #     created (for example MINE adds a discriminator param group).
+    if spec.get("pre_optimizer_setup"):
+        anchor = "    opt = torch.optim.AdamW(model.param_groups())"
+        replacement = spec["pre_optimizer_setup"].rstrip() + "\n" + anchor
+        out = out.replace(anchor, replacement, 1)
+    if spec.get("optimizer_expr"):
+        out = out.replace(
+            "    opt = torch.optim.AdamW(model.param_groups())",
+            f"    opt = torch.optim.AdamW({spec['optimizer_expr']})",
+            1,
+        )
 
     # 10) Replace the n01-specific summary printing.
     out = re.sub(

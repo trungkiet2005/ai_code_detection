@@ -1,54 +1,47 @@
 # =============================================================================
-# Novel-Track exp n06 -- Proximal Causal Sibling (PCS).
+# Novel-Track exp n05 -- Mutual Information Floor (MIF).
 #
-# Open problem this attacks: across all 14 methods, the codellama-nxcode
-# sibling pair is the dominant error mass (>50% of confusion at K=32).
-# Standard contrastive losses pull features without distinguishing the
-# pair specifically; n01 (SRD) does so via Fisher ratio. n06 takes a
-# different angle: USE the OTHER sibling as a proxy variable to identify
-# the causal effect of "fine-tune family" on author label, via the
-# Mastouri-Gretton 2025 proximal-causal estimator.
+# Open problem this attacks: we do not know the information-theoretic
+# ceiling for CoDET-M4 6-class authorship. If I(Y; X) under our encoder is
+# bounded by some I_max < log2(6) = 2.585 bits, then no classifier can
+# achieve F1 above ~ I_max / log2(6). Establishing this ceiling makes our
+# 0.71 result either provably-near-optimal or known-improvable.
 #
-# Single new mathematical object: a 2-stage feature transform where the
-# representation of one sibling acts as the negative-control proxy for the
-# other, yielding an identifiable estimate of the "family-conditional
-# author" signal even in the presence of unobserved confounders.
+# Single new mathematical object: a MINE-style lower bound on I(Y; phi(X))
+# computed via a discriminator on (encoder feature, class label) pairs
+# trained jointly with the classifier. The bound is differentiable and
+# tracked epoch-by-epoch as a diagnostic.
 #
-# NAME           : PCS (Proximal Causal Sibling).
-# ONE-LINE CLAIM : Treating codellama (1) and nxcode (4) as proxy controls
-#                  for each other in the Mastouri-Gretton 2-stage
-#                  estimator gives an identifiable family-residual
-#                  estimate that lifts sibling F1 above 0.20 at K=32
-#                  WITHOUT a 0.20 sibling-F1 floor (n01 needs explicit
-#                  Fisher ratio; PCS gets it from causal identification).
-# EQUATION       : Stage 1 (proxy regression):
-#                      For each batch with both siblings present,
-#                      regress codellama features on nxcode features:
-#                      h_1 = E[z_codellama | z_nxcode] via kernel ridge.
-#                  Stage 2 (residual classification):
-#                      r_i = z_i - h_1(z_i' for the paired sample)
-#                  Auxiliary loss:
-#                      L_PCS = lambda_pcs * MSE(z_codellama_residual,
-#                                                 -z_nxcode_residual)
-#                      (residuals should be opposite-signed if proxies
-#                      are valid negative controls).
-# THEORY HOOK    : Mastouri & Gretton JMLR 2025 "Proximal Causal Inference
-#                  with Negative-Control Proxies": under unconfoundedness
-#                  given the proxies, the 2-stage estimator yields a
-#                  consistent estimate of the causal effect even when the
-#                  back-door is unobserved.
-# WHY NOT BEFORE : Proximal causal inference is a 2024-2025 active line
-#                  in econometrics. Application to neural representations
-#                  is rare; specialisation to the codellama-nxcode
-#                  fine-tune-sibling pair is novel for code-author work.
-# FALSIFIER      : (a) K=32 codellama+nxcode mean F1 must exceed 0.20.
-#                      Same falsifier as n01, BUT achieved via a
-#                      different mathematical route -- if both n01 and
-#                      n06 fail, the sibling problem is intrinsic.
-#                  (b) Per-batch residual norms must DECREASE during
-#                      training (consistent with proxy validity).
-#                  (c) IID Macro-F1 must NOT regress vs CE baseline >0.02.
-# COMPUTE        : ~50 min Kaggle T4 default sweep.
+# NAME           : MIF (Mutual Information Floor).
+# ONE-LINE CLAIM : The MINE lower bound I_lower(Y; phi(X)) computed on
+#                  CoDET-M4 train at fraction=0.05 establishes an empirical
+#                  information-theoretic ceiling C* = I_lower / log2(K).
+#                  If our best Macro-F1 exceeds 0.95 * C*, our method is
+#                  near-optimal under the encoder; otherwise additional
+#                  signal exists in the data.
+# EQUATION       : Discriminator T_phi: R^D x R^K -> R, two-layer MLP.
+#                  Donsker-Varadhan dual MI lower bound:
+#                      I_lower(Y; phi) = sup_T E_{joint}[T(z, y)]
+#                                              - log E_{marg}[exp T(z, y_perm)]
+#                  where y_perm is a permutation of labels in the batch.
+#                  At test, classify by encoder argmax; report classifier
+#                  Macro-F1 vs information ceiling C* = I_lower / log2(K).
+# THEORY HOOK    : Belghazi et al. ICML 2018 (MINE): MI lower bound via
+#                  Donsker-Varadhan, consistent estimator under expressive
+#                  T. Combined with Fano's inequality H(Y|phi(X)) >=
+#                  H(Y) - I(Y; phi(X)), we get an upper bound on attainable
+#                  classification accuracy from any decoder.
+# WHY NOT BEFORE : Information-theoretic floors are common in compression /
+#                  generation but rare in code-author benchmarks. Using
+#                  MINE on the same backbone where we measure F1 is a
+#                  cleaner ceiling than transferred bounds.
+# FALSIFIER      : (a) Estimator stability: MINE I_lower across 3 seeds
+#                      must have std < 0.1 nats. If unstable -> bound
+#                      too loose, conclusion drops.
+#                  (b) Macro-F1 / C* < 1.0 (basic sanity).
+#                  (c) If 0.95 * C* > our best F1 -> there is still
+#                      improvement headroom.
+# COMPUTE        : ~50 min Kaggle T4. The MINE discriminator adds <10% wall.
 # =============================================================================
 from __future__ import annotations
 
@@ -99,7 +92,7 @@ except ImportError:
 
 warnings.filterwarnings("ignore")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
-logger = logging.getLogger("exp_n06_proximal_sibling")
+logger = logging.getLogger("exp_n05_mi_floor")
 
 
 def autocast(device_type="cuda", enabled=True, dtype=None):
@@ -402,45 +395,41 @@ class FSClassifier(nn.Module):
                 {"params": head, "lr": self.cfg.lr_heads, "weight_decay": self.cfg.weight_decay}]
 
 
-def proximal_sibling_loss(outputs, labels, lambda_pcs=0.4,
-                            ridge=1e-3, eps=1e-6, class_weights=None):
-    """CE + 2-stage proximal-causal sibling loss.
+class MINEDiscriminator(nn.Module):
+    """T_phi(z, y): R^D x R^K -> R for MI lower bound."""
+    def __init__(self, dim, n_classes, hidden=256):
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Linear(dim + n_classes, hidden), nn.GELU(),
+            nn.Linear(hidden, hidden), nn.GELU(),
+            nn.Linear(hidden, 1),
+        )
+        self.n_classes = n_classes
 
-    Stage 1: kernel-ridge regress codellama embeds on nxcode embeds.
-    Stage 2: enforce residuals are opposite-signed.
-    Returns dict with `total`, `ce`, `pcs`, `n_aer`, `n_grd`.
+    def forward(self, z, y_idx):
+        y_oh = F.one_hot(y_idx, num_classes=self.n_classes).float()
+        return self.net(torch.cat([z, y_oh], dim=-1)).squeeze(-1)
+
+
+def mine_loss(outputs, labels, mine, lambda_mine=0.1, class_weights=None):
+    """CE + lambda * (-I_lower(Y; z)) so that maximising MI helps the encoder.
+
+    Returns dict with `total`, `ce`, `i_lower`, `mine_t_joint`, `mine_t_marg`.
     """
     ce = F.cross_entropy(outputs["logits"], labels, weight=class_weights)
-    z = outputs["ntk_proj"]
-    is_codellama = labels == 1
-    is_nxcode = labels == 4
-    n_a = int(is_codellama.sum().item())
-    n_n = int(is_nxcode.sum().item())
-    if n_a < 2 or n_n < 2:
-        return {"total": ce, "ce": ce, "pcs": z.new_zeros(()),
-                "n_aer": n_a, "n_grd": n_n}
-    z_a = z[is_codellama]                                  # (n_a, D)
-    z_n = z[is_nxcode]                                      # (n_n, D)
-    # Stage 1: linear ridge regression z_a = z_n_pad @ W (broadcast via mean).
-    mu_n = z_n.mean(0, keepdim=True)
-    mu_a = z_a.mean(0, keepdim=True)
-    cov_nn = (z_n - mu_n).t() @ (z_n - mu_n) / max(1, n_n - 1)
-    cov_an = (z_a - mu_a).t() @ (z_n - mu_n) / max(1, min(n_a, n_n) - 1)
-    # W: D x D, predicts E[z_a | z_n] up to mean.
-    reg = ridge * torch.eye(z.size(-1), device=z.device)
-    W = torch.linalg.solve(cov_nn + reg, cov_an.t()).t()    # solve (cov_nn) X^T = cov_an^T
-    # Predicted z_a from z_n: project nxcode samples through W.
-    z_a_pred = (z_n - mu_n) @ W.t() + mu_a                  # (n_n, D)
-    z_n_pred = (z_a - mu_a) @ torch.linalg.solve(
-        cov_an + reg, cov_nn.t()).t().t() + mu_n            # symmetric direction
-    # Residuals.
-    n_pair = min(n_a, n_n)
-    r_a = z_a[:n_pair] - z_a_pred[:n_pair]                  # (n_pair, D)
-    r_n = z_n[:n_pair] - z_n_pred[:n_pair]
-    # Negative-control proxies: residuals should be ANTI-CORRELATED.
-    pcs = (r_a * r_n).sum(-1).mean()                        # scalar; want NEGATIVE
-    return {"total": ce + lambda_pcs * F.relu(pcs), "ce": ce,
-            "pcs": pcs.detach(), "n_aer": n_a, "n_grd": n_n}
+    z = outputs["ntk_proj"].detach()  # detach so MINE only updates discriminator
+    z_grad = outputs["ntk_proj"]
+    B = z.size(0)
+    # Joint and marginal expectations.
+    t_joint = mine(z_grad, labels)
+    perm = torch.randperm(B, device=z.device)
+    t_marg = mine(z_grad, labels[perm])
+    # Donsker-Varadhan bound (negated for maximisation in optim).
+    i_lower = t_joint.mean() - torch.logsumexp(t_marg, dim=0) + math.log(B)
+    # We MINIMISE -I as part of the encoder objective.
+    return {"total": ce - lambda_mine * i_lower, "ce": ce, "i_lower": i_lower.detach(),
+            "mine_t_joint": t_joint.mean().detach(),
+            "mine_t_marg": t_marg.mean().detach()}
 # =============================================================================
 # Trainer (1-epoch K-shot / 3-epoch fraction; identical structure)
 # =============================================================================
@@ -492,7 +481,13 @@ def _per_cls(p, l, n):
 def train(cfg, model, train_l, val_l, test_l, lambda_method):
     dev = torch.device(cfg.device); model = model.to(dev)
     cw = _cw(train_l, cfg.n_classes).to(dev) if cfg.use_class_weights else None
-    opt = torch.optim.AdamW(model.param_groups())
+    mine_disc = MINEDiscriminator(cfg.ntk_proj_dim, cfg.n_classes).to(dev)
+    param_groups = model.param_groups() + [{
+        "params": list(mine_disc.parameters()),
+        "lr": 1e-4,
+        "weight_decay": 0.0,
+    }]
+    opt = torch.optim.AdamW(param_groups)
     scaler = make_grad_scaler(enabled=(cfg.precision == "fp16" and dev.type == "cuda"))
     dt = torch.float16 if cfg.precision == "fp16" else torch.bfloat16
     total = max(1, len(train_l) * cfg.epochs); evf = max(5, total // 8)
@@ -502,6 +497,8 @@ def train(cfg, model, train_l, val_l, test_l, lambda_method):
             from transformers import get_cosine_schedule_with_warmup
             sched = get_cosine_schedule_with_warmup(opt, int(total * cfg.warmup_ratio), total)
         except ImportError: pass
+    logger.info(f"[mine] discriminator dim={cfg.ntk_proj_dim} K={cfg.n_classes} "
+                f"params={sum(p.numel() for p in mine_disc.parameters())}")
     best = -1.0; best_state = None; pl = 0; step = 0
     t0 = time.time()
     for _ in range(cfg.epochs):
@@ -515,7 +512,7 @@ def train(cfg, model, train_l, val_l, test_l, lambda_method):
             with autocast(device_type="cuda" if dev.type == "cuda" else "cpu",
                           enabled=dev.type == "cuda", dtype=dt):
                 out = model(ids, mask)
-                losses = proximal_sibling_loss(out, y, lambda_pcs=lambda_method, class_weights=cw)
+                losses = mine_loss(out, y, mine_disc, lambda_mine=lambda_method, class_weights=cw)
                 loss = losses["total"]
             if scaler.is_enabled():
                 scaler.scale(loss).backward(); scaler.unscale_(opt)
@@ -627,8 +624,8 @@ def cleanup():
     if torch.cuda.is_available(): torch.cuda.empty_cache()
 
 
-METHOD_NAME = "FS-ProximalSibling"
-EXP_ID = "exp_n06_proximal_sibling"
+METHOD_NAME = "FS-MutualInfoFloor"
+EXP_ID = "exp_n05_mi_floor"
 
 
 def run_one(kind, value, base_seed, lambda_method, benchmark="codet_m4"):
@@ -651,7 +648,7 @@ def run_one(kind, value, base_seed, lambda_method, benchmark="codet_m4"):
 
 def main():
     base_seed = int(os.environ.get("FS_SEED", "42"))
-    lambda_method = float(os.environ.get("FS_LAMBDA_PCS", "0.4"))
+    lambda_method = float(os.environ.get("FS_LAMBDA_MINE", "0.1"))
     benchmark = os.environ.get("FS_BENCHMARK", "codet_m4").lower()
     if benchmark not in ("codet_m4", "droid_t3", "droid_t4"):
         raise SystemExit(f"FS_BENCHMARK must be one of "

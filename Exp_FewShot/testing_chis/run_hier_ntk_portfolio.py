@@ -22,6 +22,7 @@ import os
 KAGGLE_MODELS_BASE = "/kaggle/input/datasets/chiboiz/ai-detection-encoders/models"
 KAGGLE_CODET_PATH = "/kaggle/input/datasets/chiboiz/codetm4/dataset_without_comments.parquet"
 KAGGLE_DROID_BASE = "/kaggle/input/datasets/chiboiz/droid-collection/DroidCollection"
+KAGGLE_AICD_BASE = os.environ.get("KAGGLE_AICD_BASE", "/kaggle/input/datasets/chiboiz/aicd-bench/AICD-Bench")
 
 # =============================================================================
 # 1. Bootstrap (pip-install missing deps)
@@ -147,6 +148,15 @@ class FSConfig:
     def __post_init__(self):
         if self.benchmark == "codet_m4":
             self.n_classes = 6 if self.task == "author" else 2
+        elif self.benchmark in ("aicd", "aicd_t2"):
+            self.n_classes = 12
+            self.task = "t2"
+        elif self.benchmark == "aicd_t1":
+            self.n_classes = 2
+            self.task = "t1"
+        elif self.benchmark == "aicd_t3":
+            self.n_classes = 4
+            self.task = "t3"
         elif self.benchmark in ("droid", "droid_t3"):
             self.n_classes = 3
             self.task = "t3"
@@ -294,13 +304,32 @@ def _convert_codet(split, task, vocab):
 
 
 def _convert_droid(split, task):
+    label_map_t4 = {
+        "HUMAN_GENERATED": 0,
+        "HUMAN": 0,
+        "MACHINE_GENERATED": 1,
+        "AI_GENERATED": 1,
+        "MACHINE_REFINED": 2,
+        "REFINED": 2,
+        "ADVERSARIAL": 3,
+        "ADVERSARIALLY_HUMANISED": 3,
+        "ADVERSARIALLY_HUMANIZED": 3,
+    }
+
     def _row(r):
         code = str(r.get("code", "")).strip()
-        label = int(r.get("label", -1))
+        raw_label = r.get("label", -1)
+        if isinstance(raw_label, str):
+            label = label_map_t4.get(raw_label.strip().upper(), -1)
+        else:
+            label = int(raw_label)
         if task == "t3":
-            label = label % 3
+            # Droid official T3: human vs machine-generated vs machine-refined.
+            # If adversarial examples are present, keep them in the machine-generated
+            # bucket for T3 and use droid_t4 for a separate adversarial class.
+            label = 1 if label == 3 else label
         elif task == "t4":
-            label = label % 2
+            label = label
         return {"code": code, "label": label,
                 "language": str(r.get("language", "")).strip().lower(),
                 "source": str(r.get("source", "")).strip().lower()}
@@ -321,6 +350,36 @@ def _load_codet_splits(seed):
         s2 = s1["train"].train_test_split(test_size=1 / 9, seed=seed)
         train, val = s2["train"], s2["test"]
     return train, val, test
+
+
+def _load_aicd_splits(task, seed):
+    config = {"t1": "T1", "t2": "T2", "t3": "T3"}[task]
+    if os.path.isdir(KAGGLE_AICD_BASE):
+        logger.info(f"Loading AICD-Bench {config} from local path: {KAGGLE_AICD_BASE}")
+        return (
+            load_dataset(KAGGLE_AICD_BASE, name=config, split="train"),
+            load_dataset(KAGGLE_AICD_BASE, name=config, split="validation"),
+            load_dataset(KAGGLE_AICD_BASE, name=config, split="test"),
+        )
+    logger.info(f"Loading AICD-Bench {config} from HuggingFace: AICD-bench/AICD-Bench")
+    return (
+        load_dataset("AICD-bench/AICD-Bench", name=config, split="train"),
+        load_dataset("AICD-bench/AICD-Bench", name=config, split="validation"),
+        load_dataset("AICD-bench/AICD-Bench", name=config, split="test"),
+    )
+
+
+def _convert_aicd(split):
+    def _row(r):
+        return {
+            "code": str(r.get("code", "")).strip(),
+            "label": int(r.get("label", -1)),
+            "language": str(r.get("language", "")).strip().lower(),
+            "source": str(r.get("source", "")).strip().lower(),
+        }
+
+    out = split.map(_row, remove_columns=split.column_names)
+    return out.filter(lambda x: x["label"] >= 0 and len(x["code"].strip()) > 0)
 
 
 def _load_droid_splits(task, seed):
@@ -375,7 +434,10 @@ def _collate(batch):
 def build_loaders(cfg: FSConfig):
     set_seed(cfg.seed)
 
-    if cfg.benchmark.startswith("droid"):
+    if cfg.benchmark.startswith("aicd"):
+        train_raw, val_raw, test_raw = _load_aicd_splits(cfg.task, cfg.seed)
+        vocab = {}
+    elif cfg.benchmark.startswith("droid"):
         train_raw, val_raw, test_raw = _load_droid_splits(cfg.task, cfg.seed)
         vocab = {}
     else:
@@ -385,7 +447,11 @@ def build_loaders(cfg: FSConfig):
     if cfg.task == "author":
         logger.info(f"Author vocab ({len(vocab)}): {sorted(vocab.keys())}")
 
-    if cfg.benchmark.startswith("droid"):
+    if cfg.benchmark.startswith("aicd"):
+        train_ds = _convert_aicd(train_raw)
+        val_ds = _convert_aicd(val_raw)
+        test_ds = _convert_aicd(test_raw)
+    elif cfg.benchmark.startswith("droid"):
         train_ds = _convert_droid(train_raw, cfg.task)
         val_ds = _convert_droid(val_raw, cfg.task)
         test_ds = _convert_droid(test_raw, cfg.task)
