@@ -408,29 +408,43 @@ class MixupCENet(nn.Module):
         emb = (out.last_hidden_state * mask.unsqueeze(-1)).sum(1) / mask.sum(1, keepdim=True).clamp(min=1)
         return {"logits": self.clf(self.drop(emb)), "emb": emb}
 
+    def emb_only(self, ids, mask):
+        """Return mean-pooled embedding without classifier."""
+        out = self.enc(input_ids=ids, attention_mask=mask)
+        emb = (out.last_hidden_state * mask.unsqueeze(-1)).sum(1) / mask.sum(1, keepdim=True).clamp(min=1)
+        return emb
+
+    def clf_forward(self, emb):
+        """Classifier on pre-computed embeddings."""
+        return {"logits": self.clf(self.drop(emb))}
+
     def groups(self):
         return [{"params": self.enc.parameters(), "lr": self.cfg.lr_enc, "weight_decay": self.cfg.wd},
                 {"params": self.clf.parameters(), "lr": self.cfg.lr_head, "weight_decay": self.cfg.wd}]
 
-def mixup_data(ids, mask, labels, alpha=0.2):
-    """Apply Mixup to a batch.
+
+def mixup_emb(emb, labels, n_cls, alpha=0.2):
+    """Apply Mixup on embeddings and soft labels.
     
-    Returns interpolated inputs and soft labels.
+    Returns interpolated embeddings and soft labels.
     """
     if alpha > 0:
         lam = np.random.beta(alpha, alpha)
     else:
         lam = 1.0
     
-    batch_size = ids.size(0)
-    index = torch.randperm(batch_size, device=ids.device)
+    batch_size = emb.size(0)
+    index = torch.randperm(batch_size, device=emb.device)
     
-    # Interpolate inputs (for embeddings, not raw tokens)
-    mixed_ids = lam * ids + (1 - lam) * ids[index]
-    mixed_mask = torch.minimum(mask, mask[index])  # Use minimum mask
-    mixed_labels = lam * F.one_hot(labels, num_classes=6).float() + (1 - lam) * F.one_hot(labels[index], num_classes=6).float()
+    # Interpolate embeddings
+    mixed_emb = lam * emb + (1 - lam) * emb[index]
     
-    return mixed_ids, mixed_mask, mixed_labels, lam
+    # Soft labels from Mixup
+    soft_labels = lam * F.one_hot(labels, num_classes=n_cls).float() + \
+                  (1 - lam) * F.one_hot(labels[index], num_classes=n_cls).float()
+    
+    return mixed_emb, soft_labels, lam
+
 
 def mixup_ce_loss(logits, soft_labels, w):
     """Mixup cross-entropy loss with soft labels.
@@ -476,11 +490,11 @@ def train(cfg: Cfg, tr_dl, vl_dl, ts_dl):
         for b in tr_dl:
             ids, mask, labs = b["ids"].to(dev), b["mask"].to(dev), b["labels"].to(dev)
             
-            # Apply Mixup
-            mixed_ids, mixed_mask, soft_labels, lam = mixup_data(ids, mask, labs, cfg.mixup_alpha)
-            
             with _autocast_ctx(dev):
-                out = model(mixed_ids, mixed_mask)
+                # Get embeddings, then apply Mixup
+                emb = model.emb_only(ids, mask)
+                mixed_emb, soft_labels, lam = mixup_emb(emb, labs, cfg.n_cls, cfg.mixup_alpha)
+                out = model.clf_forward(mixed_emb)
                 loss = mixup_ce_loss(out["logits"], soft_labels, w)
             
             scaler.scale(loss).backward()
