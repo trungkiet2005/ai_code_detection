@@ -171,27 +171,75 @@ def _conv_aicd(split):
     return out.filter(lambda x: x["label"]>=0 and len(x["code"].strip())>0)
 
 def _load_codet():
-    ds = load_dataset("parquet", data_files={"train":KAGGLE_CODET}, split="train")
-    ds = ds.train_test_split(test_size=0.2, seed=42)
-    vl = ds["test"].train_test_split(test_size=0.5, seed=42)
-    return ds["train"], vl["train"], vl["test"]
+    """Load CoDET-M4 from Kaggle path with proper train/val/test split."""
+    ds = load_dataset("parquet", data_files=KAGGLE_CODET, split="train")
+    if "split" in ds.column_names:
+        tr = ds.filter(lambda x: str(x.get("split","")).lower()=="train")
+        vl = ds.filter(lambda x: str(x.get("split","")).lower() in {"val","validation","dev"})
+        ts = ds.filter(lambda x: str(x.get("split","")).lower()=="test")
+        return tr, vl, ts
+    else:
+        s = ds.train_test_split(test_size=0.1, seed=42)
+        s2 = s["train"].train_test_split(test_size=1/9, seed=42)
+        return s2["train"], s2["test"], s["test"]
 
 def _load_droid():
-    base = KAGGLE_DROID
-    def ld(n): return load_dataset("parquet", data_files={"train":f"{base}/{n}"}, split="train")
-    tr, ts = ld("train.parquet"), ld("test.parquet")
-    vl = tr.train_test_split(test_size=0.1, seed=42)
-    return vl["train"], vl["test"], ts
+    """Load DroidCollection with proper shard handling."""
+    train_files = sorted(glob.glob(os.path.join(KAGGLE_DROID, "train-*.parquet")))
+    test_files = sorted(glob.glob(os.path.join(KAGGLE_DROID, "test-*.parquet")))
+    dev_files = sorted(glob.glob(os.path.join(KAGGLE_DROID, "dev-*.parquet")))
+
+    if train_files and test_files:
+        logger.info(f"[droid] Loading from local: {len(train_files)} train shards, {len(test_files)} test shards")
+        ds_train = load_dataset("parquet", data_files=train_files, split="train")
+        ds_test = load_dataset("parquet", data_files=test_files, split="test")
+
+        if dev_files:
+            ds_dev = load_dataset("parquet", data_files=dev_files, split="train")
+            return ds_train, ds_dev, ds_test
+        else:
+            s = ds_train.train_test_split(test_size=0.1, seed=42)
+            return s["train"], s["test"], ds_test
+    else:
+        logger.warning("[droid] Kaggle path not found, falling back to HuggingFace...")
+        tr = load_dataset("project-droid/DroidCollection", split="train")
+        vl = load_dataset("project-droid/DroidCollection", split="dev")
+        ts = load_dataset("project-droid/DroidCollection", split="test")
+        return tr, vl, ts
 
 def _load_aicd(task):
-    import glob
-    tdir = f"{KAGGLE_AICD}/T2" if task == "t2" else f"{KAGGLE_AICD}/T1"
-    files = glob.glob(f"{tdir}/*.parquet")
-    if not files: raise FileNotFoundError(f"No parquet in {tdir}")
-    ds = load_dataset("parquet", data_files={"train":files}, split="train")
-    ds = ds.train_test_split(test_size=0.2, seed=42)
-    vl = ds["test"].train_test_split(test_size=0.5, seed=42)
-    return ds["train"], vl["train"], vl["test"]
+    """Load AICD-Bench with proper task selection.
+
+    T1: binary (human vs AI) - 2 classes
+    T2: model family attribution - 12 classes
+    T3: fine-grained detection - 4 classes
+    """
+    task_map = {"t1": "T1", "t2": "T2", "t3": "T3"}
+    task_name = task_map.get(task.lower(), "T2")
+    task_path = os.path.join(KAGGLE_AICD, task_name)
+
+    if os.path.isdir(task_path):
+        parquet_files = sorted(glob.glob(os.path.join(task_path, "**", "*.parquet"), recursive=True))
+        if parquet_files:
+            logger.info(f"[aicd] Loading {task_name} from local: {len(parquet_files)} files")
+            ds = load_dataset("parquet", data_files=parquet_files, split="train")
+
+            if 'split' in ds.column_names:
+                try:
+                    tr = ds.filter(lambda x: str(x.get("split","")).lower()=="train")
+                    vl = ds.filter(lambda x: str(x.get("split","")).lower() in {"val","validation","dev"})
+                    ts = ds.filter(lambda x: str(x.get("split","")).lower()=="test")
+                    if len(tr) > 0 and len(vl) > 0 and len(ts) > 0:
+                        return tr, vl, ts
+                except:
+                    pass
+
+            s = ds.train_test_split(test_size=0.1, seed=42)
+            s2 = s["train"].train_test_split(test_size=1/9, seed=42)
+            return s2["train"], s2["test"], s["test"]
+
+    logger.warning(f"[aicd] Local path not found for {task_name}, trying HuggingFace...")
+    return (load_dataset("AICD-bench/AICD-Bench", name=task_name, split=s) for s in ["train","validation","test"])
 
 def _preflight_check():
     logger.info("="*60)
