@@ -213,42 +213,35 @@ def _load_aicd(task):
     cfg_map = {"t2":"T2","t3":"T3","t1":"T1"}
     task_name = cfg_map.get(task.upper().replace("T2","t2").replace("T3","t3").replace("T1","t1"), "T2")
     
-    # Try local Kaggle path first
-    local_base = KAGGLE_AICD
-    task_dirs = ["T1", "T2", "T3"]
-    
-    for t in task_dirs:
-        task_path = os.path.join(local_base, t)
-        if os.path.isdir(task_path):
-            # Find parquet files
-            parquet_files = sorted(glob.glob(os.path.join(task_path, "**", "*.parquet"), recursive=True))
-            if parquet_files:
-                logger.info(f"[aicd] Loading from local: {task_path}")
-                ds = load_dataset("parquet", data_files=parquet_files, split="train")
-                # AICD has train/val/test splits
-                if "validation" in ds.column_names or "val" in ds.column_names:
-                    val_key = "validation" if "validation" in ds.column_names else "val"
-                    return ds["train"], ds[val_key], ds["test"]
-                else:
-                    s = ds.train_test_split(test_size=0.1, seed=42)
-                    s2 = s["train"].train_test_split(test_size=1/9, seed=42)
-                    return s2["train"], s2["test"], s["test"]
-    
-    # Try loading as single parquet
-    parquet_files = sorted(glob.glob(os.path.join(local_base, "**", "*.parquet"), recursive=True))
-    if parquet_files:
-        logger.info(f"[aicd] Loading parquet files from: {local_base}")
-        ds = load_dataset("parquet", data_files=parquet_files, split="train")
-        if "validation" in ds.column_names or "val" in ds.column_names:
-            val_key = "validation" if "validation" in ds.column_names else "val"
-            return ds["train"], ds[val_key], ds["test"]
-        else:
-            s = ds.train_test_split(test_size=0.1, seed=42)
-            s2 = s["train"].train_test_split(test_size=1/9, seed=42)
-            return s2["train"], s2["test"], s["test"]
+    # Directly check the correct task directory first
+    task_path = os.path.join(KAGGLE_AICD, task_name)
+    if os.path.isdir(task_path):
+        parquet_files = sorted(glob.glob(os.path.join(task_path, "**", "*.parquet"), recursive=True))
+        if parquet_files:
+            logger.info(f"[aicd] Loading {task_name} from local: {len(parquet_files)} files")
+            ds = load_dataset("parquet", data_files=parquet_files, split="train")
+            
+            if "split" in ds.column_names:
+                try:
+                    tr = ds.filter(lambda x: str(x.get("split","")).lower()=="train")
+                    vl = ds.filter(lambda x: str(x.get("split","")).lower() in {"val","validation","dev"})
+                    ts = ds.filter(lambda x: str(x.get("split","")).lower()=="test")
+                    if len(tr) > 0 and len(vl) > 0 and len(ts) > 0:
+                        return tr, vl, ts
+                except:
+                    pass
+            
+            if "validation" in ds.column_names:
+                return ds["train"], ds["validation"], ds["test"]
+            elif "val" in ds.column_names:
+                return ds["train"], ds["val"], ds["test"]
+            else:
+                s = ds.train_test_split(test_size=0.1, seed=42)
+                s2 = s["train"].train_test_split(test_size=1/9, seed=42)
+                return s2["train"], s2["test"], s["test"]
     
     # Fallback to HuggingFace (requires internet)
-    logger.warning("[aicd] Local path not found, trying HuggingFace (requires internet)")
+    logger.warning(f"[aicd] Local path not found for {task_name}, trying HuggingFace...")
     return (load_dataset("AICD-bench/AICD-Bench", name=task_name, split=s) for s in ["train","validation","test"])
 
 # =============================================================================

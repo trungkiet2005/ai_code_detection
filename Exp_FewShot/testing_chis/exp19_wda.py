@@ -170,28 +170,22 @@ def _load_codet():
         return s2["train"], s2["test"], s["test"]
 
 def _load_droid():
-    """Load DroidCollection with proper shard handling.
-    
-    When loading parquet files directly, the split parameter doesn't work.
-    We load all files together and handle splits ourselves.
-    """
+    """Load DroidCollection with proper shard handling."""
     train_files = sorted(glob.glob(os.path.join(KAGGLE_DROID, "train-*.parquet")))
     test_files = sorted(glob.glob(os.path.join(KAGGLE_DROID, "test-*.parquet")))
     dev_files = sorted(glob.glob(os.path.join(KAGGLE_DROID, "dev-*.parquet")))
-    
-    all_train_files = train_files + dev_files  # Combine train and dev as training data
-    
-    if all_train_files and test_files:
-        logger.info(f"[droid] Loading from local: {len(all_train_files)} train+dev shards, {len(test_files)} test shards")
-        
-        # Load train+dev WITHOUT split parameter
-        ds_train = load_dataset("parquet", data_files=all_train_files, split="train")
-        # Load test WITHOUT split parameter
-        ds_test = load_dataset("parquet", data_files=test_files, split="train")
-        
-        # Split train into train/val
-        s = ds_train.train_test_split(test_size=0.1, seed=42)
-        return s["train"], s["test"], ds_test
+
+    if train_files and test_files:
+        logger.info(f"[droid] Loading from local: {len(train_files)} train shards, {len(test_files)} test shards")
+        ds_train = load_dataset("parquet", data_files=train_files, split="train")
+        ds_test = load_dataset("parquet", data_files=test_files, split="test")
+
+        if dev_files:
+            ds_dev = load_dataset("parquet", data_files=dev_files, split="train")
+            return ds_train, ds_dev, ds_test
+        else:
+            s = ds_train.train_test_split(test_size=0.1, seed=42)
+            return s["train"], s["test"], ds_test
     else:
         logger.warning("[droid] Kaggle path not found, falling back to HuggingFace...")
         tr = load_dataset("project-droid/DroidCollection", split="train")
@@ -206,8 +200,8 @@ def _load_aicd(task):
     T2: model family attribution - 12 classes
     T3: fine-grained detection - 4 classes
     """
-    task_map = {"t1": "T1", "t2": "T2", "t3": "T3"}
-    task_name = task_map.get(task.lower(), "T2")
+    cfg_map = {"t1":"T1","t2":"T2","t3":"T3"}
+    task_name = cfg_map.get(task.lower(), "T2")
     task_path = os.path.join(KAGGLE_AICD, task_name)
 
     if os.path.isdir(task_path):
@@ -216,7 +210,7 @@ def _load_aicd(task):
             logger.info(f"[aicd] Loading {task_name} from local: {len(parquet_files)} files")
             ds = load_dataset("parquet", data_files=parquet_files, split="train")
 
-            if 'split' in ds.column_names:
+            if "split" in ds.column_names:
                 try:
                     tr = ds.filter(lambda x: str(x.get("split","")).lower()=="train")
                     vl = ds.filter(lambda x: str(x.get("split","")).lower() in {"val","validation","dev"})
@@ -226,9 +220,14 @@ def _load_aicd(task):
                 except:
                     pass
 
-            s = ds.train_test_split(test_size=0.1, seed=42)
-            s2 = s["train"].train_test_split(test_size=1/9, seed=42)
-            return s2["train"], s2["test"], s["test"]
+            if "validation" in ds.column_names:
+                return ds["train"], ds["validation"], ds["test"]
+            elif "val" in ds.column_names:
+                return ds["train"], ds["val"], ds["test"]
+            else:
+                s = ds.train_test_split(test_size=0.1, seed=42)
+                s2 = s["train"].train_test_split(test_size=1/9, seed=42)
+                return s2["train"], s2["test"], s["test"]
 
     logger.warning(f"[aicd] Local path not found for {task_name}, trying HuggingFace...")
     return (load_dataset("AICD-bench/AICD-Bench", name=task_name, split=s) for s in ["train","validation","test"])
