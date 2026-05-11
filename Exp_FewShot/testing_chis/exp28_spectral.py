@@ -169,22 +169,28 @@ def _load_codet():
         return s2["train"], s2["test"], s["test"]
 
 def _load_droid():
-    """Load DroidCollection with proper shard handling."""
+    """Load DroidCollection with proper shard handling.
+    
+    When loading parquet files directly, the split parameter doesn't work.
+    We load all files together and handle splits ourselves.
+    """
     train_files = sorted(glob.glob(os.path.join(KAGGLE_DROID, "train-*.parquet")))
     test_files = sorted(glob.glob(os.path.join(KAGGLE_DROID, "test-*.parquet")))
     dev_files = sorted(glob.glob(os.path.join(KAGGLE_DROID, "dev-*.parquet")))
-
-    if train_files and test_files:
-        logger.info(f"[droid] Loading from local: {len(train_files)} train shards, {len(test_files)} test shards")
-        ds_train = load_dataset("parquet", data_files=train_files, split="train")
-        ds_test = load_dataset("parquet", data_files=test_files, split="test")
-
-        if dev_files:
-            ds_dev = load_dataset("parquet", data_files=dev_files, split="train")
-            return ds_train, ds_dev, ds_test
-        else:
-            s = ds_train.train_test_split(test_size=0.1, seed=42)
-            return s["train"], s["test"], ds_test
+    
+    all_train_files = train_files + dev_files  # Combine train and dev as training data
+    
+    if all_train_files and test_files:
+        logger.info(f"[droid] Loading from local: {len(all_train_files)} train+dev shards, {len(test_files)} test shards")
+        
+        # Load train+dev WITHOUT split parameter
+        ds_train = load_dataset("parquet", data_files=all_train_files, split="train")
+        # Load test WITHOUT split parameter
+        ds_test = load_dataset("parquet", data_files=test_files, split="train")
+        
+        # Split train into train/val
+        s = ds_train.train_test_split(test_size=0.1, seed=42)
+        return s["train"], s["test"], ds_test
     else:
         logger.warning("[droid] Kaggle path not found, falling back to HuggingFace...")
         tr = load_dataset("project-droid/DroidCollection", split="train")
