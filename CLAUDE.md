@@ -10,11 +10,18 @@ alwaysApply: true
 
 ---
 
-## 0. Current submission target -- UPDATED 2026-05-10 (theory-pivot locked + extended novelty framework)
+## 0. Current submission target -- UPDATED 2026-05-11 (standardized few-shot protocol)
 
 > **Venue:** EMNLP 2026 Main (long paper, 8 pages). **Reach for Oral.**
 > **Deadline:** ~2026-05-26.
-> **Status (2026-05-10):** Few-shot CoDET-M4 headline locked; theory framing is now the paper spine.
+> **Status (2026-05-11):** Few-shot CoDET-M4 headline locked; theory framing is now the paper spine. **Standardized few-shot protocol (FIXED_TOTAL_TRAIN=72) for fair cross-benchmark comparison.**
+
+**Few-Shot Protocol Change (2026-05-11):**
+- **OLD:** `frac=0.01` = 5,016 samples for AICD-T2 vs 72 samples for CoDET-M4 (unfair)
+- **NEW:** `FIXED_TOTAL_TRAIN=72` for ALL benchmarks (equal training budget)
+- CoDET-M4: 72 samples = 12/cls × 6 cls
+- AICD-T2: 72 samples = 6/cls × 12 cls
+- Droid T3: 72 samples = 24/cls × 3 cls
 > **Working title:** *Few-Shot AI-Code Attribution via Hierarchical Target-Kernel Learning*
 
 **Single sentence:**
@@ -337,13 +344,44 @@ The oral claim must reduce to one sentence of the form "axis X gives $\Delta$ on
 | **DroidCollection T4** | Appendix robustness stress test | **Weighted-F1** (4-class incl. adversarial) | Adversarial/humanised-machine robustness; useful only after CoDET + AICD T2 are stable |
 | **AICD-Bench T1/T3** | Limitation / appendix only | Macro-F1 | T1 has known val->test collapse; T3 is fine-grained detection, not central attribution |
 
-**Protocol (non-negotiable):**
+**Protocol (non-negotiable, updated 2026-05-11):**
 - Train separate model per benchmark. Never mix.
+- **Standardized Few-Shot Budget (NEW):** All benchmarks use `FIXED_TOTAL_TRAIN = 72` samples total.
+  - This ensures fair comparison across different dataset sizes (AICD-T2 has 12 classes vs CoDET-M4's 6).
+  - CoDET-M4: 72 samples = 12 samples/class × 6 classes
+  - AICD-T2: 72 samples = 6 samples/class × 12 classes
 - Report the full metric pack: Primary, Macro-F1, Weighted-F1, Macro-R, Weighted-R, Accuracy, per-class.
 - Report **val and test** side-by-side. The val–test gap is itself a diagnostic (insight #4).
 - Hardware: **H100 80GB, BF16, batch 64×1, seq 512**.
 - Each `exp_NN_*.py` is **standalone** and Kaggle-runnable.
 - Data-efficiency framing: **train on 5% for the headline**, evaluate on 100% test. Any positive delta vs a full-data paper baseline is a paper claim only when the task matches the paper scope.
+- **Final evaluation is always on TEST set** (val set used only for checkpoint selection).
+
+**JSON Output Schema (comprehensive for paper):**
+```json
+{
+  "encoder": "ModernBERT-base",
+  "benchmark": "codet_m4",
+  "n_classes": 6,
+  "total_train_samples": 72,
+  "train_samples_per_class": 12,
+  "macro_f1": 0.67,
+  "weighted_f1": 0.71,
+  "accuracy": 0.72,
+  "delta_vs_paper": 0.007,
+  "per_class_f1": [...],
+  "per_class_precision": [...],
+  "per_class_recall": [...],
+  "confusion_matrix": [[...]],
+  "pred_distribution": {...},
+  "label_distribution": {...},
+  "train_history": [{"epoch": 1, "loss": 1.2, "macro_f1": 0.5}, ...],
+  "val_history": [{"epoch": 1, "macro_f1": 0.5, ...}],
+  "wall_time_seconds": 120.5,
+  "gpu_memory_gb": 8.45,
+  "timestamp": "2026-05-11 23:00:00"
+}
+```
 
 **Experiment priority order:**
 1. `codet_m4` -- headline generator-level authorship attribution.
@@ -580,7 +618,7 @@ The few-shot suite is split into two physically separate folders. Different rule
 - Must have: formal statement, key insight, derivation sketch, falsifiable predictions
 - See §2.4 for templates and examples
 
-**Current novel entries (arxiv-grounded, 2026-05-10):**
+**Current novel entries (arxiv-grounded, 2026-05-11):**
 
 | File | Method | ArXiv ID | Theory Hook | Key Contribution |
 |:--|:--|:--|:--|:--|
@@ -592,6 +630,20 @@ The few-shot suite is split into two physically separate folders. Different rule
 | `exp_n10_vib.py` | **VIB** | Alemi 2017 | Info bottleneck | KL(q‖p) regularisation |
 | `exp_n11_mixup_ce.py` | **Mixup-CE** | Zhang 2018 | Boundary smoothing | Soft label interpolation |
 | `exp_n12_label_smooth.py` | **LabelSmooth** | Pereyra 2017 | Calibration | ECE improvement |
+| `exp17_cao.py` | **CAO** | ICLR 2025 | Contrastive learning | Geneaology-aware positive sampling |
+| `exp18_eif.py` | **EIF** | ICLR 2021 | Energy-based models | Identity factorization via energy |
+| `exp19_wda.py` | **WDA** | ICML 2019 | Optimal transport | Wasserstein domain alignment |
+| `exp20_proto.py` | **PPN** | NeurIPS 2017 | Prototypical networks | Class prototype propagation |
+| `exp21_hyper.py` | **HCE** | ICML 2018 | Hyperbolic geometry | Poincaré ball embeddings |
+| `exp22_mi.py` | **MIA** | ICML 2019 | Mutual information | InfoNCE for attribution |
+| `exp23_ot.py` | **OTA** | ICML 2019 | Optimal transport | Class center alignment |
+| `exp24_curriculum.py` | **CFSL** | ICML 2019 | Curriculum learning | Sample difficulty ordering |
+| `exp25_deconfound.py` | **DRL** | ICML 2019 | Causal inference | IRM for source deconfound |
+| `exp26_graph.py` | **GNA** | NeurIPS 2017 | Graph networks | Generator family message-passing |
+| `exp27_cmixup.py` | **CMA** | arXiv 2017 | Mixup augmentation | Family-aware mixup |
+| `exp28_spectral.py` | **SCL** | ICML 2021 | Spectral methods | Contrastive with spectral norm |
+| `exp29_causal_trace.py` | **CFT** | ICLR 2021 | Causal tracing | Gradient-based feature importance |
+| `exp30_bayesian.py` | **BUA** | NeurIPS 2015 | Bayesian NN | MC dropout uncertainty |
 
 **Novel theorems (self-derived, EMNLP Oral-tier):**
 
@@ -613,17 +665,17 @@ The few-shot suite is split into two physically separate folders. Different rule
 | **Geometric DL** | CUSP | `2502.00401` | ICLR 2025 | Hyperbolic/curvature methods |
 | **Causal Inference** | IRM | Arjovsky 2019 | — | Invariant risk minimisation |
 
-### Benchmark dispatch (2026-05-10)
+### Benchmark dispatch (2026-05-11)
 
-Every novel + testing file accepts `FS_BENCHMARK` env var:
+Every novel + testing file accepts `FS_BENCHMARK` env var. **NEW: All benchmarks use FIXED_TOTAL_TRAIN=72 for fair comparison.**
 
-| `FS_BENCHMARK` | Bench / Task | Classes | Primary metric | Paper baseline |
-|:--|:--|:-:|:--|:-:|
-| `codet_m4` (default) | CoDET-M4 6-class Author IID | 6 | Macro-F1 | UniXcoder 66.33 |
-| `aicd_t2` | AICD-Bench Task 2 model-family attribution | 12 | Macro-F1 | AICD T2 paper baseline |
-| `droid_t3` | DroidCollection T3 (3-class) | 3 | Weighted-F1 | DroidDetectCLS-Large 88.78 |
-| `droid_t4` | DroidCollection T4 (4-class incl. adversarial) | 4 | Weighted-F1 | DroidDetectCLS-Large 94.30 |
-| `aicd_t3` | AICD-Bench Task 3 fine-grained detection | 4 | Macro-F1 | Appendix only |
+| `FS_BENCHMARK` | Bench / Task | Classes | Total Train | Per-Class | Primary metric | Paper baseline |
+|:--|:--|:-:|:-:|:-:|:-:|:--:|
+| `codet_m4` (default) | CoDET-M4 6-class Author IID | 6 | 72 | 12 | Macro-F1 | UniXcoder 66.33 |
+| `aicd_t2` | AICD-Bench Task 2 model-family attribution | 12 | 72 | 6 | Macro-F1 | AICD T2 paper baseline |
+| `droid_t3` | DroidCollection T3 (3-class) | 3 | 72 | 24 | Weighted-F1 | DroidDetectCLS-Large 88.78 |
+| `droid_t4` | DroidCollection T4 (4-class incl. adversarial) | 4 | 72 | 18 | Weighted-F1 | DroidDetectCLS-Large 94.30 |
+| `aicd_t3` | AICD-Bench Task 3 fine-grained detection | 4 | 72 | 18 | Macro-F1 | Appendix only |
 
 Cross-bench portability of methods:
 

@@ -1,16 +1,22 @@
 """
-exp13_ce_baseline.py — Cross-Entropy baseline only (no HierTree, no NTK)
+exp16_ce_baseline.py — Cross-Entropy baseline with standardized few-shot protocol
 
-Self-contained. Runs: 2 encoders × 4 benchmarks × 3 fractions = 24 experiments.
+Self-contained. Runs: 2 encoders × 2 benchmarks = 4 experiments.
+
+Key Protocol Change (v16):
+  - FIXED_TOTAL_TRAIN = 72: All benchmarks get same 72 total training samples
+  - This ensures fair comparison across different dataset sizes
+  - CoDET-M4: 72 = 12 samples × 6 classes
+  - AICD-T2: 72 = 6 samples × 12 classes
 
 Config:
   - Encoders: ModernBERT-base, unixcoder-base
-  - Benchmarks: codet_m4 (headline), aicd_t2 (stress), droid_t3, droid_t4
-  - Fractions: 0.01, 0.05, 0.20
+  - Benchmarks: codet_m4 (6 classes), aicd_t2 (12 classes)
+  - Total training: 72 samples (fixed)
   - Batch: 256, seq=512
 
 Usage:
-  python exp13_ce_baseline.py
+  python exp16_ce_baseline.py
 """
 
 # === KAGGLE PATHS ===
@@ -76,6 +82,14 @@ class Cfg:
     wd: float = 0.01
     warmup: float = 0.1
     device: str = "cuda"
+    # Few-shot: use n_shots_per_cls > 0 to override frac
+    # Set n_shots_per_cls = 12 for K-shot learning (12 samples per class)
+    # All benchmarks will have same total samples: n_shots_per_cls * n_cls
+    n_shots_per_cls: int = 0  # 0 = use frac; >0 = use fixed K shots per class
+
+    # Fixed total training budget (Option 2)
+    # All benchmarks use same total samples: FIXED_TOTAL_TRAIN_SAMPLES
+    FIXED_TOTAL_TRAIN: int = 72  # 0 = disable; >0 = use fixed total samples
 
     def __post_init__(self):
         if self.benchmark == "codet_m4":
@@ -341,13 +355,42 @@ def build_dls(cfg: Cfg):
     for i, lab in enumerate(tr_d["label"]): by_cls[int(lab)].append(i)
     rng = random.Random(cfg.seed)
     chosen = []
-    for cls in range(cfg.n_cls):
-        pool = by_cls.get(cls, [])
-        n = max(1, int(round(len(pool) * cfg.frac))) if pool else 0
-        chosen.extend(rng.sample(pool, min(n, len(pool))) if pool else [])
+
+    if cfg.FIXED_TOTAL_TRAIN > 0:
+        # Option 2: Equal total training budget across all benchmarks
+        # Distribute FIXED_TOTAL_TRAIN samples equally per class
+        total = cfg.FIXED_TOTAL_TRAIN
+        n_per_cls = max(1, total // cfg.n_cls)  # at least 1 per class
+        remaining = total - (n_per_cls * cfg.n_cls)  # leftover
+
+        for cls in range(cfg.n_cls):
+            pool = by_cls.get(cls, [])
+            # First 'remaining' classes get n_per_cls + 1
+            n = n_per_cls + (1 if cls < remaining else 0)
+            n = min(n, len(pool))  # don't sample more than available
+            if pool:
+                chosen.extend(rng.sample(pool, n))
+        logger.info(f"[data] {cfg.enc} | {cfg.benchmark} | FIXED_TOTAL={cfg.FIXED_TOTAL_TRAIN} | n_train={len(chosen)} (={n_per_cls}/cls)")
+
+    elif cfg.n_shots_per_cls > 0:
+        # Option 1: K-shot learning (fixed K samples per class)
+        for cls in range(cfg.n_cls):
+            pool = by_cls.get(cls, [])
+            n = min(cfg.n_shots_per_cls, len(pool))
+            if pool:
+                chosen.extend(rng.sample(pool, n))
+        logger.info(f"[data] {cfg.enc} | {cfg.benchmark} | K_SHOT={cfg.n_shots_per_cls} | n_train={len(chosen)}")
+
+    else:
+        # Original: fraction-based sampling
+        for cls in range(cfg.n_cls):
+            pool = by_cls.get(cls, [])
+            n = max(1, int(round(len(pool) * cfg.frac))) if pool else 0
+            chosen.extend(rng.sample(pool, min(n, len(pool))) if pool else [])
+        logger.info(f"[data] {cfg.enc} | {cfg.benchmark} | frac={cfg.frac} | n_train={len(chosen)}")
+
     rng.shuffle(chosen)
     tr_d = tr_d.select(chosen)
-    logger.info(f"[data] {cfg.enc} | {cfg.benchmark} | frac={cfg.frac} | n_train={len(tr_d)}")
 
     def ld(ds, shuf):
         return DataLoader(FSDS(ds, tok, cfg.seq), batch_size=cfg.bs, shuffle=shuf, num_workers=4, collate_fn=collate, pin_memory=True)
@@ -388,9 +431,26 @@ def eval_m(model, loader, dev):
         with _autocast_ctx(dev): logits = model(b["ids"].to(dev), b["mask"].to(dev))["logits"]
         ps.extend(logits.argmax(1).cpu().tolist())
         ls.extend(b["labels"].tolist())
-    return {"macro": f1_score(ls, ps, average="macro", zero_division=0),
-            "weighted": f1_score(ls, ps, average="weighted", zero_division=0),
-            "acc": accuracy_score(ls, ps)}
+    from sklearn.metrics import f1_score as f1s, precision_score, recall_score, confusion_matrix
+    macro = f1s(ls, ps, average="macro", zero_division=0)
+    weighted = f1s(ls, ps, average="weighted", zero_division=0)
+    acc = accuracy_score(ls, ps)
+    # Per-class F1
+    per_cls_f1 = f1s(ls, ps, average=None, zero_division=0).tolist()
+    per_cls_precision = precision_score(ls, ps, average=None, zero_division=0).tolist()
+    per_cls_recall = recall_score(ls, ps, average=None, zero_division=0).tolist()
+    # Confusion matrix
+    conf_matrix = confusion_matrix(ls, ps).tolist()
+    # Prediction distribution
+    from collections import Counter
+    pred_dist = dict(Counter(ps))
+    label_dist = dict(Counter(ls))
+    return {
+        "macro": macro, "weighted": weighted, "acc": acc,
+        "per_class_f1": per_cls_f1, "per_class_precision": per_cls_precision,
+        "per_class_recall": per_cls_recall, "confusion_matrix": conf_matrix,
+        "pred_distribution": pred_dist, "label_distribution": label_dist,
+    }
 
 def train(cfg: Cfg, tr_dl, vl_dl, ts_dl):
     dev = torch.device(cfg.device)
@@ -402,27 +462,50 @@ def train(cfg: Cfg, tr_dl, vl_dl, ts_dl):
     scaler = GradScaler(enabled=(dev.type == "cuda"))
     best_val, best_state = 0, None
 
+    # Track per-epoch metrics for paper
+    train_history = []
+    val_history = []
+
     for ep in range(cfg.epochs):
         model.train()
         pbar = tqdm(tr_dl, desc=f"Epoch {ep+1}/{cfg.epochs}", leave=False)
+        ep_loss = []
         for b in pbar:
             ids, mask, labs = b["ids"].to(dev), b["mask"].to(dev), b["labels"].to(dev)
             with _autocast_ctx(dev):
                 logits = model(ids, mask)["logits"]
                 loss = F.cross_entropy(logits, labs, weight=w)
+            ep_loss.append(loss.item())
             scaler.scale(loss).backward()
             scaler.unscale_(opt)
             torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
             scaler.step(opt); scaler.update(); opt.zero_grad()
             sched.step()
             pbar.set_postfix({"loss": f"{loss.item():.4f}"})
+        # Per-epoch metrics
+        tr_met = eval_m(model, tr_dl, dev)
         vr = eval_m(model, vl_dl, dev)
+        train_history.append({
+            "epoch": ep + 1,
+            "loss": round(np.mean(ep_loss), 6),
+            "macro_f1": round(tr_met["macro"], 6),
+            "weighted_f1": round(tr_met["weighted"], 6),
+        })
+        val_history.append({
+            "epoch": ep + 1,
+            "macro_f1": round(vr["macro"], 6),
+            "weighted_f1": round(vr["weighted"], 6),
+            "accuracy": round(vr["acc"], 6),
+        })
         if vr["macro"] > best_val:
             best_val = vr["macro"]
             best_state = {k: v.cpu().clone() for k, v in model.state_dict().items()}
     if best_state is not None:
         model.load_state_dict(best_state)
-    return eval_m(model, ts_dl, dev)
+    final_test = eval_m(model, ts_dl, dev)
+    final_test["train_history"] = train_history
+    final_test["val_history"] = val_history
+    return final_test
 
 def main():
     # Run preflight check for all benchmarks FIRST
@@ -431,40 +514,127 @@ def main():
 
     encoders = ["ModernBERT-base", "unixcoder-base"]
     benchmarks = [("codet_m4","author"), ("aicd_t2","t2")]
-    fracs = [0.01, 0.05, 0.20]
 
-    results = []
-    for enc in encoders:
-        for bench, task in benchmarks:
-            for frac in fracs:
-                cfg = Cfg(benchmark=bench, task=task, enc=enc, frac=frac)
+    # Option 1: Standard few-shot with FIXED_TOTAL_TRAIN
+    # All benchmarks get same total training samples (72 = 12 samples/class for 6 classes)
+    # This ensures fair comparison across different dataset sizes
+    FIXED_TOTAL = 72  # 0 = disable (use fracs below); >0 = use fixed total
+
+    if FIXED_TOTAL > 0:
+        # Run with fixed total training budget
+        results = []
+        for enc in encoders:
+            for bench, task in benchmarks:
+                cfg = Cfg(benchmark=bench, task=task, enc=enc, FIXED_TOTAL_TRAIN=FIXED_TOTAL)
                 cfg = _hw(cfg)
-                tag = f"exp13_ce_{enc}_{bench}_f{frac}"
+                if torch.cuda.is_available(): torch.cuda.reset_peak_memory_stats()
+                tag = f"exp16_ce_{enc}_{bench}_fixed{FIXED_TOTAL}"
                 logger.info(f"=== {tag} ===")
                 t0 = time.time()
                 tr_dl, vl_dl, ts_dl = build_dls(cfg)
                 res = train(cfg, tr_dl, vl_dl, ts_dl)
                 elapsed = time.time() - t0
-                row = {"tag": tag, "enc": enc, "bench": bench, "frac": frac,
-                       "macro": res["macro"], "weighted": res["weighted"], "acc": res["acc"],
-                       "dpaper": res["macro"] - PAPER_BASELINE, "wall": round(elapsed,1)}
+                # Build comprehensive result row for paper
+                row = {
+                    # Experiment metadata
+                    "tag": tag,
+                    "encoder": enc,
+                    "benchmark": bench,
+                    "task": task,
+                    "n_classes": cfg.n_cls,
+                    "total_train_samples": FIXED_TOTAL,
+                    "train_samples_per_class": FIXED_TOTAL // cfg.n_cls,
+                    # Hyperparameters
+                    "batch_size": cfg.bs,
+                    "seq_length": cfg.seq,
+                    "epochs": cfg.epochs,
+                    "lr_encoder": cfg.lr_enc,
+                    "lr_head": cfg.lr_head,
+                    "weight_decay": cfg.wd,
+                    "warmup_ratio": cfg.warmup,
+                    # Main metrics
+                    "macro_f1": round(res["macro"], 6),
+                    "weighted_f1": round(res["weighted"], 6),
+                    "accuracy": round(res["acc"], 6),
+                    # Comparison to paper baseline
+                    "delta_vs_paper": round(res["macro"] - PAPER_BASELINE, 6),
+                    "paper_baseline": PAPER_BASELINE,
+                    # Per-class metrics
+                    "per_class_f1": [round(x, 6) for x in res["per_class_f1"]],
+                    "per_class_precision": [round(x, 6) for x in res["per_class_precision"]],
+                    "per_class_recall": [round(x, 6) for x in res["per_class_recall"]],
+                    # Confusion matrix
+                    "confusion_matrix": res["confusion_matrix"],
+                    # Prediction analysis
+                    "pred_distribution": res["pred_distribution"],
+                    "label_distribution": res["label_distribution"],
+                    # Training history
+                    "train_history": res["train_history"],
+                    "val_history": res["val_history"],
+                    # Training info
+                    "wall_time_seconds": round(elapsed, 1),
+                    "gpu_memory_gb": round(torch.cuda.max_memory_allocated() / 1e9, 2) if torch.cuda.is_available() else 0,
+                    "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+                }
                 results.append(row)
                 logger.info(f"[{tag}] MacroF1={res['macro']:.4f} ({res['macro']-PAPER_BASELINE:+.4f} vs paper) time={elapsed:.0f}s")
                 del tr_dl, vl_dl, ts_dl
                 import gc; gc.collect()
                 if torch.cuda.is_available(): torch.cuda.empty_cache()
 
-    os.makedirs("results", exist_ok=True)
-    with open("results/exp13_results.json", "w") as f:
-        json.dump(results, f, indent=2)
+        os.makedirs("results", exist_ok=True)
+        with open("results/exp16_fixed72_results.json", "w") as f:
+            json.dump(results, f, indent=2)
 
-    print("\n" + "="*100)
-    print(f"{'Encoder':<22} {'Benchmark':<12} {'Frac':>6} {'Macro-F1':>10} {'dPaper':>10} {'Weighted':>10} {'Wall':>8}")
-    print("-"*100)
-    for r in results:
-        print(f"{r['enc']:<22} {r['bench']:<12} {r['frac']:>6.0%} {r['macro']:>10.4f} {r['dpaper']:>+10.4f} {r['weighted']:>10.4f} {r['wall']:>8.0f}s")
-    print("="*100)
-    print(f"\nBest Macro-F1: {max(r['macro'] for r in results):.4f} @ {max(results, key=lambda x: x['macro'])['tag']}")
+        print("\n" + "="*100)
+        print(f"{'Encoder':<22} {'Benchmark':<12} {'Macro-F1':>10} {'dPaper':>10} {'Weighted':>10} {'Wall':>8}")
+        print("-"*100)
+        for r in results:
+            print(f"{r['encoder']:<22} {r['benchmark']:<12} {r['macro_f1']:>10.4f} {r['delta_vs_paper']:>+10.4f} {r['weighted_f1']:>10.4f} {r['wall_time_seconds']:>8.0f}s")
+        print("="*100)
+        print("\nPer-class F1 breakdown:")
+        for r in results:
+            print(f"\n{r['encoder']} @ {r['benchmark']}:")
+            for i, f1 in enumerate(r['per_class_f1']):
+                print(f"  Class {i:2d}: F1={f1:.4f} P={r['per_class_precision'][i]:.4f} R={r['per_class_recall'][i]:.4f}")
+
+    else:
+        # Option 2: Original frac-based (keep for comparison)
+        fracs = [0.01, 0.05, 0.20]
+        results = []
+        for enc in encoders:
+            for bench, task in benchmarks:
+                for frac in fracs:
+                    cfg = Cfg(benchmark=bench, task=task, enc=enc, frac=frac)
+                    cfg = _hw(cfg)
+                    tag = f"exp13_ce_{enc}_{bench}_f{frac}"
+                    logger.info(f"=== {tag} ===")
+                    t0 = time.time()
+                    tr_dl, vl_dl, ts_dl = build_dls(cfg)
+                    res = train(cfg, tr_dl, vl_dl, ts_dl)
+                    elapsed = time.time() - t0
+                    row = {"tag": tag, "enc": enc, "bench": bench, "frac": frac,
+                           "macro": res["macro"], "weighted": res["weighted"], "acc": res["acc"],
+                           "dpaper": res["macro"] - PAPER_BASELINE, "wall": round(elapsed,1)}
+                    results.append(row)
+                    logger.info(f"[{tag}] MacroF1={res['macro']:.4f} ({res['macro']-PAPER_BASELINE:+.4f} vs paper) time={elapsed:.0f}s")
+                    del tr_dl, vl_dl, ts_dl
+                    import gc; gc.collect()
+                    if torch.cuda.is_available(): torch.cuda.empty_cache()
+
+        os.makedirs("results", exist_ok=True)
+        with open("results/exp13_results.json", "w") as f:
+            json.dump(results, f, indent=2)
+
+        print("\n" + "="*100)
+        print(f"{'Encoder':<22} {'Benchmark':<12} {'Frac':>6} {'Macro-F1':>10} {'dPaper':>10} {'Weighted':>10} {'Wall':>8}")
+        print("-"*100)
+        for r in results:
+            print(f"{r['enc']:<22} {r['bench']:<12} {r['frac']:>6.0%} {r['macro']:>10.4f} {r['dpaper']:>+10.4f} {r['weighted']:>10.4f} {r['wall']:>8.0f}s")
+        print("="*100)
+        print(f"\nBest Macro-F1: {max(r['macro'] for r in results):.4f} @ {max(results, key=lambda x: x['macro'])['tag']}")
+
+    print("\n[OK] Experiments complete!")
 
 if __name__ == "__main__":
     main()
