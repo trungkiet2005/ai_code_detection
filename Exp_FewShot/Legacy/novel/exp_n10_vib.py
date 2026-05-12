@@ -40,6 +40,13 @@
 #                      to no regulariser.
 # COMPUTE        : ~50 min Kaggle T4. VIB head adds <5% params.
 # =============================================================================
+
+# === KAGGLE PATHS ===
+KAGGLE_MODELS = "/kaggle/input/datasets/chiboiz/ai-detection-encoders/models"
+KAGGLE_CODET = "/kaggle/input/datasets/chiboiz/codetm4/dataset_without_comments.parquet"
+KAGGLE_DROID = "/kaggle/input/datasets/chiboiz/droid-collection/DroidCollection/data"
+KAGGLE_AICD = "/kaggle/input/datasets/chiboiz/ai-code-detection/AICD-Bench"
+
 from __future__ import annotations
 
 import importlib.util
@@ -242,18 +249,50 @@ def _convert(split, vocab):
     return out.filter(lambda x: x["label"] >= 0 and len(x["code"].strip()) > 0)
 
 
-def _load(seed):
-    logger.info("Loading dataset: DaniilOr/CoDET-M4")
-    ds = load_dataset("DaniilOr/CoDET-M4", split="train")
+def _load_codet():
+    """Load CoDET-M4 from local Kaggle parquet."""
+    if os.path.isfile(KAGGLE_CODET):
+        logger.info(f"[codet] Loading from local: {KAGGLE_CODET}")
+        ds = load_dataset("parquet", data_files=KAGGLE_CODET, split="train")
+    else:
+        logger.warning("[codet] Local path not found, trying HuggingFace...")
+        ds = load_dataset("DaniilOr/CoDET-M4", split="train")
+    
     if "split" in ds.column_names:
         train = ds.filter(lambda x: str(x.get("split", "")).lower() == "train")
         val = ds.filter(lambda x: str(x.get("split", "")).lower() in {"val", "validation", "dev"})
         test = ds.filter(lambda x: str(x.get("split", "")).lower() == "test")
     else:
-        s1 = ds.train_test_split(test_size=0.1, seed=seed); test = s1["test"]
-        s2 = s1["train"].train_test_split(test_size=1 / 9, seed=seed)
+        s1 = ds.train_test_split(test_size=0.1, seed=42)
+        test = s1["test"]
+        s2 = s1["train"].train_test_split(test_size=1 / 9, seed=42)
         train, val = s2["train"], s2["test"]
     return train, val, test
+
+
+def _load_droid(task):
+    """Load DroidCollection from local Kaggle or HuggingFace fallback."""
+    if os.path.isdir(KAGGLE_DROID):
+        train_files = sorted(glob.glob(os.path.join(KAGGLE_DROID, "train-*.parquet")))
+        test_files = sorted(glob.glob(os.path.join(KAGGLE_DROID, "test-*.parquet")))
+        dev_files = sorted(glob.glob(os.path.join(KAGGLE_DROID, "dev-*.parquet")))
+        
+        if train_files and test_files:
+            logger.info(f"[droid] Loading from local: {len(train_files)} train shards")
+            ds_train = load_dataset("parquet", data_files=train_files, split="train")
+            ds_test = load_dataset("parquet", data_files=test_files, split="train")
+            if dev_files:
+                ds_dev = load_dataset("parquet", data_files=dev_files, split="train")
+                return ds_train, ds_dev, ds_test
+            else:
+                s = ds_train.train_test_split(test_size=0.1, seed=42)
+                return s["train"], s["test"], ds_test
+    
+    logger.warning("[droid] Kaggle path not found, falling back to HuggingFace...")
+    return (
+        load_dataset("project-droid/DroidCollection", split=s)
+        for s in ["train", "validation", "test"]
+    )
 
 
 # -----------------------------------------------------------------------------
@@ -328,7 +367,7 @@ def build_loaders(cfg):
     if bench in ("droid_t3", "droid_t4"):
         task = "T4" if bench == "droid_t4" else "T3"
         cfg.n_classes = 4 if task == "T4" else 3
-        train_raw, val_raw, test_raw = _load_droid(cfg.seed, task)
+        train_raw, val_raw, test_raw = _load_droid(task)
         train_ds = _droid_convert(train_raw, task)
         val_ds = _droid_convert(val_raw, task)
         test_ds = _droid_convert(test_raw, task)
@@ -338,7 +377,7 @@ def build_loaders(cfg):
     else:
         cfg.benchmark = "codet_m4"
         cfg.n_classes = 6
-        train_raw, val_raw, test_raw = _load(cfg.seed)
+        train_raw, val_raw, test_raw = _load_codet()
         vocab = _vocab(train_raw)
         logger.info(f"Author vocab ({len(vocab)}): {sorted(vocab.keys())}")
         train_ds = _convert(train_raw, vocab); val_ds = _convert(val_raw, vocab); test_ds = _convert(test_raw, vocab)
@@ -352,7 +391,8 @@ def build_loaders(cfg):
     vidx = minival_idx(list(val_ds["label"]), cfg.val_size_per_class, cfg.n_classes, cfg.fs_seed + 1000)
     val_ds = val_ds.select(vidx) if vidx else val_ds
     logger.info(f"[val] {len(val_ds)} [test] {len(test_ds)} (full)")
-    tok = AutoTokenizer.from_pretrained(cfg.encoder_name)
+    enc_path = os.path.join(KAGGLE_MODELS, cfg.encoder_name)
+    tok = AutoTokenizer.from_pretrained(enc_path, local_files_only=True)
     def _ld(d, sh):
         return DataLoader(_Ds(d, tok, cfg.max_length), batch_size=cfg.batch_size,
                           shuffle=sh, num_workers=cfg.num_workers, collate_fn=_coll,
@@ -372,7 +412,8 @@ def _pool(h, m):
 class FSClassifier(nn.Module):
     def __init__(self, cfg):
         super().__init__(); self.cfg = cfg
-        self.encoder = AutoModel.from_pretrained(cfg.encoder_name)
+        enc_path = os.path.join(KAGGLE_MODELS, cfg.encoder_name)
+        self.encoder = AutoModel.from_pretrained(enc_path, local_files_only=True)
         h = self.encoder.config.hidden_size
         self.dropout = nn.Dropout(0.1)
         self.classifier = nn.Linear(h, cfg.n_classes)
