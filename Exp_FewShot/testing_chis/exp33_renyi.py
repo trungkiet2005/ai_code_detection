@@ -59,7 +59,6 @@ from torch.cuda.amp import autocast, GradScaler
 def _autocast_ctx(dev):
     return autocast(enabled=(dev.type == "cuda"))
 
-    except TypeError: return _ac(enabled=enabled)
 warnings.filterwarnings("ignore")
 import logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s", stream=sys.stdout)
