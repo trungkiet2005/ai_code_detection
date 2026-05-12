@@ -505,7 +505,7 @@ def main():
     logger.info("[PREFLIGHT] Running dataset validation before experiments...")
     _preflight_check()
 
-    encoders = ["ModernBERT-base", "unixcoder-base"]
+    encoders = ["unixcoder-base"]
     benchmarks = [("codet_m4","author"), ("aicd_t2","t2")]
 
     # Option 1: Standard few-shot with FIXED_TOTAL_TRAIN

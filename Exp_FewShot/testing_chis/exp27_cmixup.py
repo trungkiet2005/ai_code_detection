@@ -474,7 +474,7 @@ def main():
     logger.info("[PREFLIGHT] Running dataset validation...")
     _preflight_check()
 
-    encoders = ["ModernBERT-base", "unixcoder-base"]
+    encoders = ["unixcoder-base"]
     benchmarks = [("codet_m4","author"), ("aicd_t2","t2")]
     FIXED_TOTAL = 72
 

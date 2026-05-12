@@ -52,6 +52,22 @@ Self-contained experiments for Hier-NTK ablation + published baselines.
 
 ---
 
+## Theory-Track Methods (FIXED_TOTAL=72 protocol)
+
+> These experiments use a **fixed 72-sample** training set (not fraction-based).
+> Each file: 2 encoders × 2 benchmarks = 4 runs.
+
+| File | Method | Theory | Status |
+|:--|:--|:--|:--|
+| `exp17_cao.py` | CAO | Class-Aware Ordering | ⚠️ NaN loss, collapsed |
+| `exp19_wda.py` | WDA | Wasserstein Domain Align | ❌ Collapsed |
+| `exp20_proto.py` | Proto | Prototypical Networks | ⚠️ Partial collapse |
+| `exp22_mi.py` | MI | Mutual Information | ⚠️ Partial (best: 0.1663) |
+| `exp23_ot.py` | OT | Optimal Transport | ❌ Collapsed |
+| `exp25_drl.py` | DRL/IRM | Invariant Risk Min. | ⚠️ IRM penalty=0 always |
+| `exp26_gna.py` | GNA | Graph Neural Attribution | ⚠️ Partial collapse |
+| `exp30_bua.py` | BUA | Bayesian Uncertainty | ⚠️ Partial collapse |
+
 ## Usage
 
 ```bash
@@ -190,6 +206,38 @@ Output: `results/Novel/exp*_results.json`
 
 ---
 
+## Theory-Track Results (FIXED_TOTAL=72, not fraction-based)
+
+> ⚠️ These methods use 72 fixed training samples. Results are **not directly comparable** with the fraction-based table above, but compared vs CE baseline at same fixed-72 budget.
+> Reference CE baseline (fixed-72, best encoder): **CoDET-M4 ≈ 0.39**, **AICD-T2 ≈ 0.91**
+
+### CoDET-M4 Author IID — Macro-F1 (fixed-72)
+
+| Rank | Method | Best Encoder | Macro-F1 | Notes |
+|:----:|:-------|:------------|--------:|:------|
+| 🥇 | MI | unixcoder | **0.1663** | Best of group; still far below CE |
+| 🥈 | DRL/IRM | unixcoder | 0.1273 | IRM penalty never activates (72 < 500 anneal) |
+| 🥉 | Proto | unixcoder | 0.1178 | Partial: 2/6 classes only |
+| 4 | GNA | unixcoder | 0.1106 | Graph conv collapsed |
+| 5 | BUA | unixcoder | 0.1100 | MC Dropout; collapses to 2 classes |
+| 6 | CAO | both | 0.1132 | NaN loss after ep1; frozen at class 0 |
+| 7 | WDA / OT | unixcoder | 0.0938 | Dominated by class 3 only |
+
+### AICD-T2 — Macro-F1 (fixed-72)
+
+| Rank | Method | Best Encoder | Macro-F1 | Notes |
+|:----:|:-------|:------------|--------:|:------|
+| 🥇 | DRL/IRM | unixcoder | **0.0397** | Slightly above others |
+| 🥈 | GNA | unixcoder | 0.0382 | |
+| 🥉 | Proto | unixcoder | 0.0380 | |
+| 4 | OT | unixcoder | 0.0367 | |
+| 5 | WDA | unixcoder | 0.0367 | |
+| 6 | MI | unixcoder | 0.0356 | |
+| 7 | CAO | both | 0.0685 | Collapsed to majority class only |
+| 8 | BUA | unixcoder | 0.0311 | Worst; MC dropout hurts small data |
+
+---
+
 ## 🏆 Consolidated Leaderboard (All Methods vs CE Baseline)
 
 ### CoDET-M4 Author IID — Macro-F1
@@ -218,6 +266,12 @@ Output: `results/Novel/exp*_results.json`
 | **Ours** | **Hier-NTK** | unixcoder | 0.3925 | 0.5919 | 0.6587 | +1.94 |
 | **Baseline** | CE baseline | ModernBERT | 0.3829 | 0.5725 | 0.6795 | — |
 | **Baseline** | CE baseline | unixcoder | 0.3962 | 0.5882 | 0.6619 | +1.57 |
+| **Theory-72** | MI | unixcoder | 0.1663* | — | — | n/a |
+| **Theory-72** | DRL/IRM | unixcoder | 0.1273* | — | — | n/a |
+| **Theory-72** | Proto | unixcoder | 0.1178* | — | — | n/a |
+| **Theory-72** | (all others) | — | <0.12* | — | — | n/a |
+
+> \* fixed-72 protocol, not fraction-based — see Theory-Track Results section above.
 
 ### AICD-T2 (model-family attribution) — Macro-F1
 
@@ -245,6 +299,11 @@ Output: `results/Novel/exp*_results.json`
 | **Ours** | **Hier-NTK** | unixcoder | 0.9247 | 0.9617 | 0.9739 | +0.49 |
 | **Baseline** | CE baseline | ModernBERT | 0.9135 | 0.9568 | 0.9729 | — |
 | **Baseline** | CE baseline | unixcoder | 0.9218 | 0.9598 | 0.9756 | +0.30 |
+| **Theory-72** | CAO (best) | both | 0.0685* | — | — | n/a |
+| **Theory-72** | DRL/IRM | unixcoder | 0.0397* | — | — | n/a |
+| **Theory-72** | (all others) | — | <0.04* | — | — | n/a |
+
+> \* fixed-72 protocol, not fraction-based — see Theory-Track Results section above.
 
 ---
 
@@ -281,6 +340,11 @@ Output: `results/Novel/exp*_results.json`
 | Style-Repr useless | High | -23.6 pts on CoDET-M4 |
 | Mixup-CE hurts | Medium | -0.76 pts |
 | HierTree only neutral | Medium | +0.25 pts (not worth complexity) |
+| **Theory-Track ALL collapsed** | **Critical** | All 8 methods ≤0.17 on CoDET-M4 |
+| **CAO NaN loss** | Critical | Loss → NaN after ep1, frozen predictions |
+| **WDA/OT dominated by 1 class** | High | All preds → class 3; OT loss diverges |
+| **IRM penalty never fires** | High | penalty_anneal=500 > total steps at 72 samples |
+| **BUA worst on AICD-T2** | Medium | MC Dropout + tiny data = 0.031 macro-F1 |
 
 ### 🎯 When Each Method Wins
 
@@ -304,5 +368,20 @@ UniXcoder full-data baseline (CoDET-M4 Author IID): **0.6633 Macro-F1**
 ## Notes
 
 - **Droid T3/T4 SKIPPED per 2026-05-10 directive.** Focus on CoDET-M4 + AICD T2 only.
-- Each file runs 2 encoders × 2 benchmarks × 3 fractions = 12 experiments (vs 24 before).
-- Results format: `{"tag", "enc", "bench", "frac", "macro", "weighted", "acc", "dpaper", "wall"}`
+- Each fraction-based file runs 2 encoders × 2 benchmarks × 3 fractions = 12 experiments.
+- Theory-Track (exp17–exp30): 2 encoders × 2 benchmarks = 4 runs each, FIXED_TOTAL=72.
+- Results format (fraction-based): `{"tag", "enc", "bench", "frac", "macro", "weighted", "acc", "dpaper", "wall"}`
+- Results format (theory-track): `{"tag", "encoder", "benchmark", "task", "macro_f1", "delta_vs_paper", ...}`
+
+### Theory-Track Collapse Analysis
+
+All 8 theory-track methods collapsed on CoDET-M4 (macro-F1 ≤ 0.17, vs CE baseline ~0.39).
+Common failure modes:
+- **Class imbalance exploitation**: With 72 samples, auxiliary losses (WDA, OT, CAO) overwhelm CE signal
+- **Auxiliary loss magnitude mismatch**: WDA loss ~30×, OT loss ~5×, CAO loss ~750K× the CE loss
+- **IRM anneal too high**: `penalty_anneal=500` steps but only 1 step per epoch × 3 epochs = 3 steps total
+- **Graph collapse (GNA)**: With 72 nodes, inter-node edges are trivial; network defaults to simple linear
+- **MC Dropout (BUA)**: `high_uncertainty_ratio=0.0` — all predictions confident despite being wrong
+
+**Recommendation**: Theory-track methods need hyperparameter scaling to the data regime (72 samples).
+Consider: smaller auxiliary loss weights (`wda_weight < 0.01`), lower `penalty_anneal` (e.g. 1), or prototype initialization from pretrained clusters.
