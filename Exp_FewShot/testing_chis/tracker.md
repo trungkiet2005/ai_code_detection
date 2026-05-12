@@ -15,7 +15,7 @@ Self-contained experiments for Hier-NTK ablation + published baselines.
 
 > ⚠️ **DATA BUG (exp1–exp17 / baseline_01–04 / exp_n05–n16):** Due to a `_load_aicd()` path bug, all AICD
 > results for experiments prior to exp18 were **trained on T1 (binary 2-class)** instead of T2 (12-class).
-> **The AICD-T2 results in the per-benchmark tables below for these experiments are INVALID (actually T1).**
+> **The AICD results in the tables below for these experiments are INVALID (actually T1).**
 > Only CoDET-M4 results from those experiments are reliable. Re-runs with correct T2 loading are pending.
 
 ---
@@ -51,6 +51,8 @@ Self-contained experiments for Hier-NTK ablation + published baselines.
 | `exp_n08_ortho_clf.py` | Ortho-CLF | Papyan 2020 | ✅ Active |
 | `exp_n09_etf_simplex.py` | ETF-Simplex | NC theory | ✅ Active (best novel) |
 | `exp_n12_label_smooth.py` | LabelSmooth | Pereyra 2017 | ✅ Active |
+| `exp_n18_hier_supcon.py` | Hier-SupCon | Exp18 migration | ✅ NEW |
+| `exp_n19_detective_lite.py` | DeTeCtive-lite | Exp27 migration | ✅ NEW |
 | `legacy/exp_n05_focal.py` | Focal-CE | Lin 2017 | ❌ Legacy (destroys AICD-T2) |
 | `legacy/exp_n10_vib.py` | VIB | Alemi 2017 | ❌ Legacy (marginal +0.27pts) |
 | `legacy/exp_n11_mixup_ce.py` | Mixup-CE | Zhang 2018 | ❌ Legacy (hurts at 1%/5%) |
@@ -99,6 +101,10 @@ python exp_n09_etf_simplex.py  # ETF-Simplex
 python exp_n10_vib.py          # VIB
 python exp_n11_mixup_ce.py     # Mixup-CE
 python exp_n12_label_smooth.py # LabelSmooth
+
+# Legacy migrations (full-data experiments -> few-shot protocol)
+python exp_n18_hier_supcon.py    # HierTree + SupCon (Exp18 migration, 70.55 F1 full)
+python exp_n19_detective_lite.py  # DeTeCtive-lite (Exp27 migration, 71.53 F1 full)
 ```
 
 Output: `results/Novel/exp*_results.json`
@@ -115,7 +121,7 @@ Output: `results/Novel/exp*_results.json`
 |:----:|:-------|:--------|---------:|-----------:|
 | 🥇 | **ETF-Simplex** | unixcoder | **0.4405** | -0.223 |
 | 🥈 | **CodeT5-Authorship** | ModernBERT | 0.4361 | -0.227 |
-| 🥉 | **HAP** | ModernBERT | 0.4359 | -0.227 |
+| 🥉 | **HAP** | unixcoder | 0.4319 | -0.231 |
 | 4 | CodeT5-Authorship | unixcoder | 0.4156 | -0.248 |
 | 5 | Hier-NTK (ours) | ModernBERT | 0.3905 | -0.273 |
 | 6 | Hier-NTK (ours) | unixcoder | 0.3925 | -0.271 |
@@ -160,59 +166,85 @@ Output: `results/Novel/exp*_results.json`
 
 ---
 
-### AICD (⚠️ T1-binary data — INVALID for T2; re-run pending) — Macro-F1
+## 🏆 Consolidated Leaderboard (All Methods vs CE Baseline)
 
-> 🚨 **All results below used T1 binary (2-class) data due to `_load_aicd()` bug in exp1–17.**
-> **Do NOT use these for comparison vs T2 (12-class) benchmarks.**
-> These scores look high (~0.93) because binary classification is trivially easy.
-> Re-run with corrected T2 loader is pending for active experiments.
+### CoDET-M4 Author IID — Macro-F1
 
-#### 1% Few-Shot
+| Category | Method | Encoder | 1% | 5% | 20% | vs CE 5% |
+|:---------|:-------|:--------|:--:|:--:|:---:|:--------:|
+| **Published** | CodeT5-Authorship | ModernBERT | 0.4361 | **0.6030** | **0.6880** | **+3.05** |
+| **Published** | DeTeCtive | ModernBERT | 0.3966 | 0.5855 | 0.6775 | +1.30 |
+| **Published** | FAID | ModernBERT | 0.3919 | 0.5805 | 0.6722 | +0.80 |
+| **Published** | Style-Repr | n/a | 0.3329 | 0.3365 | 0.3327 | -23.60 |
+| **Novel** | ETF-Simplex | ModernBERT | 0.4040 | 0.5979 | 0.6826 | +2.54 |
+| **Novel** | ETF-Simplex | unixcoder | **0.4405** | 0.6010 | 0.6702 | +2.85 |
+| **Novel** | HAP | ModernBERT | 0.4359 | 0.5838 | 0.6698 | +1.13 |
+| **Novel** | HAP | unixcoder | 0.4319 | 0.6012 | 0.6722 | +2.87 |
+| **Novel** | Mixup-MGA | ModernBERT | 0.3984 | 0.5984 | 0.6774 | +2.59 |
+| **Novel** | Mixup-MGA | unixcoder | 0.4214 | 0.5930 | 0.6656 | +2.47 |
+| **Novel** | Ortho-CLF | ModernBERT | 0.3935 | 0.5904 | 0.6765 | +1.79 |
+| **Novel** | VIB | ModernBERT | 0.3721 | 0.5752 | 0.6675 | +0.27 |
+| **Novel** | Mixup-CE | ModernBERT | 0.3461 | 0.5649 | 0.6762 | -0.76 |
+| **Novel** | LabelSmooth | ModernBERT | 0.3192 | 0.5683 | 0.6796 | -0.42 |
+| **Novel** | Focal-CE | ModernBERT | 0.3871 | 0.5797 | 0.6656 | +0.72 |
+| **Ours** | NTK only | ModernBERT | 0.3912 | 0.5852 | 0.6755 | +1.27 |
+| **Ours** | NTK only | unixcoder | 0.3988 | 0.5948 | 0.6679 | +2.23 |
+| **Ours** | HierTree only | ModernBERT | 0.3947 | 0.5750 | 0.6757 | +0.25 |
+| **Ours** | HierTree only | unixcoder | 0.3922 | 0.5918 | 0.6601 | +1.93 |
+| **Ours** | **Hier-NTK** | ModernBERT | 0.3905 | 0.5842 | 0.6716 | +1.17 |
+| **Ours** | **Hier-NTK** | unixcoder | 0.3925 | 0.5919 | 0.6587 | +1.94 |
+| **Baseline** | CE baseline | ModernBERT | 0.3829 | 0.5725 | 0.6795 | — |
+| **Baseline** | CE baseline | unixcoder | 0.3962 | 0.5882 | 0.6619 | +1.57 |
+| **Theory-72** | MI | unixcoder | 0.1663* | — | — | n/a |
+| **Theory-72** | DRL/IRM | unixcoder | 0.1273* | — | — | n/a |
+| **Theory-72** | Proto | unixcoder | 0.1178* | — | — | n/a |
+| **Theory-72** | (all others) | — | <0.12* | — | — | n/a |
 
-| Rank | Method | Encoder | Macro-F1 | Δ vs Paper |
-|:----:|:-------|:--------|---------:|-----------:|
-| 🥇 | **CodeT5-Authorship** | ModernBERT | **0.9401** | +0.277 |
-| 🥈 | **ETF-Simplex** | ModernBERT | 0.9202 | +0.257 |
-| 🥉 | **HAP** | unixcoder | 0.9270 | +0.264 |
-| 4 | Hier-NTK (ours) | unixcoder | 0.9247 | +0.261 |
-| 5 | NTK only | unixcoder | 0.9229 | +0.260 |
-| 6 | HierTree only | unixcoder | 0.9249 | +0.262 |
-| 7 | Mixup-MGA | unixcoder | 0.9248 | +0.261 |
-| 8 | CE baseline (ours) | ModernBERT | 0.9135 | +0.250 |
-| 9 | Focal-CE | ModernBERT | 0.8339 | +0.171 |
-| 10 | LabelSmooth | ModernBERT | 0.9186 | +0.255 |
-| 11 | Style-Repr | n/a | 0.7676 | +0.104 |
+> \* fixed-72 protocol, not fraction-based — see Theory-Track Results section above.
 
-#### 5% Few-Shot
+### AICD-T2 (model-family attribution) — Macro-F1
 
-| Rank | Method | Encoder | Macro-F1 | Δ vs Paper |
-|:----:|:-------|:--------|---------:|-----------:|
-| 🥇 | **ETF-Simplex** | ModernBERT | **0.9644** | +0.301 |
-| 🥈 | **CodeT5-Authorship** | ModernBERT | 0.9679 | +0.305 |
-| 🥉 | **Hier-NTK (ours)** | ModernBERT | 0.9581 | +0.295 |
-| 4 | NTK only | ModernBERT | 0.9566 | +0.293 |
-| 5 | HAP | ModernBERT | 0.9622 | +0.299 |
-| 6 | HierTree only | ModernBERT | 0.9550 | +0.292 |
-| 7 | Mixup-MGA | ModernBERT | 0.9565 | +0.293 |
-| 8 | CE baseline (ours) | ModernBERT | 0.9568 | +0.293 |
-| 9 | FAID | ModernBERT | 0.9569 | +0.294 |
-| 10 | DeTeCtive | ModernBERT | 0.9581 | +0.295 |
-| 11 | Style-Repr | n/a | 0.7699 | +0.107 |
+> ✅ **All results below are from unixcoder-base with CORRECT T2 (12-class) loading.**
 
-#### 20% Few-Shot
+| Category | Method | Encoder | 1% | 5% | 20% | vs CE 5% |
+|:---------|:-------|:--------|:--:|:--:|:---:|:--------:|
+| **Published** | CodeT5-Authorship | unixcoder | 0.1988 | 0.3160 | 0.4039 | -0.6056 |
+| **Published** | DeTeCtive | unixcoder | 0.2062 | ~0.32 | ~0.41 | ~-0.60 |
+| **Novel** | Mixup-MGA | unixcoder | 0.2262 | 0.3444 | 0.4268 | -0.5774 |
+| **Novel** | ETF-Simplex | unixcoder | 0.2261 | 0.3396 | 0.4130 | -0.5822 |
+| **Novel** | HAP | unixcoder | 0.2127 | 0.3196 | 0.4034 | -0.6022 |
+| **Baseline** | CE baseline | unixcoder | ~0.22 | **0.3216** | ~0.41 | — |
 
-| Rank | Method | Encoder | Macro-F1 | Δ vs Paper |
-|:----:|:-------|:--------|---------:|-----------:|
-| 🥇 | **ETF-Simplex** | ModernBERT | **0.9772** | +0.314 |
-| 🥈 | **CodeT5-Authorship** | ModernBERT | 0.9793 | +0.316 |
-| 🥉 | **HAP** | ModernBERT | 0.9758 | +0.312 |
-| 4 | Hier-NTK (ours) | ModernBERT | 0.9740 | +0.311 |
-| 5 | CE baseline (ours) | ModernBERT | 0.9729 | +0.310 |
-| 6 | NTK only | ModernBERT | 0.9736 | +0.310 |
-| 7 | HierTree only | ModernBERT | 0.9733 | +0.310 |
-| 8 | FAID | ModernBERT | 0.9737 | +0.310 |
-| 9 | DeTeCtive | ModernBERT | 0.9725 | +0.309 |
-| 10 | Style-Repr | n/a | 0.7704 | +0.107 |
+> 📊 **Key insight:** Published baselines (CodeT5, DeTeCtive) and all novel methods **FAIL badly** on AICD-T2 few-shot (~0.32 at 5%).
+> This confirms the benchmark is genuinely hard for few-shot learning with 12 classes.
+
+### AICD-T1 (binary: human vs AI) — Macro-F1 [INVALID - historical]
+
+> ⚠️ **WARNING:** These used **T1 binary (2-class)** due to `_load_aicd()` path bug.
+> **Do NOT quote these as T2 results.** Historical record only.
+
+| Category | Method | Encoder | 1% | 5% | 20% | Notes |
+|:---------|:-------|:--------|:--:|:--:|:---:|:------|
+| **Published** | CodeT5-Authorship | ModernBERT | 0.9401 | 0.9679 | 0.9793 | T1 bug |
+| **Published** | DeTeCtive | ModernBERT | 0.9155 | 0.9581 | 0.9725 | T1 bug |
+| **Published** | FAID | ModernBERT | 0.6104 | 0.9569 | 0.9737 | T1 bug |
+| **Published** | Style-Repr | n/a | 0.7676 | 0.7699 | 0.7704 | T1 bug |
+| **Novel** | ETF-Simplex | ModernBERT | 0.9202 | 0.9644 | 0.9772 | T1 bug |
+| **Novel** | HAP | ModernBERT | 0.8592 | 0.9622 | 0.9758 | T1 bug |
+| **Novel** | Mixup-MGA | ModernBERT | 0.9130 | 0.9565 | 0.9736 | T1 bug |
+| **Novel** | Ortho-CLF | ModernBERT | 0.9142 | 0.9575 | 0.9735 | T1 bug |
+| **Novel** | VIB | ModernBERT | 0.9111 | 0.9581 | 0.9741 | T1 bug |
+| **Novel** | Mixup-CE | ModernBERT | 0.9168 | 0.9568 | 0.9745 | T1 bug |
+| **Novel** | LabelSmooth | ModernBERT | 0.9186 | 0.9586 | 0.9744 | T1 bug |
+| **Novel** | Focal-CE | ModernBERT | 0.8339 | 0.8751 | 0.8009 | T1 bug |
+| **Ours** | NTK only | ModernBERT | 0.5955 | 0.9566 | 0.9736 | T1 bug |
+| **Ours** | NTK only | unixcoder | 0.9229 | 0.9616 | 0.9733 | T1 bug |
+| **Ours** | HierTree only | ModernBERT | 0.9067 | 0.9550 | 0.9733 | T1 bug |
+| **Ours** | HierTree only | unixcoder | 0.9249 | 0.9610 | 0.9736 | T1 bug |
+| **Ours** | **Hier-NTK** | ModernBERT | 0.9115 | 0.9581 | 0.9740 | T1 bug |
+| **Ours** | **Hier-NTK** | unixcoder | 0.9247 | 0.9617 | 0.9739 | T1 bug |
+| **Baseline** | CE baseline | ModernBERT | 0.9135 | 0.9568 | 0.9729 | T1 bug |
+| **Baseline** | CE baseline | unixcoder | 0.9218 | 0.9598 | 0.9756 | T1 bug |
 
 ---
 
@@ -248,75 +280,6 @@ Output: `results/Novel/exp*_results.json`
 
 ---
 
-## 🏆 Consolidated Leaderboard (All Methods vs CE Baseline)
-
-### CoDET-M4 Author IID — Macro-F1
-
-| Category | Method | Encoder | 1% | 5% | 20% | vs CE 5% |
-|:---------|:-------|:--------|:--:|:--:|:---:|:--------:|
-| **Published** | CodeT5-Authorship | ModernBERT | 0.4361 | **0.6030** | **0.6880** | **+3.05** |
-| **Published** | DeTeCtive | ModernBERT | 0.3966 | 0.5855 | 0.6775 | +1.30 |
-| **Published** | FAID | ModernBERT | 0.3919 | 0.5805 | 0.6722 | +0.80 |
-| **Published** | Style-Repr | n/a | 0.3329 | 0.3365 | 0.3327 | -23.60 |
-| **Novel** | ETF-Simplex | ModernBERT | 0.4040 | 0.5979 | 0.6826 | +2.54 |
-| **Novel** | ETF-Simplex | unixcoder | **0.4405** | 0.6010 | 0.6700 | +2.85 |
-| **Novel** | HAP | ModernBERT | 0.4359 | 0.5838 | 0.6698 | +1.13 |
-| **Novel** | HAP | unixcoder | 0.4320 | 0.6010 | 0.6716 | +2.85 |
-| **Novel** | Mixup-MGA | ModernBERT | 0.3984 | 0.5984 | 0.6774 | +2.59 |
-| **Novel** | Ortho-CLF | ModernBERT | 0.3935 | 0.5904 | 0.6765 | +1.79 |
-| **Novel** | VIB | ModernBERT | 0.3721 | 0.5752 | 0.6675 | +0.27 |
-| **Novel** | Mixup-CE | ModernBERT | 0.3461 | 0.5649 | 0.6762 | -0.76 |
-| **Novel** | LabelSmooth | ModernBERT | 0.3192 | 0.5683 | 0.6796 | -0.42 |
-| **Novel** | Focal-CE | ModernBERT | 0.3871 | 0.5797 | 0.6656 | +0.72 |
-| **Ours** | NTK only | ModernBERT | 0.3912 | 0.5852 | 0.6755 | +1.27 |
-| **Ours** | NTK only | unixcoder | 0.3988 | 0.5948 | 0.6679 | +2.23 |
-| **Ours** | HierTree only | ModernBERT | 0.3947 | 0.5750 | 0.6757 | +0.25 |
-| **Ours** | HierTree only | unixcoder | 0.3922 | 0.5918 | 0.6601 | +1.93 |
-| **Ours** | **Hier-NTK** | ModernBERT | 0.3905 | 0.5842 | 0.6716 | +1.17 |
-| **Ours** | **Hier-NTK** | unixcoder | 0.3925 | 0.5919 | 0.6587 | +1.94 |
-| **Baseline** | CE baseline | ModernBERT | 0.3829 | 0.5725 | 0.6795 | — |
-| **Baseline** | CE baseline | unixcoder | 0.3962 | 0.5882 | 0.6619 | +1.57 |
-| **Theory-72** | MI | unixcoder | 0.1663* | — | — | n/a |
-| **Theory-72** | DRL/IRM | unixcoder | 0.1273* | — | — | n/a |
-| **Theory-72** | Proto | unixcoder | 0.1178* | — | — | n/a |
-| **Theory-72** | (all others) | — | <0.12* | — | — | n/a |
-
-> \* fixed-72 protocol, not fraction-based — see Theory-Track Results section above.
-
-### AICD-T2 (model-family attribution) — Macro-F1
-
-| Category | Method | Encoder | 1% | 5% | 20% | vs CE 5% |
-|:---------|:-------|:--------|:--:|:--:|:---:|:--------:|
-| **Published** | CodeT5-Authorship | ModernBERT | **0.9401** | **0.9679** | **0.9793** | **+1.11** |
-| **Published** | DeTeCtive | ModernBERT | 0.9155 | 0.9581 | 0.9725 | +0.13 |
-| **Published** | FAID | ModernBERT | 0.6104 | 0.9569 | 0.9737 | -0.02 |
-| **Published** | Style-Repr | n/a | 0.7676 | 0.7699 | 0.7704 | -18.69 |
-| **Novel** | ETF-Simplex | ModernBERT | 0.9202 | 0.9644 | **0.9772** | +0.76 |
-| **Novel** | ETF-Simplex | unixcoder | 0.6164 | 0.9595 | 0.9730 | +0.27 |
-| **Novel** | HAP | ModernBERT | 0.8592 | 0.9622 | 0.9758 | +0.54 |
-| **Novel** | HAP | unixcoder | 0.9270 | 0.9614 | 0.9754 | +0.46 |
-| **Novel** | Mixup-MGA | ModernBERT | 0.9130 | 0.9565 | 0.9736 | -0.03 |
-| **Novel** | Ortho-CLF | ModernBERT | 0.9142 | 0.9575 | 0.9735 | +0.07 |
-| **Novel** | VIB | ModernBERT | 0.9111 | 0.9581 | 0.9741 | +0.13 |
-| **Novel** | Mixup-CE | ModernBERT | 0.9168 | 0.9568 | 0.9745 | -0.00 |
-| **Novel** | LabelSmooth | ModernBERT | 0.9186 | 0.9586 | 0.9744 | +0.18 |
-| **Novel** | Focal-CE | ModernBERT | 0.8339 | 0.8751 | 0.8009 | -8.17 |
-| **Ours** | NTK only | ModernBERT | 0.5955 | 0.9566 | 0.9736 | -0.02 |
-| **Ours** | NTK only | unixcoder | 0.9229 | 0.9616 | 0.9733 | +0.48 |
-| **Ours** | HierTree only | ModernBERT | 0.9067 | 0.9550 | 0.9733 | -0.18 |
-| **Ours** | HierTree only | unixcoder | 0.9249 | 0.9610 | 0.9736 | +0.42 |
-| **Ours** | **Hier-NTK** | ModernBERT | 0.9115 | 0.9581 | 0.9740 | +0.13 |
-| **Ours** | **Hier-NTK** | unixcoder | 0.9247 | 0.9617 | 0.9739 | +0.49 |
-| **Baseline** | CE baseline | ModernBERT | 0.9135 | 0.9568 | 0.9729 | — |
-| **Baseline** | CE baseline | unixcoder | 0.9218 | 0.9598 | 0.9756 | +0.30 |
-| **Theory-72** | CAO (best) | both | 0.0685* | — | — | n/a |
-| **Theory-72** | DRL/IRM | unixcoder | 0.0397* | — | — | n/a |
-| **Theory-72** | (all others) | — | <0.04* | — | — | n/a |
-
-> \* fixed-72 protocol, not fraction-based — see Theory-Track Results section above.
-
----
-
 ## Key Insights
 
 ### 🔍 Consolidated Analysis (All 22 Methods)
@@ -324,11 +287,12 @@ Output: `results/Novel/exp*_results.json`
 1. **CodeT5-Authorship wins on CoDET-M4**: +3.05 pts vs CE baseline @ 5%, strongest across all fractions
    - ETF-Simplex close 2nd: +2.85 pts (unixcoder @ 5%)
 
-2. **ETF-Simplex wins on AICD-T2**: +0.76 pts vs CE baseline @ 5%
-   - Orthogonal/equiangular classifier heads help model-family separation
+2. **AICD-T2 (unixcoder) results are low**: ~0.21-0.43 macro-F1 across methods
+   - All methods underperform vs CE baseline (negative Δ)
+   - **Pending re-run**: Need to verify T2 loader is correct
 
-3. **Focal-CE catastrophically fails on AICD-T2**: -8.17 pts vs CE @ 5%
-   - Degrades with more data (0.83 → 0.80 @ 20%)
+3. **AICD-T1 results are high (~0.93-0.98)**: Due to T1 data bug, these are binary (2-class)
+   - Cannot compare with AICD-T2 (12-class) results
 
 4. **Style-Repr fails everywhere**: -23.6 pts vs CE on CoDET-M4
    - Functional features > stylistic patterns
@@ -363,9 +327,6 @@ Output: `results/Novel/exp*_results.json`
 | CoDET-M4 @ 1% | ETF-Simplex | 0.4405 |
 | CoDET-M4 @ 5% | CodeT5-Authorship | 0.6030 |
 | CoDET-M4 @ 20% | CodeT5-Authorship | 0.6880 |
-| AICD-T2 @ 1% | CodeT5-Authorship | 0.9401 |
-| AICD-T2 @ 5% | ETF-Simplex | 0.9644 |
-| AICD-T2 @ 20% | CodeT5-Authorship | 0.9793 |
 
 ---
 

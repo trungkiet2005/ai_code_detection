@@ -378,11 +378,13 @@ def build_dls(cfg: Cfg):
         tr_raw, vl_raw, ts_raw = _load_aicd(cfg.task)
         tr_d = _conv_aicd(tr_raw); vl_d = _conv_aicd(vl_raw); ts_d = _conv_aicd(ts_raw)
 
+    # Few-shot sampling: sample from actual classes in data
+    actual_classes = sorted(set(tr_d["label"]))
     by_cls = defaultdict(list)
     for i, lab in enumerate(tr_d["label"]): by_cls[int(lab)].append(i)
     rng = random.Random(cfg.seed)
     chosen = []
-    for cls in range(cfg.n_cls):
+    for cls in actual_classes:  # Use actual classes from data, not cfg.n_cls
         pool = by_cls.get(cls, [])
         n = max(1, int(round(len(pool) * cfg.frac))) if pool else 0
         chosen.extend(rng.sample(pool, min(n, len(pool))) if pool else [])

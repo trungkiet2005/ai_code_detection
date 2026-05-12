@@ -59,12 +59,6 @@ from torch.cuda.amp import autocast, GradScaler
 
 def _autocast_ctx(dev):
     return autocast(enabled=(dev.type == "cuda"))
-
-except ImportError:
-    from torch.cuda.amp import autocast, GradScaler  # type: ignore[no-redef]
-    def _autocast_ctx(dev: torch.device):  # type: ignore[no-redef]
-        return autocast(enabled=(dev.type == "cuda"))
-
 warnings.filterwarnings("ignore")
 import logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s", stream=sys.stdout)

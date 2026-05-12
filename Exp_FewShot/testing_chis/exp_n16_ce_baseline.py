@@ -332,6 +332,9 @@ def build_dls(cfg: Cfg):
 
     by_cls = defaultdict(list)
     for i, lab in enumerate(tr_d["label"]): by_cls[int(lab)].append(i)
+    # Get actual classes from data first
+    actual_classes = sorted(set(tr_d["label"]))
+    n_actual_cls = len(actual_classes)
     rng = random.Random(cfg.seed)
     chosen = []
 
@@ -339,21 +342,21 @@ def build_dls(cfg: Cfg):
         # Option 2: Equal total training budget across all benchmarks
         # Distribute FIXED_TOTAL_TRAIN samples equally per class
         total = cfg.FIXED_TOTAL_TRAIN
-        n_per_cls = max(1, total // cfg.n_cls)  # at least 1 per class
-        remaining = total - (n_per_cls * cfg.n_cls)  # leftover
+        n_per_cls = max(1, total // n_actual_cls)  # at least 1 per class
+        remaining = total - (n_per_cls * n_actual_cls)  # leftover
 
-        for cls in range(cfg.n_cls):
+        for cls in actual_classes:
             pool = by_cls.get(cls, [])
             # First 'remaining' classes get n_per_cls + 1
             n = n_per_cls + (1 if cls < remaining else 0)
-            n = min(n, len(pool))  # don't sample more than available
+            n = min(n, len(pool))  # don't Sample more than available
             if pool:
                 chosen.extend(rng.sample(pool, n))
         logger.info(f"[data] {cfg.enc} | {cfg.benchmark} | FIXED_TOTAL={cfg.FIXED_TOTAL_TRAIN} | n_train={len(chosen)} (={n_per_cls}/cls)")
 
     elif cfg.n_shots_per_cls > 0:
         # Option 1: K-shot learning (fixed K samples per class)
-        for cls in range(cfg.n_cls):
+        for cls in actual_classes:
             pool = by_cls.get(cls, [])
             n = min(cfg.n_shots_per_cls, len(pool))
             if pool:
@@ -362,7 +365,7 @@ def build_dls(cfg: Cfg):
 
     else:
         # Original: fraction-based sampling
-        for cls in range(cfg.n_cls):
+        for cls in actual_classes:
             pool = by_cls.get(cls, [])
             n = max(1, int(round(len(pool) * cfg.frac))) if pool else 0
             chosen.extend(rng.sample(pool, min(n, len(pool))) if pool else [])
