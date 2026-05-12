@@ -342,7 +342,8 @@ class ExpMapPoincare(nn.Module):
     def exp_map(self, x):
         """Exponential map: Euclidean -> Hyperbolic."""
         norm_x = torch.norm(x, dim=-1, keepdim=True).clamp(min=1e-8)
-        second_term = (torch.tanh(torch.sqrt(self.c) * norm_x) / (torch.sqrt(self.c) * norm_x)) * x
+        sqrt_c = self.c ** 0.5  # self.c is a float; use ** not torch.sqrt
+        second_term = (torch.tanh(sqrt_c * norm_x) / (sqrt_c * norm_x)) * x
         return second_term
 
     def forward(self, x):

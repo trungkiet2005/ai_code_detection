@@ -375,7 +375,7 @@ def train(cfg: Cfg, tr_dl, vl_dl, ts_dl):
     model = EIFNet(cfg).to(dev)
 
     opt = torch.optim.AdamW(model.parameters(), lr=cfg.lr_enc, weight_decay=cfg.wd)
-    sched = torch.optim.lr_scheduler.OneCycleLR(opt, max_lr=[cfg.lr_enc, cfg.lr_head],
+    sched = torch.optim.lr_scheduler.OneCycleLR(opt, max_lr=cfg.lr_enc,
         steps_per_epoch=len(tr_dl), epochs=cfg.epochs, pct_start=cfg.warmup)
     scaler = GradScaler(enabled=(dev.type == "cuda"))
 
