@@ -54,13 +54,13 @@ from torch.utils.data import Dataset as TD, DataLoader
 from transformers import AutoModel, AutoTokenizer
 from tqdm import tqdm
 try:
-    from torch.amp import autocast as _ac, GradScaler
+    from torch.amp import autocast, GradScaler
+    def _autocast_ctx(dev):
+        return autocast(device_type=dev.type, enabled=(dev.type == "cuda"))
 except ImportError:
-    from torch.cuda.amp import autocast as _ac, GradScaler
-def _autocast_ctx(dev):
-    enabled = (dev.type == "cuda")
-    try: return _ac(device_type=dev.type, enabled=enabled)
-    except TypeError: return _ac(enabled=enabled)
+    from torch.cuda.amp import autocast, GradScaler
+    def _autocast_ctx(dev):
+        return autocast(enabled=(dev.type == "cuda"))
 warnings.filterwarnings("ignore")
 import logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s", stream=sys.stdout)

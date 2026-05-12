@@ -1,4 +1,4 @@
-﻿"""
+"""
 exp_n06_attn_pool.py — Attention Pooling for Code Structure Capture
 
 NAME : Hierarchical Attention Pooling (HAP)
@@ -76,16 +76,13 @@ from transformers import AutoModel, AutoTokenizer
 from tqdm import tqdm
 
 try:
-    from torch.amp import autocast as _ac, GradScaler
+    from torch.amp import autocast, GradScaler
+    def _autocast_ctx(dev: torch.device):
+        return autocast(device_type=dev.type, enabled=(dev.type == "cuda"))
 except ImportError:
-    from torch.cuda.amp import autocast as _ac, GradScaler
-
-def _autocast_ctx(dev: torch.device):
-    enabled = (dev.type == "cuda")
-    try:
-        return _ac(device_type=dev.type, enabled=enabled)
-    except TypeError:
-        return _ac(enabled=enabled)
+    from torch.cuda.amp import autocast, GradScaler  # type: ignore[no-redef]
+    def _autocast_ctx(dev: torch.device):  # type: ignore[no-redef]
+        return autocast(enabled=(dev.type == "cuda"))
 
 warnings.filterwarnings("ignore")
 import logging
