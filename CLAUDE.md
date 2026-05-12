@@ -88,9 +88,22 @@ where `k_tree` is high for the same author, intermediate for related model famil
 L_htka = 1 - cos(vec(ZZ^T), vec(T))
 ```
 
-### 2.2 Theory-grounded novelty bar
+### 2.2 Theory-grounded novelty bar — NOVELTY-FIRST PRINCIPLE
 
-Every "novel" method must have: NAME / ARXIV_ID / ONE-LINE CLAIM / EQUATION / PROPERTY / WHY NOT BEFORE / FALSIFIER.
+> 🚨 **EMNLP Oral demands NEW mathematical objects, not generic ML techniques applied to a new domain.**
+> Every experiment must introduce something that **ONLY makes sense** in the context of
+> AI-code attribution with genealogy structure. If a reviewer can say "this is just X applied to Y",
+> the experiment is NOT novel enough.
+
+**Anti-patterns (DO NOT propose):**
+- SupCon, ArcFace, R-Drop, LoRA, SimCSE, Center Loss — anyone can think of these
+- "Apply existing method to code attribution" alone — must have genealogy-specific twist
+- Loss-weight tuning presented as novelty
+- Feature stacking without new theory
+
+**Required: each experiment must have a NEW MATHEMATICAL OBJECT** with:
+- NAME / ARXIV_ID / ONE-LINE CLAIM / EQUATION / PROPERTY / WHY NOT BEFORE / FALSIFIER
+- The "WHY NOT BEFORE" must explain why this object is specific to genealogy-structured attribution
 
 ```python
 # =============================================================================
@@ -107,34 +120,38 @@ Every "novel" method must have: NAME / ARXIV_ID / ONE-LINE CLAIM / EQUATION / PR
 # =============================================================================
 ```
 
-### 2.3 Active novel experiments (arxiv-grounded, as of 2026-05-12)
+### 2.3 Active experiments (as of 2026-05-12)
 
-**Active (kept — top 3 novel + all theory-track):**
+**Top-3 Novel (arxiv-grounded, proven on CoDET-M4):**
 
 | File | Method | ArXiv | Theory Hook | Status |
 |:--|:--|:--|:--|:--|
 | `exp_n06_attn_pool.py` | HAP | Lee 2017 | Hierarchical attention pooling | ✅ Active |
 | `exp_n07_mixup_align.py` | MGA | Arjovsky 2019 | IRM source invariance | ✅ Active |
 | `exp_n09_etf_simplex.py` | ETF-Simplex | NC theory | Optimal K-class ETF geometry | ✅ Active (best novel) |
-| `exp20_proto.py` | PPN | NeurIPS 2017 | Prototypical networks | ✅ Rescued (fraction protocol) |
-| `exp25_deconfound.py` | DRL/IRM | ICML 2019 | Invariant risk minimization | ✅ Rescued (penalty_anneal=50) |
-| `exp26_graph.py` | GNA | NeurIPS 2017 | Graph neural message-passing | ✅ Rescued (fraction protocol) |
-| `exp27_cmixup.py` | CMA | arXiv 2017 | Family-aware Mixup | ✅ Active |
-| `exp28_spectral.py` | SCL | ICML 2021 | Spectral contrastive learning | ✅ Active |
-| `exp29_causal_trace.py` | CFT | ICLR 2021 | Causal feature tracing | ✅ Active |
 
-**Legacy (moved to `testing_chis/legacy/`):**
+**Rescued theory-track (fraction protocol):**
 
-| File | Method | Reason |
-|:--|:--|:--|
-| `exp_n05_focal.py` | Focal-CE | Destroys AICD-T2 (−8.17pts in old T1 run) |
-| `exp_n08_ortho_clf.py` | Ortho-CLF | +1.79pts — below top-3 bar |
-| `exp_n10_vib.py` | VIB | Only +0.27pts marginal |
-| `exp_n11_mixup_ce.py` | Mixup-CE | Hurts at 1%/5% |
-| `exp_n12_label_smooth.py` | LabelSmooth | Good only at 20%, bad at 1%/5% |
-| `baseline_04_style.py` | Style-Repr | −23.6pts CoDET-M4, useless |
-| `exp17_cao.py` through `exp24_curriculum.py` | Various | NaN loss / collapse in fixed-72 regime |
-| `exp30_bayesian.py` | BUA | Partial collapse in fixed-72 regime |
+| File | Method | ArXiv | Status |
+|:--|:--|:--|:--|
+| `exp20_proto.py` | PPN | NeurIPS 2017 | ✅ Rescued |
+| `exp25_deconfound.py` | DRL/IRM | ICML 2019 | ✅ Rescued (penalty_anneal=50) |
+| `exp26_graph.py` | GNA | NeurIPS 2017 | ✅ Rescued |
+| `exp27_cmixup.py` | CMA | arXiv 2017 | ✅ Active |
+| `exp28_spectral.py` | SCL | ICML 2021 | ✅ Active |
+| `exp29_causal_trace.py` | CFT | ICLR 2021 | ✅ Active |
+
+**🔬 Oral-Tier Novel Experiments (NEW — genealogy-specific objects):**
+
+| File | Method | New Object | Why Genuinely Novel |
+|:--|:--|:--|:--|
+| `exp31_got.py` | GOT | Wasserstein loss with tree-metric ground cost | OT ground metric from genealogy — misclass cost ∝ tree distance |
+| `exp32_spectral_gene.py` | SGE | Laplacian eigenvectors of label graph as target | Spectral methods on LABEL structure, not data graph |
+| `exp33_renyi.py` | RAD | Rényi-α loss with regime-dependent optimal α | α-regime connection (α* ∝ log(n/K)) is new |
+| `exp34_hyper_proto.py` | HPA | Prototypes in Poincaré ball for tree labels | Trees embed with zero distortion in hyperbolic space |
+| `exp35_kac.py` | KAC | Phase-transition curriculum from OUR Theorem 2 | Tests our own theorem — ultimate self-falsifier |
+| `exp36_mmdg.py` | MMDG | MMD with genealogy-defined kernel | Distribution matching with tree kernel |
+| `exp37_igg.py` | IGG | Natural gradient with genealogy Fisher target | Optimisation geometry from label tree |
 
 ### 2.4 Novel Theorems (self-derived for EMNLP Oral)
 
