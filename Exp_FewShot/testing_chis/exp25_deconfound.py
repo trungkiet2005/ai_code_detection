@@ -50,10 +50,11 @@ from torch.utils.data import Dataset as TD, DataLoader
 from transformers import AutoModel, AutoTokenizer
 from tqdm import tqdm
 
-try:
-    from torch.amp import autocast, GradScaler
-    def _autocast_ctx(dev: torch.device):
-        return autocast(device_type=dev.type, enabled=(dev.type == "cuda"))
+from torch.cuda.amp import autocast, GradScaler
+
+def _autocast_ctx(dev):
+    return autocast(enabled=(dev.type == "cuda"))
+
 except ImportError:
     from torch.cuda.amp import autocast, GradScaler  # type: ignore[no-redef]
     def _autocast_ctx(dev: torch.device):  # type: ignore[no-redef]

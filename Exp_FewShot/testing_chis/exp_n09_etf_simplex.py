@@ -1,4 +1,4 @@
-﻿"""
+"""
 exp_n09_etf_simplex.py — Equiangular Tight Frame Simplex Classifier
 
 NAME : Equiangular Tight Frame Simplex (ETF-Simplex)
@@ -75,15 +75,11 @@ from torch.utils.data import Dataset as TD, DataLoader
 from transformers import AutoModel, AutoTokenizer
 from tqdm import tqdm
 
-try:
-    from torch.amp import autocast as _ac, GradScaler
-except ImportError:
-    from torch.cuda.amp import autocast as _ac, GradScaler
+from torch.cuda.amp import autocast, GradScaler
 
-def _autocast_ctx(dev: torch.device):
-    enabled = (dev.type == "cuda")
-    try:
-        return _ac(device_type=dev.type, enabled=enabled)
+def _autocast_ctx(dev):
+    return autocast(enabled=(dev.type == "cuda"))
+
     except TypeError:
         return _ac(enabled=enabled)
 

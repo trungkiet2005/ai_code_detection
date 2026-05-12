@@ -1,4 +1,4 @@
-﻿"""
+"""
 ================================================================================
 Theory-Track exp -- MMD with Genealogical Kernel (MMDG):
 Maximum Mean Discrepancy with tree-structured kernel for distributional attribution.
@@ -51,13 +51,11 @@ from sklearn.metrics import accuracy_score, f1_score
 from torch.utils.data import Dataset as TD, DataLoader
 from transformers import AutoModel, AutoTokenizer
 from tqdm import tqdm
-try:
-    from torch.amp import autocast as _ac, GradScaler
-except ImportError:
-    from torch.cuda.amp import autocast as _ac, GradScaler
+from torch.cuda.amp import autocast, GradScaler
+
 def _autocast_ctx(dev):
-    enabled = (dev.type == "cuda")
-    try: return _ac(device_type=dev.type, enabled=enabled)
+    return autocast(enabled=(dev.type == "cuda"))
+
     except TypeError: return _ac(enabled=enabled)
 warnings.filterwarnings("ignore")
 import logging

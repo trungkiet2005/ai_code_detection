@@ -1,4 +1,4 @@
-﻿"""
+"""
 ================================================================================
 Theory-Track exp -- Information-Geometric Genealogy (IGG):
 Fisher-Rao metric on the probability simplex structured by genealogy.
@@ -53,10 +53,11 @@ from sklearn.metrics import accuracy_score, f1_score
 from torch.utils.data import Dataset as TD, DataLoader
 from transformers import AutoModel, AutoTokenizer
 from tqdm import tqdm
-try:
-    from torch.amp import autocast, GradScaler
-    def _autocast_ctx(dev):
-        return autocast(device_type=dev.type, enabled=(dev.type == "cuda"))
+from torch.cuda.amp import autocast, GradScaler
+
+def _autocast_ctx(dev):
+    return autocast(enabled=(dev.type == "cuda"))
+
 except ImportError:
     from torch.cuda.amp import autocast, GradScaler
     def _autocast_ctx(dev):
