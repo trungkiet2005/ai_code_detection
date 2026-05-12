@@ -185,7 +185,7 @@ def _load_droid():
         logger.info(f"[droid] Loading from local: {len(train_files)} train shards, {len(test_files)} test shards")
         # Load train and test separately
         ds_train = load_dataset("parquet", data_files=train_files, split="train")
-        ds_test = load_dataset("parquet", data_files=test_files, split="test")
+        ds_test = load_dataset("parquet", data_files=test_files, split="train")
         # Split train: 90% train, 10% val
         s = ds_train.train_test_split(test_size=0.1, seed=42)
         return s["train"], s["test"], ds_test

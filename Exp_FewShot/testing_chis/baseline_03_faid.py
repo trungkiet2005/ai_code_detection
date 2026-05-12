@@ -252,7 +252,7 @@ def _load_droid():
     if train_files and test_files:
         logger.info(f"[droid] Loading from local: {len(train_files)} train shards, {len(test_files)} test shards, {len(dev_files)} dev shards")
         ds_train = load_dataset("parquet", data_files=train_files, split="train")
-        ds_test = load_dataset("parquet", data_files=test_files, split="test")
+        ds_test = load_dataset("parquet", data_files=test_files, split="train")
         
         if dev_files:
             ds_dev = load_dataset("parquet", data_files=dev_files, split="train")

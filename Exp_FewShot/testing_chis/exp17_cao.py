@@ -207,17 +207,21 @@ def _load_droid():
     test_files = sorted(glob.glob(os.path.join(KAGGLE_DROID, "test-*.parquet")))
     dev_files = sorted(glob.glob(os.path.join(KAGGLE_DROID, "dev-*.parquet")))
 
-    if train_files and test_files:
-        logger.info(f"[droid] Loading from local: {len(train_files)} train shards, {len(test_files)} test shards")
+    if train_files:
+        logger.info(f"[droid] Loading from local: {len(train_files)} train shards, {len(test_files)} test shards, {len(dev_files)} dev shards")
         ds_train = load_dataset("parquet", data_files=train_files, split="train")
-        ds_test = load_dataset("parquet", data_files=test_files, split="test")
-
+        
         if dev_files:
             ds_dev = load_dataset("parquet", data_files=dev_files, split="train")
+            ds_test = load_dataset("parquet", data_files=test_files, split="train") if test_files else None
             return ds_train, ds_dev, ds_test
-        else:
+        elif test_files:
+            ds_test = load_dataset("parquet", data_files=test_files, split="train")
             s = ds_train.train_test_split(test_size=0.1, seed=42)
             return s["train"], s["test"], ds_test
+        else:
+            s = ds_train.train_test_split(test_size=0.2, seed=42)
+            return s["train"], s["test"], s["test"]
     else:
         logger.warning("[droid] Kaggle path not found, falling back to HuggingFace...")
         tr = load_dataset("project-droid/DroidCollection", split="train")
