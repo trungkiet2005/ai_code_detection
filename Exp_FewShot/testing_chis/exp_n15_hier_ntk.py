@@ -1,4 +1,4 @@
-"""
+﻿"""
 exp12_hier_ntk.py — HierTree + NTK combined
 
 Self-contained. Runs: 2 encoders × 4 benchmarks × 3 fractions = 24 experiments.
@@ -264,52 +264,40 @@ def _load_droid():
         return tr, vl, ts
 
 def _load_aicd(task):
-    """Load AICD-Bench from Kaggle local path or HuggingFace.
-    
-    Kaggle path structure:
-      /kaggle/input/datasets/chiboiz/ai-code-detection/AICD-Bench/
-        ├── T1/
-        │   └── *.parquet
-        ├── T2/
-        │   └── *.parquet
-        └── T3/
-            └── *.parquet
-    
-    HuggingFace fallback: AICD-bench/AICD-Bench (requires internet).
+    """Load AICD-Bench -- STRICT: only loads the requested task dir, NO fallback.
+
+    Raises FileNotFoundError immediately if target task dir is missing.
+    Prevents silent data bugs (e.g. loading T1 instead of T2).
     """
-    cfg_map = {"t2":"T2","t3":"T3","t1":"T1"}
-    task_name = cfg_map.get(task.upper().replace("T2","t2").replace("T3","t3").replace("T1","t1"), "T2")
-    
-    # Directly check the correct task directory first
+    task_map = {"t1": "T1", "t2": "T2", "t3": "T3"}
+    task_name = task_map.get(task.lower(), None)
+    if task_name is None:
+        raise ValueError(f"[aicd] Unknown task '{task}'. Must be one of: t1, t2, t3.")
     task_path = os.path.join(KAGGLE_AICD, task_name)
-    if os.path.isdir(task_path):
-        parquet_files = sorted(glob.glob(os.path.join(task_path, "**", "*.parquet"), recursive=True))
-        if parquet_files:
-            logger.info(f"[aicd] Loading {task_name} from local: {len(parquet_files)} files")
-            ds = load_dataset("parquet", data_files=parquet_files, split="train")
-            
-            if "split" in ds.column_names:
-                try:
-                    tr = ds.filter(lambda x: str(x.get("split","")).lower()=="train")
-                    vl = ds.filter(lambda x: str(x.get("split","")).lower() in {"val","validation","dev"})
-                    ts = ds.filter(lambda x: str(x.get("split","")).lower()=="test")
-                    if len(tr) > 0 and len(vl) > 0 and len(ts) > 0:
-                        return tr, vl, ts
-                except:
-                    pass
-            
-            if "validation" in ds.column_names:
-                return ds["train"], ds["validation"], ds["test"]
-            elif "val" in ds.column_names:
-                return ds["train"], ds["val"], ds["test"]
-            else:
-                s = ds.train_test_split(test_size=0.1, seed=42)
-                s2 = s["train"].train_test_split(test_size=1/9, seed=42)
-                return s2["train"], s2["test"], s["test"]
-    
-    # Fallback to HuggingFace (requires internet)
-    logger.warning(f"[aicd] Local path not found for {task_name}, trying HuggingFace...")
-    return (load_dataset("AICD-bench/AICD-Bench", name=task_name, split=s) for s in ["train","validation","test"])
+    if not os.path.isdir(task_path):
+        raise FileNotFoundError(
+            f"[aicd] STRICT: {task_name} dir not found at {task_path}. "
+            f"NO fallback to other tasks or HuggingFace. Check KAGGLE_AICD path."
+        )
+    parquet_files = sorted(glob.glob(os.path.join(task_path, "**", "*.parquet"), recursive=True))
+    if not parquet_files:
+        raise FileNotFoundError(
+            f"[aicd] STRICT: No parquet files in {task_path}. NO fallback."
+        )
+    logger.info(f"[aicd] Loading {task_name} from {task_path} ({len(parquet_files)} files)")
+    ds = load_dataset("parquet", data_files=parquet_files, split="train")
+    if "split" in ds.column_names:
+        try:
+            tr = ds.filter(lambda x: str(x.get("split", "")).lower() == "train")
+            vl = ds.filter(lambda x: str(x.get("split", "")).lower() in {"val", "validation", "dev"})
+            ts = ds.filter(lambda x: str(x.get("split", "")).lower() == "test")
+            if len(tr) > 0 and len(vl) > 0 and len(ts) > 0:
+                return tr, vl, ts
+        except Exception:
+            pass
+    s = ds.train_test_split(test_size=0.1, seed=42)
+    s2 = s["train"].train_test_split(test_size=1/9, seed=42)
+    return s2["train"], s2["test"], s["test"]
 
 class FSDS(TD):
     def __init__(self, hf, tok, max_len):

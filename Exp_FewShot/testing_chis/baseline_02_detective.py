@@ -1,4 +1,4 @@
-"""
+﻿"""
 exp01_detective.py — DeTeCtive-style CE + supervised contrastive baseline
 
 Published method: DeTeCtive (arXiv 2410.20964)
@@ -198,64 +198,41 @@ def _load_droid():
         return tr, vl, ts
 
 def _load_aicd(task):
-    """Load AICD-Bench from Kaggle local path or HuggingFace.
-    
-    Kaggle path structure:
-      /kaggle/input/datasets/chiboiz/ai-code-detection/AICD-Bench/
-        ├── T1/
-        │   └── *.parquet
-        ├── T2/
-        │   └── *.parquet
-        └── T3/
-            └── *.parquet
-    
-    HuggingFace fallback: AICD-bench/AICD-Bench (requires internet).
-    """
-    cfg_map = {"t2":"T2","t3":"T3","t1":"T1"}
-    task_name = cfg_map.get(task.upper().replace("T2","t2").replace("T3","t3").replace("T1","t1"), "T2")
-    
-    # Try local Kaggle path first
-    local_base = KAGGLE_AICD
-    task_dirs = ["T1", "T2", "T3"]
-    
-    for t in task_dirs:
-        task_path = os.path.join(local_base, t)
-        if os.path.isdir(task_path):
-            # Find parquet files
-            parquet_files = sorted(glob.glob(os.path.join(task_path, "**", "*.parquet"), recursive=True))
-            if parquet_files:
-                logger.info(f"[aicd] Loading from local: {task_path}")
-                ds = load_dataset("parquet", data_files=parquet_files, split="train")
-                # AICD has train/val/test splits
-                if "validation" in ds.column_names or "val" in ds.column_names:
-                    val_key = "validation" if "validation" in ds.column_names else "val"
-                    return ds["train"], ds[val_key], ds["test"]
-                else:
-                    s = ds.train_test_split(test_size=0.1, seed=42)
-                    s2 = s["train"].train_test_split(test_size=1/9, seed=42)
-                    return s2["train"], s2["test"], s["test"]
-    
-    # Try loading as single parquet
-    parquet_files = sorted(glob.glob(os.path.join(local_base, "**", "*.parquet"), recursive=True))
-    if parquet_files:
-        logger.info(f"[aicd] Loading parquet files from: {local_base}")
-        ds = load_dataset("parquet", data_files=parquet_files, split="train")
-        if "validation" in ds.column_names or "val" in ds.column_names:
-            val_key = "validation" if "validation" in ds.column_names else "val"
-            return ds["train"], ds[val_key], ds["test"]
-        else:
-            s = ds.train_test_split(test_size=0.1, seed=42)
-            s2 = s["train"].train_test_split(test_size=1/9, seed=42)
-            return s2["train"], s2["test"], s["test"]
-    
-    # Fallback to HuggingFace (requires internet)
-    logger.warning("[aicd] Local path not found, trying HuggingFace (requires internet)")
-    return (load_dataset("AICD-bench/AICD-Bench", name=task_name, split=s) for s in ["train","validation","test"])
+    """Load AICD-Bench -- STRICT: only loads the requested task dir, NO fallback.
 
-# =============================================================================
-# PREFLIGHT: Validate all datasets BEFORE training runs
-# Purpose: Fail fast on missing/corrupt data, report sizes, abort if empty
-# =============================================================================
+    Raises FileNotFoundError immediately if target task dir is missing.
+    Prevents silent data bugs (e.g. loading T1 instead of T2).
+    """
+    task_map = {"t1": "T1", "t2": "T2", "t3": "T3"}
+    task_name = task_map.get(task.lower(), None)
+    if task_name is None:
+        raise ValueError(f"[aicd] Unknown task '{task}'. Must be one of: t1, t2, t3.")
+    task_path = os.path.join(KAGGLE_AICD, task_name)
+    if not os.path.isdir(task_path):
+        raise FileNotFoundError(
+            f"[aicd] STRICT: {task_name} dir not found at {task_path}. "
+            f"NO fallback to other tasks or HuggingFace. Check KAGGLE_AICD path."
+        )
+    parquet_files = sorted(glob.glob(os.path.join(task_path, "**", "*.parquet"), recursive=True))
+    if not parquet_files:
+        raise FileNotFoundError(
+            f"[aicd] STRICT: No parquet files in {task_path}. NO fallback."
+        )
+    logger.info(f"[aicd] Loading {task_name} from {task_path} ({len(parquet_files)} files)")
+    ds = load_dataset("parquet", data_files=parquet_files, split="train")
+    if "split" in ds.column_names:
+        try:
+            tr = ds.filter(lambda x: str(x.get("split", "")).lower() == "train")
+            vl = ds.filter(lambda x: str(x.get("split", "")).lower() in {"val", "validation", "dev"})
+            ts = ds.filter(lambda x: str(x.get("split", "")).lower() == "test")
+            if len(tr) > 0 and len(vl) > 0 and len(ts) > 0:
+                return tr, vl, ts
+        except Exception:
+            pass
+    s = ds.train_test_split(test_size=0.1, seed=42)
+    s2 = s["train"].train_test_split(test_size=1/9, seed=42)
+    return s2["train"], s2["test"], s["test"]
+
 def _preflight_check():
     """Load all benchmarks and report sizes. Abort if any dataset is empty."""
     logger.info("=" * 60)
