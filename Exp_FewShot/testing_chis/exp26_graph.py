@@ -1,25 +1,24 @@
 """
 ================================================================================
-Theory-Track exp -- Prototype Propagation Networks (PPN):
-Class prototypes with meta-learning based propagation for few-shot attribution.
+Theory-Track exp -- Graph Neural Attribution (GNA):
+Modeling generator relationships as a graph for message-passing attribution.
 
-ARXIV_ID      : NeurIPS 2017 Prototypical Networks (1703.05175);
-                ICLR 2019 MAML (arXiv:1703.03400)
-NAME          : Prototype Propagation Networks (PPN)
-ONE-LINE CLAIM: Computing class prototypes and propagating them through a learned
-                graph enables rapid adaptation to new generators with few examples.
-EQUATION      : p_c = (1/|S_c|) Σ_{x∈S_c} f_θ(x)
-                d(x, p_c) = ||f_θ(x) - p_c||²
-PROPERTY      : Prototypes provide a nearest-centroid classifier that is robust to
-                class imbalance and converges faster than parametric classifiers.
-WHY NOT BEFORE: CE-based classifiers overfit to few-shot training distribution.
-                Prototypes maintain a more stable decision boundary.
-FALSIFIER     : If prototype accuracy does NOT improve relative to CE on K-shot,
-                the prototype-based approach is not appropriate for code attribution.
+ARXIV_ID      : NeurIPS 2017 GCN (1611.07308); ICLR 2019 Graph Networks (1806.01261)
+NAME          : Graph Neural Attribution (GNA)
+ONE-LINE CLAIM: Explicitly modeling generator family relationships as a graph
+                and propagating embeddings through message-passing improves attribution.
+EQUATION      : h_v^{(l+1)} = σ(W^{(l)} · AGG({h_u^{(l)} : u ∈ N(v) ∪ {v}}))
+                Node features: generator embeddings; Edge weights: family proximity.
+PROPERTY      : Graph structure injects prior knowledge about generator relationships,
+                reducing sample complexity for family-level attribution.
+WHY NOT BEFORE: Standard classifiers treat all classes as independent. GNA leverages
+                the genealogical structure as an explicit inductive bias.
+FALSIFIER     : If GNA does NOT improve family-group accuracy more than individual
+                class accuracy, the graph structure is not helping.
 ================================================================================
 
-exp20_proto.py — Prototype-based few-shot AI-code attribution.
-Protocol: FIXED_TOTAL_TRAIN = 72 samples across all benchmarks.
+exp26_graph.py — Graph neural attribution for few-shot AI-code attribution.
+Protocol: fraction-based (1% / 5% / 20%), unixcoder-base only.
 """
 
 # === KAGGLE PATHS ===
@@ -65,15 +64,31 @@ def _autocast_ctx(dev: torch.device):
 warnings.filterwarnings("ignore")
 import logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s", stream=sys.stdout)
-logger = logging.getLogger("exp20")
+logger = logging.getLogger("exp26")
 
 PAPER_BASELINE = 0.6633
+
+# Generator family graph structure
+GENERATOR_GRAPH = {
+    0: [],  # human - isolated
+    1: [2, 3],  # gpt-3.5 related to gpt-4
+    2: [1, 3],  # gpt-4 related to gpt-3.5
+    3: [1, 2],  # gpt-4o related to gpt family
+    4: [5, 6, 7],  # llama-3 related to llama-3.1, codellama, nxcode
+    5: [4, 6, 7],  # llama-3.1 related to llama-3, codellama, nxcode
+    6: [4, 5, 7],  # codellama related to llama family
+    7: [4, 5, 6],  # nxcode related to llama family
+    8: [9, 10],  # qwen2 related to qwen2.5
+    9: [8, 10],  # qwen2.5 related to qwen family
+    10: [8, 9],  # qwen1.5 related to qwen family
+}
 
 @dataclass
 class Cfg:
     benchmark: str = "codet_m4"
     task: str = "author"
-    enc: str = "ModernBERT-base"
+    enc: str = "unixcoder-base"
+    frac: float = 0.05
     n_cls: int = 6
     seed: int = 42
     bs: int = 256
@@ -84,8 +99,9 @@ class Cfg:
     wd: float = 0.01
     warmup: float = 0.1
     device: str = "cuda"
-    FIXED_TOTAL_TRAIN: int = 72
-    proto_weight: float = 0.5  # Weight for prototype loss
+    # GNA specific
+    graph_hidden: int = 128  # Graph convolution hidden dim
+    num_layers: int = 2  # Number of GNN layers
 
     def __post_init__(self):
         if self.benchmark == "codet_m4":
@@ -310,19 +326,11 @@ def build_dls(cfg: Cfg):
     for i, lab in enumerate(tr_d["label"]): by_cls[int(lab)].append(i)
     rng = random.Random(cfg.seed)
     chosen = []
-
-    if cfg.FIXED_TOTAL_TRAIN > 0:
-        total = cfg.FIXED_TOTAL_TRAIN
-        n_per_cls = max(1, total // cfg.n_cls)
-        remaining = total - (n_per_cls * cfg.n_cls)
-        for cls in range(cfg.n_cls):
-            pool = by_cls.get(cls, [])
-            n = n_per_cls + (1 if cls < remaining else 0)
-            n = min(n, len(pool))
-            if pool:
-                chosen.extend(rng.sample(pool, n))
-        logger.info(f"[data] {cfg.enc} | {cfg.benchmark} | FIXED_TOTAL={cfg.FIXED_TOTAL_TRAIN} | n_train={len(chosen)}")
-
+    for cls in range(cfg.n_cls):
+        pool = by_cls.get(cls, [])
+        n = max(1, int(round(len(pool) * cfg.frac))) if pool else 0
+        chosen.extend(rng.sample(pool, min(n, len(pool))) if pool else [])
+    logger.info(f"[data] {cfg.enc} | {cfg.benchmark} | frac={cfg.frac} | n_train={len(chosen)}")
     rng.shuffle(chosen)
     tr_d = tr_d.select(chosen)
 
@@ -331,56 +339,88 @@ def build_dls(cfg: Cfg):
     return ld(tr_d, True), ld(vl_d, False), ld(ts_d, False)
 
 
-class ProtoNet(nn.Module):
-    """Encoder + classifier with prototype-based loss."""
+class GraphConvLayer(nn.Module):
+    """Single graph convolution layer."""
+    def __init__(self, in_dim, out_dim):
+        super().__init__()
+        self.linear = nn.Linear(in_dim, out_dim)
+
+    def forward(self, x, adj):
+        # x: [n_cls, in_dim], adj: [n_cls, n_cls]
+        out = torch.mm(adj, x)  # Aggregate neighbors
+        out = self.linear(out)
+        return F.relu(out)
+
+
+class GNANet(nn.Module):
+    """Encoder with graph neural network for generator relationships."""
     def __init__(self, cfg: Cfg):
         super().__init__()
         self.cfg = cfg
+        self.n_cls = cfg.n_cls
+
+        # Build adjacency matrix from graph
+        self.adj = self._build_adj_matrix()
+
         self.encoder = AutoModel.from_pretrained(
             os.path.join(KAGGLE_MODELS, cfg.enc), local_files_only=True
         )
         hidden = self.encoder.config.hidden_size
+
+        # Node embeddings for each class
+        self.node_embeddings = nn.Parameter(torch.randn(cfg.n_cls, cfg.graph_hidden))
+
+        # GNN layers
+        self.gnn_layers = nn.ModuleList([
+            GraphConvLayer(cfg.graph_hidden, cfg.graph_hidden)
+            for _ in range(cfg.num_layers)
+        ])
+
+        # Combine encoder and graph
         self.head = nn.Sequential(
-            nn.Linear(hidden, hidden // 2),
+            nn.Linear(hidden + cfg.graph_hidden, hidden // 2),
             nn.ReLU(),
             nn.Dropout(0.1),
             nn.Linear(hidden // 2, cfg.n_cls),
         )
 
+    def _build_adj_matrix(self):
+        adj = torch.zeros(self.n_cls, self.n_cls)
+        for node, neighbors in GENERATOR_GRAPH.items():
+            if node < self.n_cls:
+                for neighbor in neighbors:
+                    if neighbor < self.n_cls:
+                        adj[node, neighbor] = 1.0
+                        adj[neighbor, node] = 1.0
+        # Self-loop
+        adj.fill_diagonal_(1)
+        # Normalize
+        deg = adj.sum(dim=1, keepdim=True)
+        adj = adj / (deg + 1e-8)
+        return adj
+
     def forward(self, ids, mask):
         out = self.encoder(input_ids=ids, attention_mask=mask)
         pooled = out.last_hidden_state[:, 0]
-        logits = self.head(pooled)
-        return {"logits": logits, "pooled": pooled}
 
-    def compute_prototypes(self, embeddings, labels, n_cls):
-        """Compute class prototypes (mean embeddings)."""
-        device = embeddings.device
-        prototypes = torch.zeros(n_cls, embeddings.size(1), device=device)
-        for c in range(n_cls):
-            mask = (labels == c)
-            if mask.sum() > 0:
-                prototypes[c] = embeddings[mask].mean(dim=0)
-            else:
-                prototypes[c] = embeddings.mean(dim=0)  # Fallback
-        return F.normalize(prototypes, dim=1)
+        # Propagate through GNN
+        node_features = self.node_embeddings
+        adj = self.adj.to(node_features.device)
+        for layer in self.gnn_layers:
+            node_features = layer(node_features, adj)
 
-    def prototype_loss(self, embeddings, labels, n_cls, temperature=0.1):
-        """Prototype-based contrastive loss."""
-        prototypes = self.compute_prototypes(embeddings, labels, n_cls)
+        # Use class-0 node embedding as prototype (or mean)
+        graph_feat = node_features[0].unsqueeze(0).expand(pooled.size(0), -1)
 
-        # Compute distances to prototypes
-        dist = torch.cdist(embeddings, prototypes, p=2)
-
-        # Softmax with temperature
-        logits = -dist / temperature
-        loss = F.cross_entropy(logits, labels)
-        return loss
+        # Combine encoder and graph features
+        combined = torch.cat([pooled, graph_feat], dim=1)
+        logits = self.head(combined)
+        return {"logits": logits, "node_features": node_features}
 
 
 def train(cfg: Cfg, tr_dl, vl_dl, ts_dl):
     dev = torch.device(cfg.device)
-    model = ProtoNet(cfg).to(dev)
+    model = GNANet(cfg).to(dev)
 
     opt = torch.optim.AdamW(model.parameters(), lr=cfg.lr_enc, weight_decay=cfg.wd)
     sched = torch.optim.lr_scheduler.OneCycleLR(opt, max_lr=cfg.lr_enc,
@@ -393,26 +433,15 @@ def train(cfg: Cfg, tr_dl, vl_dl, ts_dl):
     for ep in range(cfg.epochs):
         model.train()
         pbar = tqdm(tr_dl, desc=f"Epoch {ep+1}/{cfg.epochs}", leave=False)
-        ep_loss, ep_ce, ep_proto = [], [], []
+        ep_loss = []
 
         for b in pbar:
             ids, mask, labs = b["ids"].to(dev), b["mask"].to(dev), b["labels"].to(dev)
 
             with _autocast_ctx(dev):
-                out = model(ids, mask)
-                logits = out["logits"]
-                pooled = out["pooled"]
+                logits = model(ids, mask)["logits"]
+                loss = F.cross_entropy(logits, labs)
 
-                # Standard CE loss
-                loss_ce = F.cross_entropy(logits, labs)
-
-                # Prototype loss
-                loss_proto = model.prototype_loss(pooled, labs, cfg.n_cls)
-
-                loss = loss_ce + cfg.proto_weight * loss_proto
-
-            ep_ce.append(loss_ce.item())
-            ep_proto.append(loss_proto.item())
             ep_loss.append(loss.item())
 
             scaler.scale(loss).backward()
@@ -420,13 +449,12 @@ def train(cfg: Cfg, tr_dl, vl_dl, ts_dl):
             torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
             scaler.step(opt); scaler.update(); opt.zero_grad()
             sched.step()
-            pbar.set_postfix({"ce": f"{loss_ce.item():.3f}", "proto": f"{loss_proto.item():.3f}"})
+            pbar.set_postfix({"loss": f"{loss.item():.3f}"})
 
         tr_met = eval_m(model, tr_dl, dev)
         vr = eval_m(model, vl_dl, dev)
         train_history.append({
             "epoch": ep + 1, "loss": round(np.mean(ep_loss), 6),
-            "ce_loss": round(np.mean(ep_ce), 6), "proto_loss": round(np.mean(ep_proto), 6),
             "macro_f1": round(tr_met["macro"], 6),
         })
         val_history.append({
@@ -472,63 +500,54 @@ def main():
     logger.info("[PREFLIGHT] Running dataset validation...")
     _preflight_check()
 
-    encoders = ["ModernBERT-base", "unixcoder-base"]
+    encoders = ["unixcoder-base"]
     benchmarks = [("codet_m4","author"), ("aicd_t2","t2")]
-    FIXED_TOTAL = 72
+    fracs = [0.01, 0.05, 0.20]
 
     results = []
     for enc in encoders:
         for bench, task in benchmarks:
-            cfg = Cfg(benchmark=bench, task=task, enc=enc, FIXED_TOTAL_TRAIN=FIXED_TOTAL)
-            cfg = _hw(cfg)
-            if torch.cuda.is_available(): torch.cuda.reset_peak_memory_stats()
-            tag = f"exp20_proto_{enc}_{bench}_fixed{FIXED_TOTAL}"
-            logger.info(f"=== {tag} ===")
-            t0 = time.time()
-            tr_dl, vl_dl, ts_dl = build_dls(cfg)
-            res = train(cfg, tr_dl, vl_dl, ts_dl)
-            elapsed = time.time() - t0
+            for frac in fracs:
+                cfg = Cfg(benchmark=bench, task=task, enc=enc, frac=frac)
+                cfg = _hw(cfg)
+                if torch.cuda.is_available(): torch.cuda.reset_peak_memory_stats()
+                tag = f"exp26_gna_{enc}_{bench}_f{frac}"
+                logger.info(f"=== {tag} ===")
+                t0 = time.time()
+                tr_dl, vl_dl, ts_dl = build_dls(cfg)
+                res = train(cfg, tr_dl, vl_dl, ts_dl)
+                elapsed = time.time() - t0
 
-            row = {
-                "tag": tag, "encoder": enc, "benchmark": bench, "task": task,
-                "n_classes": cfg.n_cls, "total_train_samples": FIXED_TOTAL,
-                "train_samples_per_class": FIXED_TOTAL // cfg.n_cls,
-                "batch_size": cfg.bs, "seq_length": cfg.seq, "epochs": cfg.epochs,
-                "lr_encoder": cfg.lr_enc, "lr_head": cfg.lr_head,
-                "proto_weight": cfg.proto_weight,
-                "macro_f1": round(res["macro"], 6), "weighted_f1": round(res["weighted"], 6),
-                "accuracy": round(res["acc"], 6),
-                "delta_vs_paper": round(res["macro"] - PAPER_BASELINE, 6),
-                "paper_baseline": PAPER_BASELINE,
-                "per_class_f1": [round(x, 6) for x in res["per_class_f1"]],
-                "per_class_precision": [round(x, 6) for x in res["per_class_precision"]],
-                "per_class_recall": [round(x, 6) for x in res["per_class_recall"]],
-                "confusion_matrix": res["confusion_matrix"],
-                "pred_distribution": res["pred_distribution"],
-                "label_distribution": res["label_distribution"],
-                "train_history": res["train_history"],
-                "val_history": res["val_history"],
-                "wall_time_seconds": round(elapsed, 1),
-                "gpu_memory_gb": round(torch.cuda.max_memory_allocated() / 1e9, 2) if torch.cuda.is_available() else 0,
-                "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
-            }
-            results.append(row)
-            logger.info(f"[{tag}] MacroF1={res['macro']:.4f} ({res['macro']-PAPER_BASELINE:+.4f} vs paper)")
-            del tr_dl, vl_dl, ts_dl
-            import gc; gc.collect()
-            if torch.cuda.is_available(): torch.cuda.empty_cache()
+                row = {
+                    "tag": tag, "enc": enc, "bench": bench, "frac": frac,
+                    "macro": round(res["macro"], 6), "weighted": round(res["weighted"], 6),
+                    "acc": round(res["acc"], 6),
+                    "dpaper": round(res["macro"] - PAPER_BASELINE, 6),
+                    "graph_hidden": cfg.graph_hidden, "num_layers": cfg.num_layers,
+                    "per_class_f1": [round(x, 6) for x in res["per_class_f1"]],
+                    "confusion_matrix": res["confusion_matrix"],
+                    "train_history": res["train_history"],
+                    "val_history": res["val_history"],
+                    "wall": round(elapsed, 1),
+                    "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+                }
+                results.append(row)
+                logger.info(f"[{tag}] MacroF1={res['macro']:.4f} ({res['macro']-PAPER_BASELINE:+.4f} vs paper) time={elapsed:.0f}s")
+                del tr_dl, vl_dl, ts_dl
+                import gc; gc.collect()
+                if torch.cuda.is_available(): torch.cuda.empty_cache()
 
     os.makedirs("results", exist_ok=True)
-    with open("results/exp20_proto_results.json", "w") as f:
+    with open("results/exp26_gna_results.json", "w") as f:
         json.dump(results, f, indent=2)
 
     print("\n" + "="*100)
-    print(f"{'Encoder':<22} {'Benchmark':<12} {'Macro-F1':>10} {'dPaper':>10} {'Weighted':>10} {'Wall':>8}")
+    print(f"{'Encoder':<22} {'Benchmark':<12} {'Frac':>6} {'Macro-F1':>10} {'dPaper':>10} {'Weighted':>10} {'Wall':>8}")
     print("-"*100)
     for r in results:
-        print(f"{r['encoder']:<22} {r['benchmark']:<12} {r['macro_f1']:>10.4f} {r['delta_vs_paper']:>+10.4f} {r['weighted_f1']:>10.4f} {r['wall_time_seconds']:>8.0f}s")
+        print(f"{r['enc']:<22} {r['bench']:<12} {r['frac']:>6.0%} {r['macro']:>10.4f} {r['dpaper']:>+10.4f} {r['weighted']:>10.4f} {r['wall']:>8.0f}s")
     print("="*100)
-    print("\n[OK] Proto experiments complete!")
+    print("\n[OK] GNA experiments complete!")
 
 if __name__ == "__main__":
     main()

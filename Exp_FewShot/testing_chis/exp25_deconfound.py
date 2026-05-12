@@ -18,7 +18,7 @@ FALSIFIER     : If DRL does NOT improve OOD accuracy more than IID accuracy,
 ================================================================================
 
 exp25_deconfound.py — Deconfounded representation learning for few-shot AI-code attribution.
-Protocol: FIXED_TOTAL_TRAIN = 72 samples across all benchmarks.
+Protocol: fraction-based (1% / 5% / 20%), unixcoder-base only.
 """
 
 # === KAGGLE PATHS ===
@@ -72,7 +72,8 @@ PAPER_BASELINE = 0.6633
 class Cfg:
     benchmark: str = "codet_m4"
     task: str = "author"
-    enc: str = "ModernBERT-base"
+    enc: str = "unixcoder-base"
+    frac: float = 0.05
     n_cls: int = 6
     seed: int = 42
     bs: int = 256
@@ -83,10 +84,9 @@ class Cfg:
     wd: float = 0.01
     warmup: float = 0.1
     device: str = "cuda"
-    FIXED_TOTAL_TRAIN: int = 72
     # DRL specific
     irm_lambda: float = 0.5  # IRM penalty weight
-    penalty_anneal: int = 500  # Steps before IRM penalty activates
+    penalty_anneal: int = 50  # Steps before IRM penalty activates (scaled for fraction protocol)
 
     def __post_init__(self):
         if self.benchmark == "codet_m4":
@@ -311,19 +311,11 @@ def build_dls(cfg: Cfg):
     for i, lab in enumerate(tr_d["label"]): by_cls[int(lab)].append(i)
     rng = random.Random(cfg.seed)
     chosen = []
-
-    if cfg.FIXED_TOTAL_TRAIN > 0:
-        total = cfg.FIXED_TOTAL_TRAIN
-        n_per_cls = max(1, total // cfg.n_cls)
-        remaining = total - (n_per_cls * cfg.n_cls)
-        for cls in range(cfg.n_cls):
-            pool = by_cls.get(cls, [])
-            n = n_per_cls + (1 if cls < remaining else 0)
-            n = min(n, len(pool))
-            if pool:
-                chosen.extend(rng.sample(pool, n))
-        logger.info(f"[data] {cfg.enc} | {cfg.benchmark} | FIXED_TOTAL={cfg.FIXED_TOTAL_TRAIN} | n_train={len(chosen)}")
-
+    for cls in range(cfg.n_cls):
+        pool = by_cls.get(cls, [])
+        n = max(1, int(round(len(pool) * cfg.frac))) if pool else 0
+        chosen.extend(rng.sample(pool, min(n, len(pool))) if pool else [])
+    logger.info(f"[data] {cfg.enc} | {cfg.benchmark} | frac={cfg.frac} | n_train={len(chosen)}")
     rng.shuffle(chosen)
     tr_d = tr_d.select(chosen)
 
@@ -460,61 +452,52 @@ def main():
     logger.info("[PREFLIGHT] Running dataset validation...")
     _preflight_check()
 
-    encoders = ["ModernBERT-base", "unixcoder-base"]
+    encoders = ["unixcoder-base"]
     benchmarks = [("codet_m4","author"), ("aicd_t2","t2")]
-    FIXED_TOTAL = 72
+    fracs = [0.01, 0.05, 0.20]
 
     results = []
     for enc in encoders:
         for bench, task in benchmarks:
-            cfg = Cfg(benchmark=bench, task=task, enc=enc, FIXED_TOTAL_TRAIN=FIXED_TOTAL)
-            cfg = _hw(cfg)
-            if torch.cuda.is_available(): torch.cuda.reset_peak_memory_stats()
-            tag = f"exp25_drl_{enc}_{bench}_fixed{FIXED_TOTAL}"
-            logger.info(f"=== {tag} ===")
-            t0 = time.time()
-            tr_dl, vl_dl, ts_dl = build_dls(cfg)
-            res = train(cfg, tr_dl, vl_dl, ts_dl)
-            elapsed = time.time() - t0
+            for frac in fracs:
+                cfg = Cfg(benchmark=bench, task=task, enc=enc, frac=frac)
+                cfg = _hw(cfg)
+                if torch.cuda.is_available(): torch.cuda.reset_peak_memory_stats()
+                tag = f"exp25_drl_{enc}_{bench}_f{frac}"
+                logger.info(f"=== {tag} ===")
+                t0 = time.time()
+                tr_dl, vl_dl, ts_dl = build_dls(cfg)
+                res = train(cfg, tr_dl, vl_dl, ts_dl)
+                elapsed = time.time() - t0
 
-            row = {
-                "tag": tag, "encoder": enc, "benchmark": bench, "task": task,
-                "n_classes": cfg.n_cls, "total_train_samples": FIXED_TOTAL,
-                "train_samples_per_class": FIXED_TOTAL // cfg.n_cls,
-                "batch_size": cfg.bs, "seq_length": cfg.seq, "epochs": cfg.epochs,
-                "lr_encoder": cfg.lr_enc, "lr_head": cfg.lr_head,
-                "irm_lambda": cfg.irm_lambda, "penalty_anneal": cfg.penalty_anneal,
-                "macro_f1": round(res["macro"], 6), "weighted_f1": round(res["weighted"], 6),
-                "accuracy": round(res["acc"], 6),
-                "delta_vs_paper": round(res["macro"] - PAPER_BASELINE, 6),
-                "paper_baseline": PAPER_BASELINE,
-                "per_class_f1": [round(x, 6) for x in res["per_class_f1"]],
-                "per_class_precision": [round(x, 6) for x in res["per_class_precision"]],
-                "per_class_recall": [round(x, 6) for x in res["per_class_recall"]],
-                "confusion_matrix": res["confusion_matrix"],
-                "pred_distribution": res["pred_distribution"],
-                "label_distribution": res["label_distribution"],
-                "train_history": res["train_history"],
-                "val_history": res["val_history"],
-                "wall_time_seconds": round(elapsed, 1),
-                "gpu_memory_gb": round(torch.cuda.max_memory_allocated() / 1e9, 2) if torch.cuda.is_available() else 0,
-                "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
-            }
-            results.append(row)
-            logger.info(f"[{tag}] MacroF1={res['macro']:.4f} ({res['macro']-PAPER_BASELINE:+.4f} vs paper)")
-            del tr_dl, vl_dl, ts_dl
-            import gc; gc.collect()
-            if torch.cuda.is_available(): torch.cuda.empty_cache()
+                row = {
+                    "tag": tag, "enc": enc, "bench": bench, "frac": frac,
+                    "macro": round(res["macro"], 6), "weighted": round(res["weighted"], 6),
+                    "acc": round(res["acc"], 6),
+                    "dpaper": round(res["macro"] - PAPER_BASELINE, 6),
+                    "irm_lambda": cfg.irm_lambda, "penalty_anneal": cfg.penalty_anneal,
+                    "per_class_f1": [round(x, 6) for x in res["per_class_f1"]],
+                    "confusion_matrix": res["confusion_matrix"],
+                    "train_history": res["train_history"],
+                    "val_history": res["val_history"],
+                    "wall": round(elapsed, 1),
+                    "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+                }
+                results.append(row)
+                logger.info(f"[{tag}] MacroF1={res['macro']:.4f} ({res['macro']-PAPER_BASELINE:+.4f} vs paper) time={elapsed:.0f}s")
+                del tr_dl, vl_dl, ts_dl
+                import gc; gc.collect()
+                if torch.cuda.is_available(): torch.cuda.empty_cache()
 
     os.makedirs("results", exist_ok=True)
     with open("results/exp25_drl_results.json", "w") as f:
         json.dump(results, f, indent=2)
 
     print("\n" + "="*100)
-    print(f"{'Encoder':<22} {'Benchmark':<12} {'Macro-F1':>10} {'dPaper':>10} {'Weighted':>10} {'Wall':>8}")
+    print(f"{'Encoder':<22} {'Benchmark':<12} {'Frac':>6} {'Macro-F1':>10} {'dPaper':>10} {'Weighted':>10} {'Wall':>8}")
     print("-"*100)
     for r in results:
-        print(f"{r['encoder']:<22} {r['benchmark']:<12} {r['macro_f1']:>10.4f} {r['delta_vs_paper']:>+10.4f} {r['weighted_f1']:>10.4f} {r['wall_time_seconds']:>8.0f}s")
+        print(f"{r['enc']:<22} {r['bench']:<12} {r['frac']:>6.0%} {r['macro']:>10.4f} {r['dpaper']:>+10.4f} {r['weighted']:>10.4f} {r['wall']:>8.0f}s")
     print("="*100)
     print("\n[OK] DRL experiments complete!")
 
