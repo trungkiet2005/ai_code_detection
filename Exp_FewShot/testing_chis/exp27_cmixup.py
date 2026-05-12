@@ -399,13 +399,19 @@ def train(cfg: Cfg, tr_dl, vl_dl, ts_dl):
             ids, mask, labs = b["ids"].to(dev), b["mask"].to(dev), b["labels"].to(dev)
 
             with _autocast_ctx(dev):
-                # Apply mixup
                 if random.random() < cfg.mixup_prob:
-                    mixed_ids, mixed_mask, labs_a, labs_b, lam = mixup_data(
-                        ids, mask, labs, cfg.mixup_alpha
-                    )
-                    logits = model(mixed_ids, mixed_mask)["logits"]
-                    loss = mixup_criterion(F.cross_entropy, logits, labs_a, labs_b, lam)
+                    # Mixup at embedding level (can't mix integer token IDs directly)
+                    enc_out = model.encoder(input_ids=ids, attention_mask=mask)
+                    pooled = enc_out.last_hidden_state[:, 0]
+
+                    lam = float(np.random.beta(cfg.mixup_alpha, cfg.mixup_alpha))
+                    lam = max(lam, 1 - lam)  # ensure lam >= 0.5
+                    idx = torch.randperm(pooled.size(0), device=dev)
+                    mixed = lam * pooled + (1 - lam) * pooled[idx]
+
+                    logits = model.head(mixed)
+                    loss = (lam * F.cross_entropy(logits, labs)
+                            + (1 - lam) * F.cross_entropy(logits, labs[idx]))
                 else:
                     logits = model(ids, mask)["logits"]
                     loss = F.cross_entropy(logits, labs)

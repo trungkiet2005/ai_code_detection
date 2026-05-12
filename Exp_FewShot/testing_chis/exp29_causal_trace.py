@@ -371,28 +371,29 @@ class CFTNet(nn.Module):
 def causal_feature_loss(hidden, logits, labels):
     """
     Causal feature loss: encourage high gradient features.
-    Uses attention-weighted pooling to emphasize causally relevant tokens.
+    Uses attention-weighted pooling over seq_len to emphasize causally relevant tokens.
     """
-    # Get attention weights
-    attn = torch.softmax(torch.randn_like(logits[..., :hidden.size(1)]), dim=-1)
+    # attn must be (batch, seq_len) — NOT (batch, n_cls)!
+    attn = torch.softmax(
+        torch.randn(hidden.size(0), hidden.size(1), device=hidden.device, dtype=hidden.dtype),
+        dim=-1
+    )  # (batch, seq_len)
 
-    # Compute RACE-like scores: gradient * activation
-    # Simplified: use attention-weighted pooling
+    # Weighted pooling: (batch, seq_len, hidden) → (batch, hidden)
     weighted = (hidden * attn.unsqueeze(-1)).sum(dim=1)
 
-    # Encourage class-discriminative features
+    # Detached class centroids (constants w.r.t. gradient)
     class_mean = torch.zeros_like(weighted)
     for c in range(logits.size(-1)):
         mask = (labels == c)
         if mask.sum() > 0:
-            class_mean[mask] = weighted[mask].mean()
+            class_mean[mask] = weighted[mask].detach().mean(dim=0)
 
-    # Loss: minimize intra-class variance, maximize inter-class distance
+    # Loss: minimize intra-class variance
     loss = torch.tensor(0.0, device=logits.device)
     for c in range(logits.size(-1)):
         mask = (labels == c)
         if mask.sum() > 1:
-            # Pull toward class mean
             class_dist = torch.norm(weighted[mask] - class_mean[mask], dim=1)
             loss = loss + class_dist.mean()
 

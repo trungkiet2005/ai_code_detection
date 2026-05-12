@@ -376,13 +376,13 @@ def spectral_contrastive_loss(emb, labels, temp=0.07):
     sim = torch.mm(emb, emb.T) / temp
 
     # Positive mask: same label
-    labels = labels.unsqueeze(1)
-    pos_mask = (labels == labels.T).float()
-    pos_mask.fill_diagonal_(0)
+    labels_col = labels.unsqueeze(1)
+    pos_mask = (labels_col == labels_col.T).float()
+    pos_mask.fill_diagonal_(0)  # pos_mask is a fresh float tensor, safe to modify inplace
 
-    # Numerator: positive pairs
-    exp_sim = torch.exp(sim)
-    exp_sim.fill_diagonal_(0)  # Exclude diagonal
+    # Diagonal mask (non-inplace) to exclude self-similarity from denominator
+    diag_mask = 1.0 - torch.eye(n, device=emb.device, dtype=emb.dtype)
+    exp_sim = torch.exp(sim) * diag_mask  # Exclude self-similarity (no inplace!)
 
     # InfoNCE
     log_prob = sim - torch.log(exp_sim.sum(dim=1, keepdim=True) + 1e-8)
