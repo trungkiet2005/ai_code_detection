@@ -145,7 +145,7 @@ def _conv_droid(split, task):
         if task == "t3": label = 1 if label == 3 else label
         return {"code":code,"label":label,"lang":str(r.get("language","")).strip().lower()}
     out = split.map(row, remove_columns=split.column_names)
-    return out.filter(lambda x: x["label"]>=0 and len(code)>0)
+    return out.filter(lambda x: x["label"]>=0 and len(x["code"].strip())>0)
 
 def _conv_aicd(split):
     def row(r):
@@ -197,43 +197,59 @@ def _load_droid():
         return tr, vl, ts
 
 def _load_aicd(task):
-    """Load AICD-Bench with proper task selection.
+    """Load AICD-Bench from Kaggle local path or HuggingFace.
 
-    T1: binary (human vs AI) - 2 classes
-    T2: model family attribution - 12 classes
-    T3: fine-grained detection - 4 classes
+    Kaggle path structure:
+      /kaggle/input/datasets/chiboiz/ai-code-detection/AICD-Bench/
+        ├── T1/ (binary: human vs AI, 2 classes)
+        ├── T2/ (model family attribution, 12 classes)
+        └── T3/ (fine-grained detection, 4 classes)
+
+    Always tries the CORRECT task directory first (T2 for aicd_t2, etc.).
+    Falls back to other directories only if the target dir is missing.
     """
-    cfg_map = {"t1":"T1","t2":"T2","t3":"T3"}
-    task_name = cfg_map.get(task.lower(), "T2")
-    task_path = os.path.join(KAGGLE_AICD, task_name)
+    task_map = {"t1": "T1", "t2": "T2", "t3": "T3"}
+    task_name = task_map.get(task.lower(), "T2")
 
-    if os.path.isdir(task_path):
-        parquet_files = sorted(glob.glob(os.path.join(task_path, "**", "*.parquet"), recursive=True))
-        if parquet_files:
-            logger.info(f"[aicd] Loading {task_name} from local: {len(parquet_files)} files")
-            ds = load_dataset("parquet", data_files=parquet_files, split="train")
+    local_base = KAGGLE_AICD
+    # Try correct task dir first, then remaining dirs as fallback
+    dirs_to_try = [task_name] + [d for d in ["T1", "T2", "T3"] if d != task_name]
 
-            if "split" in ds.column_names:
-                try:
-                    tr = ds.filter(lambda x: str(x.get("split","")).lower()=="train")
-                    vl = ds.filter(lambda x: str(x.get("split","")).lower() in {"val","validation","dev"})
-                    ts = ds.filter(lambda x: str(x.get("split","")).lower()=="test")
-                    if len(tr) > 0 and len(vl) > 0 and len(ts) > 0:
-                        return tr, vl, ts
-                except:
-                    pass
-
-            if "validation" in ds.column_names:
-                return ds["train"], ds["validation"], ds["test"]
-            elif "val" in ds.column_names:
-                return ds["train"], ds["val"], ds["test"]
-            else:
+    for t in dirs_to_try:
+        task_path = os.path.join(local_base, t)
+        if os.path.isdir(task_path):
+            parquet_files = sorted(glob.glob(os.path.join(task_path, "**", "*.parquet"), recursive=True))
+            if parquet_files:
+                logger.info(f"[aicd] Loading {t} from local: {task_path} ({len(parquet_files)} files)")
+                ds = load_dataset("parquet", data_files=parquet_files, split="train")
+                # Honour built-in split column if present
+                if "split" in ds.column_names:
+                    try:
+                        tr = ds.filter(lambda x: str(x.get("split", "")).lower() == "train")
+                        vl = ds.filter(lambda x: str(x.get("split", "")).lower() in {"val", "validation", "dev"})
+                        ts = ds.filter(lambda x: str(x.get("split", "")).lower() == "test")
+                        if len(tr) > 0 and len(vl) > 0 and len(ts) > 0:
+                            return tr, vl, ts
+                    except Exception:
+                        pass
+                # Manual 80/10/10 split
                 s = ds.train_test_split(test_size=0.1, seed=42)
                 s2 = s["train"].train_test_split(test_size=1/9, seed=42)
                 return s2["train"], s2["test"], s["test"]
 
-    logger.warning(f"[aicd] Local path not found for {task_name}, trying HuggingFace...")
-    return (load_dataset("AICD-bench/AICD-Bench", name=task_name, split=s) for s in ["train","validation","test"])
+    # Flat fallback: scan entire AICD base dir
+    parquet_files = sorted(glob.glob(os.path.join(local_base, "**", "*.parquet"), recursive=True))
+    if parquet_files:
+        logger.info(f"[aicd] Loading parquet files from base: {local_base}")
+        ds = load_dataset("parquet", data_files=parquet_files, split="train")
+        s = ds.train_test_split(test_size=0.1, seed=42)
+        s2 = s["train"].train_test_split(test_size=1/9, seed=42)
+        return s2["train"], s2["test"], s["test"]
+
+    # Last resort: HuggingFace (requires internet)
+    logger.warning(f"[aicd] Local path not found for {task_name}, trying HuggingFace (requires internet)")
+    return (load_dataset("AICD-bench/AICD-Bench", name=task_name, split=s) for s in ["train", "validation", "test"])
+
 
 def _preflight_check():
     logger.info("="*60)
