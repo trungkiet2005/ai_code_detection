@@ -26,6 +26,8 @@ Config:
 Usage:
   python exp_n09_etf_simplex.py
 """
+from __future__ import annotations
+
 
 # =============================================================================
 # Theory-Track exp — Equiangular Tight Frame Simplex (ETF-Simplex):
@@ -52,7 +54,6 @@ KAGGLE_CODET = "/kaggle/input/datasets/chiboiz/codetm4/dataset_without_comments.
 KAGGLE_DROID = "/kaggle/input/datasets/chiboiz/droid-collection/DroidCollection/data"
 KAGGLE_AICD = "/kaggle/input/datasets/chiboiz/ai-code-detection/AICD-Bench"
 
-from __future__ import annotations
 import os, sys, time, json, random, subprocess, importlib.util, warnings, glob
 from collections import defaultdict
 from dataclasses import dataclass

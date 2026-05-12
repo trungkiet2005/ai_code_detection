@@ -15,6 +15,8 @@ Config:
 Usage:
   python exp00_codet5.py
 """
+from __future__ import annotations
+
 
 # === KAGGLE PATHS ===
 KAGGLE_MODELS = "/kaggle/input/datasets/chiboiz/ai-detection-encoders/models"
@@ -22,7 +24,6 @@ KAGGLE_CODET = "/kaggle/input/datasets/chiboiz/codetm4/dataset_without_comments.
 KAGGLE_DROID = "/kaggle/input/datasets/chiboiz/droid-collection/DroidCollection"
 KAGGLE_AICD = "/kaggle/input/datasets/chiboiz/ai-code-detection/AICD-Bench"
 
-from __future__ import annotations
 import os, sys, time, json, random, subprocess, importlib.util, warnings, glob
 from collections import defaultdict
 from dataclasses import dataclass

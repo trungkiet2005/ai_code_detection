@@ -1,4 +1,4 @@
-"""
+﻿"""
 ================================================================================
 Theory-Track exp -- Kernel Alignment Curriculum (KAC):
 Phase-transition curriculum from our own Theorem 2.
@@ -25,6 +25,8 @@ FALSIFIER     : If the optimal λ_tree does not exhibit a sigmoid transition nea
 exp35_kac.py — Kernel Alignment Curriculum for few-shot AI-code attribution.
 Protocol: fraction-based (1% / 5% / 20%), unixcoder-base only.
 """
+from __future__ import annotations
+
 
 # === KAGGLE PATHS ===
 KAGGLE_MODELS = "/kaggle/input/datasets/chiboiz/ai-detection-encoders/models"
@@ -32,7 +34,6 @@ KAGGLE_CODET = "/kaggle/input/datasets/chiboiz/codetm4/dataset_without_comments.
 KAGGLE_DROID = "/kaggle/input/datasets/chiboiz/droid-collection/DroidCollection/data"
 KAGGLE_AICD = "/kaggle/input/datasets/chiboiz/ai-code-detection/AICD-Bench"
 
-from __future__ import annotations
 import os, sys, time, json, random, subprocess, importlib.util, warnings, glob, math
 from collections import defaultdict
 from dataclasses import dataclass
