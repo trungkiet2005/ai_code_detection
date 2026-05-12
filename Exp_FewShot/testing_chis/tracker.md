@@ -4,14 +4,19 @@
 
 Self-contained experiments for Hier-NTK ablation + published baselines.
 
-**Config for all experiments:**
-- Encoders: `ModernBERT-base`, `unixcoder-base` (2 encoders)
+**Config (updated — unixcoder-only from now on):**
+- Encoder: `unixcoder-base` only (ModernBERT dropped — unixcoder consistently best or equal)
 - Fractions: `0.01`, `0.05`, `0.20` (3 fractions)
-- Benchmarks: `codet_m4` (headline), `aicd_t2` (stress test)
+- Benchmarks: `codet_m4` (headline), `aicd_t2` (stress test, T2 = model-family 12-class)
 - **Droid T3/T4: SKIPPED (per 2026-05-10 directive)**
 - Batch: 256, seq=512
 
-**Total per experiment file:** 12 runs (2 encoders × 2 benchmarks × 3 fractions)
+**Total per experiment file:** 6 runs (1 encoder × 2 benchmarks × 3 fractions)
+
+> ⚠️ **DATA BUG (exp1–exp17 / baseline_01–04 / exp_n05–n16):** Due to a `_load_aicd()` path bug, all AICD
+> results for experiments prior to exp18 were **trained on T1 (binary 2-class)** instead of T2 (12-class).
+> **The AICD-T2 results in the per-benchmark tables below for these experiments are INVALID (actually T1).**
+> Only CoDET-M4 results from those experiments are reliable. Re-runs with correct T2 loading are pending.
 
 ---
 
@@ -28,27 +33,27 @@ Self-contained experiments for Hier-NTK ablation + published baselines.
 
 ## Published Baselines
 
-| File | Method | Paper | Runs |
+| File | Method | Paper | Status |
 |:--|:--|:--|:--|
-| `baseline_01_codet5.py` | CodeT5-Authorship | AISec 2025 / arXiv 2506.17323 | 12 |
-| `baseline_02_detective.py` | DeTeCtive | arXiv 2410.20964 | 12 |
-| `baseline_03_faid.py` | FAID | EACL 2026 | 12 |
-| `baseline_04_style.py` | Style-Repr | arXiv 2401.06712 | 6 (no encoder) |
+| `baseline_01_codet5.py` | CodeT5-Authorship | AISec 2025 / arXiv 2506.17323 | ✅ Active |
+| `baseline_02_detective.py` | DeTeCtive | arXiv 2410.20964 | ✅ Active |
+| `baseline_03_faid.py` | FAID | EACL 2026 | ✅ Active |
+| `legacy/baseline_04_style.py` | Style-Repr | arXiv 2401.06712 | ❌ Legacy (useless: −23.6pts CoDET) |
 
 ---
 
 ## Novel Methods (arxiv-grounded theory)
 
-| File | Method | ArXiv | Runs |
+| File | Method | ArXiv | Status |
 |:--|:--|:--|:--|
-| `exp_n05_focal.py` | Focal-CE | Lin 2017 | 12 |
-| `exp_n06_attn_pool.py` | HAP | Lee 2017 | 12 |
-| `exp_n07_mixup_align.py` | MGA | Arjovsky 2019 | 12 |
-| `exp_n08_ortho_clf.py` | Ortho-CLF | Papyan 2020 | 12 |
-| `exp_n09_etf_simplex.py` | ETF-Simplex | NC theory | 12 |
-| `exp_n10_vib.py` | VIB | Alemi 2017 | 12 |
-| `exp_n11_mixup_ce.py` | Mixup-CE | Zhang 2018 | 12 |
-| `exp_n12_label_smooth.py` | LabelSmooth | Pereyra 2017 | 12 |
+| `exp_n06_attn_pool.py` | HAP | Lee 2017 | ✅ Active |
+| `exp_n07_mixup_align.py` | MGA | Arjovsky 2019 | ✅ Active |
+| `exp_n08_ortho_clf.py` | Ortho-CLF | Papyan 2020 | ✅ Active |
+| `exp_n09_etf_simplex.py` | ETF-Simplex | NC theory | ✅ Active (best novel) |
+| `exp_n12_label_smooth.py` | LabelSmooth | Pereyra 2017 | ✅ Active |
+| `legacy/exp_n05_focal.py` | Focal-CE | Lin 2017 | ❌ Legacy (destroys AICD-T2) |
+| `legacy/exp_n10_vib.py` | VIB | Alemi 2017 | ❌ Legacy (marginal +0.27pts) |
+| `legacy/exp_n11_mixup_ce.py` | Mixup-CE | Zhang 2018 | ❌ Legacy (hurts at 1%/5%) |
 
 ---
 
@@ -155,7 +160,12 @@ Output: `results/Novel/exp*_results.json`
 
 ---
 
-### AICD-T2 (stress test — model-family attribution) — Macro-F1
+### AICD (⚠️ T1-binary data — INVALID for T2; re-run pending) — Macro-F1
+
+> 🚨 **All results below used T1 binary (2-class) data due to `_load_aicd()` bug in exp1–17.**
+> **Do NOT use these for comparison vs T2 (12-class) benchmarks.**
+> These scores look high (~0.93) because binary classification is trivially easy.
+> Re-run with corrected T2 loader is pending for active experiments.
 
 #### 1% Few-Shot
 
