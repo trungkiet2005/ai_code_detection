@@ -206,17 +206,20 @@ Output: `results/Novel/exp*_results.json`
 
 > ✅ **All results below are from unixcoder-base with CORRECT T2 (12-class) loading.**
 
-| Category | Method | Encoder | 1% | 5% | 20% | vs CE 5% |
-|:---------|:-------|:--------|:--:|:--:|:---:|:--------:|
-| **Published** | CodeT5-Authorship | unixcoder | 0.1988 | 0.3160 | 0.4039 | -0.6056 |
-| **Published** | DeTeCtive | unixcoder | 0.2062 | ~0.32 | ~0.41 | ~-0.60 |
-| **Novel** | Mixup-MGA | unixcoder | 0.2262 | 0.3444 | 0.4268 | -0.5774 |
-| **Novel** | ETF-Simplex | unixcoder | 0.2261 | 0.3396 | 0.4130 | -0.5822 |
-| **Novel** | HAP | unixcoder | 0.2127 | 0.3196 | 0.4034 | -0.6022 |
-| **Baseline** | CE baseline | unixcoder | ~0.22 | **0.3216** | ~0.41 | — |
+| Category | Method | 1% | 5% | 20% | Notes |
+|:---------|:-------|:--:|:--:|:---:|:------|
+| **Novel** | LabelSmooth | 0.191 | 0.333 | 0.445 | ✅ Best at 5%/20% |
+| **Novel** | Mixup-CE | 0.190 | 0.326 | 0.443 | |
+| **Novel** | KAC | 0.200 | 0.325 | 0.410 | |
+| **Novel** | SGE | 0.204 | 0.324 | 0.408 | |
+| **Novel** | HPA | 0.194 | 0.319 | 0.407 | |
+| **Novel** | Ortho-CLF | 0.205 | 0.317 | 0.410 | |
+| **Novel** | Focal-CE | 0.191 | 0.306 | 0.392 | |
+| **Published** | CodeT5-Authorship | 0.199 | 0.316 | 0.404 | |
+| **Baseline** | CE baseline | ~0.22 | **0.322** | ~0.41 | |
 
-> 📊 **Key insight:** Published baselines (CodeT5, DeTeCtive) and all novel methods **FAIL badly** on AICD-T2 few-shot (~0.32 at 5%).
-> This confirms the benchmark is genuinely hard for few-shot learning with 12 classes.
+> 📊 **Key insight:** LabelSmooth achieves best AICD-T2 results at 5%/20% (+0.01 over baseline).
+> All methods struggle at 1% few-shot (~0.19-0.21) due to 12-class problem.
 
 ### AICD-T1 (binary: human vs AI) — Macro-F1 [INVALID - historical]
 

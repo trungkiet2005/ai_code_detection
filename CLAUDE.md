@@ -153,6 +153,23 @@ L_htka = 1 - cos(vec(ZZ^T), vec(T))
 | `exp36_mmdg.py` | MMDG | MMD with genealogy-defined kernel | Distribution matching with tree kernel |
 | `exp37_igg.py` | IGG | Natural gradient with genealogy Fisher target | Optimisation geometry from label tree |
 
+**🔬 Dual-Tree Theory Experiments (NEW — AST + Genealogy intersection):**
+
+> **Motivation:** These experiments define NEW mathematical objects that only make sense when combining AST structure (how code is written) with genealogy structure (who wrote it).
+
+| File | Method | New Object | Theory Basis |
+|:--|:--|:--|:--|
+| `exp38_gaka.py` | GAKA | Cross-kernel alignment | Alignment between AST kernel and genealogy kernel |
+| `exp39_sto.py` | STO | Structural Transfer Operator | Transfer AST patterns between generators |
+| `exp40_hcdt.py` | HCDT | Dual-tree contrastive | Positive pairs as INTERSECTION of two trees |
+| `exp41_cfi.py` | CFI | Family invariance | Invariance defined by genealogy tree |
+| `exp42_ssl.py` | SSL | Weighted CE | Error weights from genealogy distance |
+| `exp43_cta.py` | CTA | Genealogical attention | Attention modulated by genealogy |
+| `exp44_sgd.py` | SGD | Unified distance | d_sgd combines AST + Genealogy trees |
+| `exp45_gra.py` | GRA | Genealogical residual | R(x) = AST(x) - E[AST|gene(x)] |
+
+> **Why genuinely novel:** Each requires BOTH AST structure AND genealogy structure.
+
 ### 2.4 Novel Theorems (self-derived for EMNLP Oral)
 
 See detailed statements in §2.4 of the original CLAUDE.md version (theorems 1–3 on kernel alignment bound, phase transition, sibling confusion bound). These are self-derived and represent the Oral-tier contribution.
@@ -387,3 +404,4 @@ Results → `results/expXX_YYY_results.json`.
 - HuggingFace fallback in `_load_aicd` — removed
 - Loss-weight tuning presented as novelty
 - Feature stacking without theory grounding
+
