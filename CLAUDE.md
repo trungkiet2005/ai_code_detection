@@ -10,11 +10,15 @@ alwaysApply: true
 
 ---
 
-## 0. Current submission target — UPDATED 2026-05-12
+## 0. Current submission target — UPDATED 2026-05-13
 
 > **Venue:** EMNLP 2026 Main (long paper, 8 pages). **Reach for Oral.**
 > **Deadline:** ~2026-05-26.
-> **Status (2026-05-12):** Fraction-based few-shot protocol locked; `unixcoder-base` only; active files cleaned up; `_load_aicd` is now STRICT (no fallback).
+> **Status (2026-05-13):** Fraction-based few-shot protocol locked; `unixcoder-base` only;
+> `_load_aicd` STRICT (no fallback); **6 weak Dual-Tree exps refactored into new oral-tier
+> objects (TPNL, BGB, TKE, GIBA, HETE, GFR)**; AST extraction upgraded to legacy-aligned
+> 22-feature structural vector (offline, no tree-sitter dep); GPU pipeline tuned for
+> RTX Pro 6000 (bs=256, seq=512, num_workers=4, **AMP=bfloat16**, TF32 on, cudnn.benchmark).
 
 **Few-Shot Protocol (FINAL as of 2026-05-12):**
 - **Fractions:** `0.01` (1%), `0.05` (5%), `0.20` (20%) of the training split per class
@@ -153,22 +157,47 @@ L_htka = 1 - cos(vec(ZZ^T), vec(T))
 | `exp36_mmdg.py` | MMDG | MMD with genealogy-defined kernel | Distribution matching with tree kernel |
 | `exp37_igg.py` | IGG | Natural gradient with genealogy Fisher target | Optimisation geometry from label tree |
 
-**🔬 Dual-Tree Theory Experiments (NEW — AST + Genealogy intersection):**
+**🔬 Dual-Tree / Genealogy-Aware Experiments (exp38–exp55, post-refactor 2026-05-13):**
 
-> **Motivation:** These experiments define NEW mathematical objects that only make sense when combining AST structure (how code is written) with genealogy structure (who wrote it).
+> **Motivation:** These experiments define NEW mathematical objects that only make sense
+> when combining AST structure (how code is written) with genealogy structure (who wrote it).
+> Six were refactored on 2026-05-13 from generic ML wrappers into genuinely novel
+> tree-conditioned objects (TPNL, BGB, TKE, GIBA, HETE, GFR — see table below).
 
-| File | Method | New Object | Theory Basis |
+| File | Method (in code) | New Object | Theory Basis / Equation |
 |:--|:--|:--|:--|
-| `exp38_gaka.py` | GAKA | Cross-kernel alignment | Alignment between AST kernel and genealogy kernel |
-| `exp39_sto.py` | STO | Structural Transfer Operator | Transfer AST patterns between generators |
-| `exp40_hcdt.py` | HCDT | Dual-tree contrastive | Positive pairs as INTERSECTION of two trees |
-| `exp41_cfi.py` | CFI | Family invariance | Invariance defined by genealogy tree |
-| `exp42_ssl.py` | SSL | Weighted CE | Error weights from genealogy distance |
-| `exp43_cta.py` | CTA | Genealogical attention | Attention modulated by genealogy |
-| `exp44_sgd.py` | SGD | Unified distance | d_sgd combines AST + Genealogy trees |
-| `exp45_gra.py` | GRA | Genealogical residual | R(x) = AST(x) - E[AST|gene(x)] |
+| `exp38_gaka.py` | GAKA | Cross-kernel alignment | `L = 1 − ⟨K_AST, K_GENE⟩_F / √(‖K_AST‖²·‖K_GENE‖²)` |
+| `exp39_sto.py` | STO | Structural Transfer Operator | Transfer AST patterns weighted by tree distance |
+| `exp40_hcdt.py` | **TPNL** *(was HCDT)* | Tree-Path Negative Lifting | InfoNCE w/ neg weights `exp(−α·d_tree(y_p, y_n))` |
+| `exp41_cfi.py` | CFI | Code-Family Invariance | Invariance loss for AST-preserving perturbation |
+| `exp42_ssl.py` | SSL | Sibling-Sensitive weighted CE | Per-sample CE × genealogy-distance weight matrix |
+| `exp43_cta.py` | **BGB** *(was CTA)* | Batch Genealogy Bridge | Cross-sample attn modulated by `exp(−α·d_tree)` |
+| `exp44_sgd.py` | **TKE** *(was SGD)* | Tree-Kernel Embedding (Bourgain) | `L = E[(‖z_i−z_j‖² − β·d_tree(y_i,y_j))²]` |
+| `exp45_gra.py` | GRA | Genealogical residual | `R(x) = AST(x) − E[AST \| gene(x)]` |
+| `exp46_cie.py` | CIE | Backdoor adjustment | `P(Y \| do(AST)) = Σ_s P(Y \| AST, S=s)·P(S=s)` |
+| `exp47_ift.py` | **GIBA** *(was IFT)* | Genealogy InfoNCE Bottleneck | `CE − μ·I_NCE(z;fam) + ν·I_CLUB(z;src) + β·KL` |
+| `exp48_dtr.py` | **HETE** *(was DTR)* | Heterogeneous Treatment Effects | `logit_y = base_y(φ) + Σ_k T_k(x)·τ_k(φ, y)` |
+| `exp49_paca.py` | PAC-A | PAC-Bayes bound | Gaussian posterior + KL(Q‖P) regularisation |
+| `exp50_sie.py` | SIE | Structural Invariance Equation | Z_2 sign-flip group action averaged over views |
+| `exp51_frc.py` | FRC | Functional Representation Consistency | `‖proj_auth(emb) − proj_func(emb)‖²` |
+| `exp52_cpo.py` | CPO | Counterfactual Permutation | Triplet-margin on AST-swapped counterfactuals |
+| `exp53_rce.py` | RCE | Representation Causal Effect | Learnable causal gates on sem/ast components |
+| `exp54_rde.py` | **GFR** *(was RDE)* | Genealogy-Factorized Representation | β-TCVAE + FactorVAE TC disc + family supervision on z_sty |
+| `exp55_irm.py` | IRM | Invariant Risk Minimization | `‖∇_w R(w·φ)‖²` penalty via `torch.autograd.grad` |
 
-> **Why genuinely novel:** Each requires BOTH AST structure AND genealogy structure.
+> **Why genuinely novel:** Each requires either BOTH AST + genealogy structure, or a
+> tree-conditioned mathematical object that is undefined when labels lack metric structure.
+
+**🚨 Refactor manifest (2026-05-13) — 6 weak methods promoted to oral-tier objects:**
+
+| Old (weak, in commit ≤ 87317ce) | New (oral-tier, in commit 1a5d3c5) | What was broken |
+|:--|:--|:--|
+| exp40 HCDT (non-canonical loss, O(B²) Python loop) | **TPNL** Tree-Path Negative Lifting | Loss = `−pos_term`, not real InfoNCE |
+| exp43 CTA (per-sample `.item()` compat scalar) | **BGB** Batch Genealogy Bridge | Genealogy multiplier detached from autograd |
+| exp44 SGD (Python `gene_distance` loop, ad-hoc α) | **TKE** Tree-Kernel Embedding | No metric anchoring; only positive margin |
+| exp47 IFT (correlation, not MI) | **GIBA** Genealogy InfoNCE Bottleneck | Fake MI = `‖z·s‖`; no real estimator |
+| exp48 DTR (trivial scalar τ per feature) | **HETE** Heterogeneous Treatment Effects | No class-conditional treatment effects |
+| exp54 RDE (3 KL terms, no real independence) | **GFR** Genealogy-Factorized Representation | No TC penalty, no genealogy anchor on z_sty |
 
 ### 2.4 Novel Theorems (self-derived for EMNLP Oral)
 
@@ -203,14 +232,19 @@ See detailed statements in §2.4 of the original CLAUDE.md version (theorems 1�
 | **DroidCollection T3/T4** | SKIPPED (per 2026-05-10 directive) | — | — |
 | **AICD T1/T3** | Limitation / appendix only | — | T1 has known val→test collapse |
 
-**Protocol (non-negotiable, as of 2026-05-12):**
+**Protocol (non-negotiable, as of 2026-05-13):**
 - Encoder: `unixcoder-base` only
 - Fractions: `[0.01, 0.05, 0.20]`
 - Benchmarks: `codet_m4`, `aicd_t2`
 - **`_load_aicd()` is STRICT:** `FileNotFoundError` if target task dir missing. NO fallback to other tasks. NO HuggingFace fallback.
+- **All model + tokenizer loads:** `local_files_only=True` (offline). Paths only from `KAGGLE_*` constants.
+- **AMP:** `torch.autocast(device_type='cuda', dtype=torch.bfloat16)` — native on Ada (RTX Pro 6000), avoids GradScaler overflow.
+- **DataLoader:** `num_workers=4`, `pin_memory=True`, `bs=256`, `seq=512` (auto-down-scaled by `_hw(cfg)` if VRAM < 40 GB).
+- **AST features:** legacy-aligned 22-feature structural vector (`extract_ast_features`, mirrors `legacy/Exp_DM_weak/exp06_ast_irm.py::extract_structural_features`), padded to `max_len`. No tree-sitter.
 - Train separate model per benchmark. Never mix.
 - Report the full metric pack: Primary, Macro-F1, Weighted-F1, per-class.
 - **Final evaluation is always on TEST set** (val set used only for checkpoint selection).
+- **Always report val-test gap** (per repo-rules hook).
 
 **JSON Output Schema (simplified for fraction protocol):**
 ```json
@@ -232,7 +266,7 @@ See detailed statements in §2.4 of the original CLAUDE.md version (theorems 1�
 }
 ```
 
-## 7. Repo layout (post-cleanup 2026-05-12)
+## 7. Repo layout (post-refactor 2026-05-13)
 
 ```
 ai_code_detection/
@@ -269,7 +303,36 @@ ai_code_detection/
 │       ├── exp26_graph.py              # GNA (Graph Neural Attribution)
 │       ├── exp27_cmixup.py             # CMA (Family-aware Mixup)
 │       ├── exp28_spectral.py           # SCL (Spectral Contrastive)
-│       └── exp29_causal_trace.py       # CFT (Causal Feature Tracing)
+│       ├── exp29_causal_trace.py       # CFT (Causal Feature Tracing)
+│       │
+│       │  # === ORAL-TIER NOVEL (single-tree, exp31–37) ===
+│       ├── exp31_got.py                # GOT (OT w/ tree ground cost)
+│       ├── exp32_spectral_gene.py      # SGE (Laplacian eigvecs of label graph)
+│       ├── exp33_renyi.py              # RAD (Rényi-α, regime-dependent)
+│       ├── exp34_hyper_proto.py        # HPA (Poincaré-ball prototypes)
+│       ├── exp35_kac.py                # KAC (phase-transition curriculum)
+│       ├── exp36_mmdg.py               # MMDG (MMD w/ genealogy kernel)
+│       ├── exp37_igg.py                # IGG (natural grad w/ genealogy Fisher)
+│       │
+│       │  # === DUAL-TREE + ORAL-TIER REFACTORS (exp38–exp55) ===
+│       ├── exp38_gaka.py               # GAKA  cross-kernel alignment
+│       ├── exp39_sto.py                # STO   structural transfer operator
+│       ├── exp40_hcdt.py               # TPNL  tree-path negative lifting (refactored 2026-05-13)
+│       ├── exp41_cfi.py                # CFI   code-family invariance
+│       ├── exp42_ssl.py                # SSL   sibling-sensitive weighted CE (grad fix 2026-05-13)
+│       ├── exp43_cta.py                # BGB   batch genealogy bridge (refactored 2026-05-13)
+│       ├── exp44_sgd.py                # TKE   tree-kernel embedding (refactored 2026-05-13)
+│       ├── exp45_gra.py                # GRA   genealogical residual
+│       ├── exp46_cie.py                # CIE   backdoor adjustment (dim fix 2026-05-13)
+│       ├── exp47_ift.py                # GIBA  genealogy InfoNCE bottleneck (refactored 2026-05-13)
+│       ├── exp48_dtr.py                # HETE  heterogeneous treatment effects (refactored 2026-05-13)
+│       ├── exp49_paca.py               # PAC-A PAC-Bayes (grad fix 2026-05-13)
+│       ├── exp50_sie.py                # SIE   Z_2 sign-flip group invariance (crash fix 2026-05-13)
+│       ├── exp51_frc.py                # FRC   functional representation consistency
+│       ├── exp52_cpo.py                # CPO   counterfactual permutation (method fix 2026-05-13)
+│       ├── exp53_rce.py                # RCE   representation causal effect
+│       ├── exp54_rde.py                # GFR   genealogy-factorized representation (refactored 2026-05-13)
+│       └── exp55_irm.py                # IRM   invariant risk minimization
 ├── Paper/                              # EMNLP 2026 submission
 │   ├── outline.md
 │   └── latex/main.tex
@@ -330,10 +393,14 @@ Results → `results/expXX_YYY_results.json`.
 
 ### Add a new experiment
 1. Write the 6-line theory block (NAME / ARXIV_ID / EQUATION / PROPERTY / WHY NOT BEFORE / FALSIFIER).
-2. Copy closest active `exp_nXX_*.py`. Change only the method-specific loss.
+2. Copy closest active `exp_nXX_*.py` or one of the oral-tier refactors (`exp40_hcdt` for TPNL-style contrastive, `exp43_cta` for BGB-style batch attention, `exp44_sgd` for TKE-style metric, `exp47_ift` for GIBA-style InfoNCE-MI, `exp48_dtr` for HETE-style per-class CATE, `exp54_rde` for GFR-style disentanglement). Change only the method-specific loss / model.
 3. Use fraction-based `build_dls(cfg)` with `cfg.frac`. Do NOT use `FIXED_TOTAL_TRAIN`.
 4. Use `unixcoder-base` as the encoder. Do NOT add ModernBERT.
-5. Register in tracker.md after run.
+5. `from_pretrained(..., local_files_only=True)` for both `AutoModel` and `AutoTokenizer`.
+6. Wrap forward+loss in `torch.autocast(device_type='cuda', dtype=torch.bfloat16, enabled=(cfg.device == 'cuda'))`.
+7. Use `num_workers=4`, `pin_memory=True` in `DataLoader`.
+8. Match the `_hw(cfg)`, `=== {tag} ===`, `[epoch N] val=...`, and single-combined-JSON save pattern from `exp_n19_detective_lite.py` / `exp40_hcdt.py`.
+9. Register in tracker.md after run with val + test + Δ.
 
 ### Conventions
 - Experiment IDs never reused.
@@ -360,7 +427,7 @@ Results → `results/expXX_YYY_results.json`.
 - `legacy/` is archived. Do not import from it.
 - Large negative Δ on AICD T1 is expected (val→test collapse). §6 Limitations only.
 
-## 13. Cold-start checklist (2026-05-12)
+## 13. Cold-start checklist (2026-05-13)
 
 1. Read §0 (protocol, data bug warning) and §8 (locked numbers).
 2. Open [Exp_FewShot/testing_chis/tracker.md](Exp_FewShot/testing_chis/tracker.md) — current leaderboard.
@@ -368,26 +435,41 @@ Results → `results/expXX_YYY_results.json`.
 4. Active files are in §7 layout. Only edit files listed there.
 5. If asked about AICD results: **only results from exp18+ (with correct T2 loader) are valid**. Earlier runs were T1 binary.
 6. `Exp_Climb/`, `Exp_CodeDet/`, `Exp_DM/` are FROZEN. Do not add new experiments there.
+7. **2026-05-13 refactor note:** if you see `HCDT`, `CTA`, `SGD`, `IFT`, `DTR`, or `RDE`
+   referenced in old PRs / tracker rows, they have been refactored in-place to
+   **TPNL / BGB / TKE / GIBA / HETE / GFR** respectively. Files keep the same expNN ID
+   (`exp40_hcdt.py` etc.) but the `method` field in JSON output, the JSON filename
+   (`exp40_tpnl_results.json`), and the in-code logger name (`exp40_tpnl`) reflect the
+   new object. See §2.3 refactor manifest.
+8. **GPU:** code is tuned for RTX Pro 6000 (96 GB Ada). `_hw(cfg)` auto-down-scales for
+   smaller VRAM. AMP is `bf16` (no GradScaler dependence even if `GradScaler(enabled=False)`
+   is still constructed).
 
 ## 14. Decision rules (what NOT to do unprompted)
 
 - **Never** add a new method to `Exp_Climb/` / `Exp_CodeDet/` / `Exp_DM/` without user approval.
 - **Never** re-open Zero-Shot work — archived for −32pt reproduction gap.
 - **Never** add `dirs_to_try` fallback or HuggingFace fallback to `_load_aicd()`.
+- **Never** drop `local_files_only=True` from `AutoModel.from_pretrained` / `AutoTokenizer.from_pretrained`.
+- **Never** revert AMP back to fp16 + GradScaler on RTX Pro 6000 — bf16 is preferred (no scaler overhead, wider dynamic range).
+- **Never** re-introduce the per-tag JSON save inside `run_exp` (one combined `{expNN_method}_results.json` per file, all 6 rows).
 - **Never** quote AICD numbers from exp1–17 as T2 results — they are T1 (binary).
 - **Always** report val-test gap alongside test metrics.
 - **Always** use fraction sampling, not fixed sample count.
+- **Always** match the legacy-aligned `extract_ast_features` schema (22 features, padded) — do not regress to the 12-feature stub.
 
-## 15. Exp_FewShot/testing_chis rules (active suite, 2026-05-12)
+## 15. Exp_FewShot/testing_chis rules (active suite, 2026-05-13)
 
 ### Protocol
-- Encoder: `unixcoder-base` only
+- Encoder: `unixcoder-base` only (loaded with `local_files_only=True`)
 - Fractions: `[0.01, 0.05, 0.20]`
 - Benchmarks: `codet_m4`, `aicd_t2` (T2 = 12-class model-family)
 - Sampling: per-class fraction sampling (not fixed total)
-- `_load_aicd` STRICT — no fallback
+- `_load_aicd` STRICT — no fallback, no HF download
+- AMP: `bfloat16` autocast; `DataLoader(num_workers=4, pin_memory=True)`
+- AST: 22-feature legacy-aligned `extract_ast_features` (no tree-sitter)
 
-### Active file inventory
+### Active file inventory (updated 2026-05-13)
 
 | Category | Files | Notes |
 |:--|:--|:--|
@@ -395,6 +477,9 @@ Results → `results/expXX_YYY_results.json`.
 | Ours | `exp_n13`, `n14`, `n15`, `n16` | HierTree, NTK, Hier-NTK, CE-base |
 | Top-3 Novel | `exp_n06`, `n07`, `n09` | HAP, MGA, ETF-Simplex |
 | Rescued theory | `exp20`, `25`, `26`, `27`, `28`, `29` | Fraction protocol, no FIXED_TOTAL |
+| Oral-tier single-tree | `exp31–exp37` | GOT, SGE, RAD, HPA, KAC, MMDG, IGG |
+| Dual-tree + oral-tier refactors | `exp38–exp55` | See §2.3; 6 of these (40/43/44/47/48/54) refactored 2026-05-13 |
+| Reference loader/log style | `exp_n19_detective_lite.py` | Match for new files |
 | Legacy (inactive) | `testing_chis/legacy/*.py` | Do not run |
 
 ### Anti-patterns
@@ -402,6 +487,50 @@ Results → `results/expXX_YYY_results.json`.
 - `ModernBERT-base` as encoder — dropped
 - `dirs_to_try` fallback in `_load_aicd` — replaced by STRICT loader
 - HuggingFace fallback in `_load_aicd` — removed
+- Missing `local_files_only=True` on `from_pretrained` — banned
+- `torch.autocast(...)` without `dtype=torch.bfloat16` — banned for new files
+- `num_workers <= 2` for fraction-protocol training — banned (use 4)
+- Per-tag JSON save inside `run_exp` — replaced by ONE combined `{expNN_method}_results.json`
+- Python `O(B²)` pairwise loops with `.item()` — vectorise (see TPNL, TKE, BGB)
+- `weights = torch.zeros_like(...)` then index-assign grad-tracked product — gradient is **detached**; use `(no_grad_w * grad_x).mean()` instead (see exp42 SSL fix)
 - Loss-weight tuning presented as novelty
 - Feature stacking without theory grounding
+- 12-feature regex AST stub — replaced by 22-feature legacy-aligned extractor
+
+## 16. GPU + AMP (RTX Pro 6000, 96 GB Ada Lovelace SM89)
+
+**Tuned defaults (all 18 files in `testing_chis/exp{38..55}*.py`):**
+
+| Setting | Value | Why |
+|:--|:--|:--|
+| `bs` | 256 | unixcoder-base (~125M params) at seq=512 uses ~15 GB / step — comfortable on 96 GB |
+| `seq` | 512 | matches paper-protocol; `_hw(cfg)` auto-down-scales if VRAM < 40 GB |
+| `num_workers` | 4 | matches Kaggle CPU cap; avoids IO bottleneck without oversubscription |
+| `pin_memory` | True | required for true zero-copy host→device |
+| AMP | `torch.autocast(device_type='cuda', dtype=torch.bfloat16)` | Ada native bf16; no fp16 scaler overflow risk |
+| `GradScaler` | constructed but effectively inert under bf16 | left in to keep `scaler.scale/step/update` call sites unchanged |
+| `cudnn.benchmark` | True | seq-len fixed → kernel autotuning gives 10-20% speedup |
+| `cuda.matmul.allow_tf32` | True | TF32 matmul on Ampere/Ada |
+| `cudnn.allow_tf32` | True | TF32 conv on Ampere/Ada |
+| `PYTORCH_CUDA_ALLOC_CONF` | `expandable_segments:True` | reduces fragmentation across the 6 runs / file |
+
+`_hw(cfg)` ladder (auto-selected by VRAM):
+- ≥ 40 GB → `bs=256, seq=512`
+- ≥ 10 GB → `bs=128, seq=384`
+- else   → `bs=64,  seq=256`
+
+## 17. Bug-fix audit log (2026-05-13, commit `1a5d3c5`)
+
+| File | Severity | What was broken | Fix |
+|:--|:--|:--|:--|
+| `exp42_ssl.py` | HIGH (grad) | `weights = torch.zeros_like(ce); weights[i] = w * ce[i]` — index-assign into a non-grad tensor detached gradient → SSL term was dead | Replace with `(sample_w * ce).mean()` where `sample_w` is no-grad and `ce` carries grad. |
+| `exp46_cie.py` | HIGH (dim) | `SourceEncoder(n_sources)` passed `n_sources` into `embed_dim` slot → `adjust_net` input dim mismatched downstream | Refactored to `SourceEncoder(n_sources, embed_dim)`; `use_adjustment=False` path now marginalises via uniform source prior. |
+| `exp47_ift.py` | MED (logic) | `estimate_mi(z_ast, source_ids, source_ids)` passed source twice; labels never reached MI estimator | Added `labels` to `forward` signature, plumbed through `train_epoch`. Later refactored to GIBA with real InfoNCE-MI critic + CLUB upper bound. |
+| `exp48_dtr.py` | HIGH (dim) | `self.proj = nn.Linear(hidden + ast_dim + n_treatments, …)` but `fused` was `cat([sem_proj(128), ast_emb(64), tau(9)])` | Fixed input dim to `128 + ast_dim + n_treatments`; later refactored to HETE per-class CATE. |
+| `exp49_paca.py` | HIGH (NameError) | `torch.randn_like(self.weight_std)` and `self.bias_std` referenced attrs that did not exist | Use local `weight_std = self.weight_log_std.exp()` and `bias_std = self.bias_log_std.exp()`. |
+| `exp50_sie.py` | HIGH (crash + dead reg) | `apply_group=True` branch called `GroupInvariantPool((B, D))` instead of `(B, G, D)` → dim crash at epoch ≥ 2; `logits_aug` always `None` → invariance reg dead | Replaced with real Z_2 sign-flip group action: `h_inv = (1/|G|) Σ_g f(g·h)`. |
+| `exp52_cpo.py` | HIGH (method dead) | `cpo_loss(..., emb_cf=None, labels_cf=None)` always; counterfactual reg always 0; loss sign wrong | Train loop now permutes `ast_feat` within batch, computes `emb_cf` via second forward, `cpo_loss` is triplet-margin (same-label pull, diff-label push). |
+| `exp52_cpo.py` | LOW (install) | `_ensure("sklearn")` is wrong pip name | Changed to `_ensure("scikit-learn")`. |
+| All 18 (style) | MED (consistency) | mixed `bs=64` vs `bs=256`; `num_workers=2`; fp16 + GradScaler | Standardised to bs=256, num_workers=4, bf16 autocast; `_hw(cfg)` logs `[hw] mem=…GB bs=… seq=…`. |
+| All 18 (logging) | MED (consistency) | Per-tag JSON save inside `run_exp`; no summary table; errors swallowed | Replaced with single combined JSON per file + summary table; `main()` logs `=== {tag} ===`, `[epoch N] val=…`, `[{tag}] MacroF1=… ({Δ:+.4f} vs paper)`. |
 
