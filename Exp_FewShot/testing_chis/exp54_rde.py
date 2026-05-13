@@ -1,28 +1,26 @@
 # =============================================================================
-# Theory-Track exp -- HCDT (Hierarchical Contrastive over Dual Trees):
+# Theory-Track exp -- RDE (Representation Disentanglement Effect):
 #
-# ARXIV_ID      : THIS IS NEW - no prior work defines contrastive learning over
-#                 the INTERSECTION of AST tree and genealogy tree
-# NAME          : HCDT (Hierarchical Contrastive over Dual Trees)
-# ONE-LINE CLAIM: Positive pairs are defined by BOTH AST structural similarity AND
-#                 genealogical proximity; this dual-tree contrastive loss creates
-#                 representations where code clusters reflect both structures.
-# EQUATION      : L_hcdt = -log exp(⟨z_i, z_j⟩/τ) / Σ_k exp(⟨z_i, z_k⟩/τ)
-#                 where (i,j) is positive iff AST_dist(i,j) < δ_AST AND gene_dist(i,j) < δ_GENE
-# PROPERTY      : Only samples that are similar in BOTH trees form positive pairs.
-#                 This creates a representation space where the dual-tree topology is embedded.
-# WHY NOT BEFORE: Standard contrastive learning uses ONE similarity structure.
-#                 HCDT is defined over the INTERSECTION of two trees, creating a new
-#                 mathematical object only meaningful when both structures exist.
-# FALSIFIER     : If HCDT representations outperform single-tree contrastive,
-#                 then both AST and genealogy structures are necessary for attribution.
+# ARXIV_ID      : THIS IS NEW - disentangling authorship factors into independent
+#                 representation subspaces
+# NAME          : RDE (Representation Disentanglement Effect)
+# ONE-LINE CLAIM: Authorship representation is decomposed into independent factors
+#                 (syntax, semantics, style) via VAE-like disentanglement.
+# EQUATION      : h(x) = [z_syntax, z_semantic, z_style]
+#                 where each z_i is independent: I(z_i, z_j) = 0 for i ≠ j
+# PROPERTY      : Disentangled representations are more interpretable and robust
+#                 because each factor can be independently manipulated.
+# WHY NOT BEFORE: Standard representations are entangled.
+#                 RDE provides interpretable, controllable authorship factors.
+# FALSIFIER     : If disentangled representations improve OOD robustness,
+#                 then factorization is key to understanding attribution.
 # =============================================================================
 from __future__ import annotations
 
 import os, sys, time, json, random, subprocess, importlib.util, warnings, glob
 from collections import defaultdict
 from dataclasses import dataclass
-from typing import Dict, List, Tuple
+from typing import List, Dict
 
 os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
 
@@ -31,7 +29,7 @@ def _ensure(pkg):
         subprocess.check_call([sys.executable, "-m", "pip", "install", "-q", pkg])
 
 _ensure("numpy"); _ensure("torch"); _ensure("datasets")
-_ensure("transformers"); _ensure("scikit-learn"); _ensure("tqdm")
+_ensure("transformers"); _ensure("sklearn"); _ensure("tqdm")
 
 import numpy as np
 import torch, torch.nn as nn, torch.nn.functional as F
@@ -45,58 +43,32 @@ from torch.cuda.amp import autocast, GradScaler
 warnings.filterwarnings("ignore")
 import logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s", stream=sys.stdout)
-logger = logging.getLogger("exp40")
+logger = logging.getLogger("exp54")
 
 PAPER_BASELINE = 0.6633
 
 # =============================================================================
-# NEW MATHEMATICAL OBJECT: Hierarchical Contrastive over Dual Trees (HCDT)
+# NEW MATHEMATICAL OBJECT: Representation Disentanglement Effect (RDE)
 # =============================================================================
 """
-HCDT defines positive pairs as the INTERSECTION of AST similarity and genealogy proximity.
+RDE decomposes authorship representation into independent factors.
 
-Standard contrastive: positive if same class
-HCDT: positive if (AST_similar AND genealogy_close)
+h(x) = [z_syntax, z_semantic, z_style]
 
-Mathematically:
-    P_{hcdt}(i,j) = 1[AST_dist(i,j) < δ_AST ∧ Gene_dist(i,j) < δ_GENE]
+Key properties:
+- Each factor captures a distinct aspect of authorship
+- Factors are statistically independent: I(z_i, z_j) = 0 for i ≠ j
+- Manipulating one factor changes only that aspect
 
-This creates a representation where:
-- Close neighbors share BOTH AST structure AND genealogy
-- Distant samples differ in BOTH structures
-- The representation space topology reflects the dual-tree structure
+The total correlation loss enforces:
+TC(z) = KL(p(z) || Π_i p(z_i))
 
-KEY INSIGHT: This is NOT just "multi-view contrastive". It's defined over
-the STRUCTURAL INTERSECTION of two trees, creating a new topological object.
+Minimizing TC encourages factorization of the representation.
 """
 
 # =============================================================================
-# Genealogy Structures
+# AST Feature Extraction
 # =============================================================================
-
-GENE_ADJ_CODET = {
-    0: [], 1: [3], 2: [], 3: [1], 4: [], 5: []
-}
-
-GENE_ADJ_AICD = {i: [(i//3)*3 + j for j in range(3) if (i//3)*3 + j != i] for i in range(12)}
-
-
-def gene_distance(u: int, v: int, adj: Dict[int, List[int]]) -> float:
-    """Compute genealogical distance via BFS."""
-    if u == v:
-        return 0.0
-    queue = [(u, 0)]
-    visited = {u}
-    while queue:
-        curr, d = queue.pop(0)
-        for neighbor in adj.get(curr, []):
-            if neighbor == v:
-                return d + 1.0
-            if neighbor not in visited:
-                visited.add(neighbor)
-                queue.append((neighbor, d + 1))
-    return float('inf')
-
 
 def extract_ast_features(code: str, max_len: int = 128) -> List[float]:
     """Extract AST structural features without tree-sitter dependency.
@@ -158,128 +130,135 @@ def extract_ast_features(code: str, max_len: int = 128) -> List[float]:
 
 
 # =============================================================================
-# HCDT Positive Pair Definition
+# RDE Model with Disentanglement
 # =============================================================================
 
-class DualTreePositivePairs:
-    """Defines positive pairs as intersection of AST similarity and genealogy proximity.
+class DisentangledEncoder(nn.Module):
+    """VAE-style encoder with factorized latent space."""
+    def __init__(self, in_dim: int, z_syntax: int = 32, z_semantic: int = 64, z_style: int = 32):
+        super().__init__()
+        self.z_syntax = z_syntax
+        self.z_semantic = z_semantic
+        self.z_style = z_style
 
-    This is NOT standard contrastive learning. Positive pairs are defined by:
-    P(i,j) = 1[AST_dist(i,j) < δ_AST AND Gene_dist(i,j) < δ_GENE]
-    """
-    def __init__(self, ast_threshold: float = 0.3, gene_threshold: float = 1.0,
-                 gene_adj: Dict[int, List[int]] = None, n_cls: int = 6):
-        self.ast_threshold = ast_threshold
-        self.gene_threshold = gene_threshold
-        self.gene_adj = gene_adj or GENE_ADJ_CODET
-        self.n_cls = n_cls
+        # Shared encoder
+        self.shared = nn.Sequential(
+            nn.Linear(in_dim, 256),
+            nn.GELU(),
+        )
 
-    def ast_distance(self, feat1: torch.Tensor, feat2: torch.Tensor) -> float:
-        """Compute AST structural distance."""
-        return F.mse_loss(feat1, feat2).item()
+        # Factorized priors
+        self.syntax_head = nn.Linear(256, z_syntax * 2)  # mu, logvar
+        self.semantic_head = nn.Linear(256, z_semantic * 2)
+        self.style_head = nn.Linear(256, z_style * 2)
 
-    def gene_distance_func(self, u: int, v: int) -> float:
-        """Compute genealogical distance."""
-        return gene_distance(u, v, self.gene_adj)
+    def reparameterize(self, mu, logvar):
+        std = (0.5 * logvar).exp()
+        eps = torch.randn_like(std)
+        return mu + eps * std
 
-    def is_positive_pair(self, ast_feat1: torch.Tensor, ast_feat2: torch.Tensor,
-                        label1: int, label2: int) -> bool:
-        """Check if (i,j) is a positive pair under dual-tree criterion."""
-        ast_dist = self.ast_distance(ast_feat1, ast_feat2)
-        gene_dist = self.gene_distance_func(label1, label2)
-        return (ast_dist < self.ast_threshold) and (gene_dist <= self.gene_threshold)
+    def forward(self, x):
+        h = self.shared(x)
+
+        # Syntax factor
+        syntax_out = self.syntax_head(h)
+        mu_s, lv_s = syntax_out[:, :self.z_syntax], syntax_out[:, self.z_syntax:]
+        z_syntax = self.reparameterize(mu_s, lv_s)
+
+        # Semantic factor
+        sem_out = self.semantic_head(h)
+        mu_sem, lv_sem = sem_out[:, :self.z_semantic], sem_out[:, self.z_semantic:]
+        z_semantic = self.reparameterize(mu_sem, lv_sem)
+
+        # Style factor
+        style_out = self.style_head(h)
+        mu_st, lv_st = style_out[:, :self.z_style], style_out[:, self.z_style:]
+        z_style = self.reparameterize(mu_st, lv_st)
+
+        # Total correlation (simplified: sum of KLs)
+        kl_syntax = -0.5 * (1 + lv_s - mu_s.pow(2) - lv_s.exp()).sum(-1).mean()
+        kl_semantic = -0.5 * (1 + lv_sem - mu_sem.pow(2) - lv_sem.exp()).sum(-1).mean()
+        kl_style = -0.5 * (1 + lv_st - mu_st.pow(2) - lv_st.exp()).sum(-1).mean()
+
+        kl_total = kl_syntax + kl_semantic + kl_style
+
+        return z_syntax, z_semantic, z_style, kl_total
+
+    def extract_mean(self, x):
+        """Extract mean without sampling (for inference)."""
+        h = self.shared(x)
+
+        syntax_out = self.syntax_head(h)
+        z_syntax = syntax_out[:, :self.z_syntax]
+
+        sem_out = self.semantic_head(h)
+        z_semantic = sem_out[:, :self.z_semantic]
+
+        style_out = self.style_head(h)
+        z_style = style_out[:, :self.z_style]
+
+        return z_syntax, z_semantic, z_style
 
 
-# =============================================================================
-# Model
-# =============================================================================
-
-class HCDTModel(nn.Module):
-    """Hierarchical Contrastive over Dual Trees model."""
-    def __init__(self, enc_name: str, n_cls: int, tau: float = 0.07, ast_dim: int = 64):
+class RDEModel(nn.Module):
+    """Representation Disentanglement Effect model."""
+    def __init__(self, enc_name: str, n_cls: int, z_syntax: int = 32,
+                 z_semantic: int = 64, z_style: int = 32):
         super().__init__()
         self.encoder = AutoModel.from_pretrained(os.path.join(KAGGLE_MODELS, enc_name), local_files_only=True)
         hidden = self.encoder.config.hidden_size
-        self.tau = tau
 
-        self.ast_encoder = nn.Sequential(
-            nn.Linear(64, 128),
+        # Disentangled encoders
+        self.ast_disentangler = DisentangledEncoder(64, z_syntax, z_semantic, z_style)
+
+        # Semantic encoder
+        self.sem_encoder = nn.Sequential(
+            nn.Linear(hidden, 256),
             nn.GELU(),
-            nn.Linear(128, ast_dim)
         )
+
+        # Classifier on disentangled representation
+        total_z = z_syntax + z_semantic + z_style
         self.proj = nn.Sequential(
-            nn.Linear(hidden + ast_dim, 256),
+            nn.Linear(total_z + 256, 256),
             nn.GELU(),
-            nn.Linear(256, 128)
+            nn.Dropout(0.1)
         )
-        self.clf = nn.Linear(128, n_cls)
+        self.clf = nn.Linear(256, n_cls)
 
-    def forward(self, ids, mask, ast_feat):
+    def forward(self, ids, mask, ast_feat, sample=True):
+        # Semantic encoding
         out = self.encoder(input_ids=ids, attention_mask=mask)
         sem_emb = (out.last_hidden_state * mask.unsqueeze(-1)).sum(1) / mask.sum(1, keepdim=True).clamp(min=1)
-        ast_emb = self.ast_encoder(ast_feat)
-        fused = torch.cat([sem_emb, ast_emb], dim=-1)
-        proj = self.proj(fused)
-        logits = self.clf(proj)
-        return logits, proj
+        sem = self.sem_encoder(sem_emb)
+
+        # Disentangled AST factors
+        if sample:
+            z_syntax, z_semantic, z_style, kl = self.ast_disentangler(ast_feat)
+        else:
+            z_syntax, z_semantic, z_style = self.ast_disentangler.extract_mean(ast_feat)
+            kl = torch.tensor(0.0, device=ast_feat.device)
+
+        # Combine
+        z = torch.cat([z_syntax, z_semantic, z_style], dim=-1)
+        fused = torch.cat([z, sem], dim=-1)
+        h = self.proj(fused)
+        logits = self.clf(h)
+
+        return logits, kl
 
 
 # =============================================================================
-# HCDT Loss
+# RDE Loss
 # =============================================================================
 
-def compute_hcdt_loss(emb: torch.Tensor, ast_feat: torch.Tensor,
-                    labels: torch.Tensor, dt_pairs: DualTreePositivePairs,
-                    tau: float = 0.07) -> Tuple[torch.Tensor, torch.Tensor]:
-    """Compute HCDT contrastive loss.
+def rde_loss(logits, kl, labels, lambda_rde=0.1):
+    """RDE loss with disentanglement regularization."""
+    ce = F.cross_entropy(logits, labels)
 
-    Positive pairs: both AST similar AND genealogy close
-    Negative pairs: rest
-    """
-    B = emb.shape[0]
-    device = emb.device
-
-    # Normalize embeddings
-    emb = F.normalize(emb, dim=-1)
-
-    # Compute all pairwise similarities
-    sim = torch.mm(emb, emb.T) / tau  # (B, B)
-
-    # Build positive mask: dual-tree criterion
-    pos_mask = torch.zeros(B, B, device=device)
-    for i in range(B):
-        for j in range(B):
-            if i == j:
-                continue
-            # Check dual-tree criterion
-            ast_dist = F.mse_loss(ast_feat[i], ast_feat[j]).item()
-            gene_dist = gene_distance(labels[i].item(), labels[j].item(), dt_pairs.gene_adj)
-            if (ast_dist < dt_pairs.ast_threshold) and (gene_dist <= dt_pairs.gene_threshold):
-                pos_mask[i, j] = 1.0
-
-    # Numerical stability
-    sim_max, _ = sim.max(dim=1, keepdim=True)
-    sim = sim - sim_max.detach()
-
-    # Exp and mask
-    exp_sim = torch.exp(sim)
-    exp_sim = exp_sim * (1 - torch.eye(B, device=device))  # Zero diagonal
-
-    # Denominator: sum of all exp similarities
-    denom = exp_sim.sum(dim=1, keepdim=True) + 1e-8
-
-    # Positive term
-    pos_exp = exp_sim * pos_mask
-    pos_term = (pos_exp.sum(dim=1) / (pos_mask.sum(dim=1) + 1e-8)).mean()
-
-    # Loss
-    loss = -pos_term
-
-    # Statistics
-    n_pos = pos_mask.sum().item()
-    alignment = pos_exp.diagonal().mean().item() if n_pos > 0 else 0.0
-
-    return loss, alignment
+    # Disentanglement: minimize total correlation
+    # Higher KL = better separation of factors
+    return ce + lambda_rde * kl, ce.item(), kl.item()
 
 
 # =============================================================================
@@ -305,18 +284,9 @@ class Cfg:
     lr_proj: float = 1e-4
     lr_head: float = 1e-4
     wd: float = 0.01
-    lambda_hcdt: float = 0.3
-    tau: float = 0.07
-    ast_threshold: float = 0.3
-    gene_threshold: float = 1.0
+    lambda_rde: float = 0.1
     warmup: float = 0.1
     device: str = "cuda"
-
-    def __post_init__(self):
-        if self.benchmark == "codet_m4":
-            self.gene_adj = GENE_ADJ_CODET
-        else:
-            self.gene_adj = GENE_ADJ_AICD
 
 
 def _hw(cfg):
@@ -440,9 +410,9 @@ class FSDS(TD):
         }
 
 
-def train_epoch(model, loader, opt, sch, scaler, cfg, dt_pairs):
+def train_epoch(model, loader, opt, sch, scaler, cfg, sample=True):
     model.train()
-    total_loss, total_ce, total_hcdt = 0, 0, 0
+    total_loss, total_ce, total_kl = 0, 0, 0
 
     for b in tqdm(loader, desc="Train"):
         ids = b["ids"].to(cfg.device)
@@ -451,10 +421,8 @@ def train_epoch(model, loader, opt, sch, scaler, cfg, dt_pairs):
         labs = b["label"].to(cfg.device)
 
         with torch.autocast(device_type='cuda', enabled=(cfg.device == "cuda")):
-            logits, emb = model(ids, mask, ast_feat)
-            loss_ce = F.cross_entropy(logits, labs)
-            loss_hcdt, _ = compute_hcdt_loss(emb, ast_feat, labs, dt_pairs, cfg.tau)
-            loss = loss_ce + cfg.lambda_hcdt * loss_hcdt
+            logits, kl = model(ids, mask, ast_feat, sample=sample)
+            loss, ce, kl_val = rde_loss(logits, kl, labs, cfg.lambda_rde)
 
         scaler.scale(loss).backward()
         scaler.unscale_(opt)
@@ -465,11 +433,11 @@ def train_epoch(model, loader, opt, sch, scaler, cfg, dt_pairs):
         sch.step()
 
         total_loss += loss.item()
-        total_ce += loss_ce.item()
-        total_hcdt += loss_hcdt.item()
+        total_ce += ce
+        total_kl += kl_val
 
     n = len(loader)
-    return total_loss / n, total_ce / n, total_hcdt / n
+    return total_loss / n, total_ce / n, total_kl / n
 
 
 @torch.no_grad()
@@ -482,7 +450,7 @@ def eval_model(model, loader, cfg):
         ast_feat = b["ast_feat"].to(cfg.device)
         labs = b["label"]
 
-        logits, _ = model(ids, mask, ast_feat)
+        logits, _ = model(ids, mask, ast_feat, sample=False)
         preds.extend(logits.argmax(dim=-1).cpu().tolist())
         labels.extend(labs.tolist())
 
@@ -498,14 +466,7 @@ def eval_model(model, loader, cfg):
 def run_exp(cfg: Cfg, tag: str):
     set_seed(cfg.seed)
     cfg = _hw(cfg)
-    logger.info(f"[exp40] HCDT: {tag} | frac={cfg.frac}")
-
-    dt_pairs = DualTreePositivePairs(
-        ast_threshold=cfg.ast_threshold,
-        gene_threshold=cfg.gene_threshold,
-        gene_adj=cfg.gene_adj,
-        n_cls=cfg.n_cls
-    )
+    logger.info(f"[exp54] RDE: {tag} | frac={cfg.frac}")
 
     if cfg.benchmark == "codet_m4":
         tr_raw, vl_raw, ts_raw = _load_codet()
@@ -532,27 +493,28 @@ def run_exp(cfg: Cfg, tag: str):
     vl_dl = DataLoader(vl_ds, shuffle=False, **loader_cfg)
     ts_dl = DataLoader(ts_ds, shuffle=False, **loader_cfg)
 
-    model = HCDTModel(cfg.enc, cfg.n_cls, cfg.tau).to(cfg.device)
+    model = RDEModel(cfg.enc, cfg.n_cls).to(cfg.device)
 
     opt = torch.optim.AdamW([
         {"params": model.encoder.parameters(), "lr": cfg.lr_enc},
-        {"params": model.ast_encoder.parameters(), "lr": cfg.lr_proj},
+        {"params": model.ast_disentangler.parameters(), "lr": cfg.lr_proj},
+        {"params": model.sem_encoder.parameters(), "lr": cfg.lr_proj},
         {"params": model.proj.parameters(), "lr": cfg.lr_proj},
         {"params": model.clf.parameters(), "lr": cfg.lr_head}
     ], weight_decay=cfg.wd)
 
     total_steps = len(tr_dl) * cfg.epochs
     sch = torch.optim.lr_scheduler.OneCycleLR(
-        opt, max_lr=[cfg.lr_enc, cfg.lr_proj, cfg.lr_proj, cfg.lr_head],
+        opt, max_lr=[cfg.lr_enc, cfg.lr_proj, cfg.lr_proj, cfg.lr_proj, cfg.lr_head],
         total_steps=total_steps, pct_start=cfg.warmup
     )
     scaler = GradScaler()
 
     best_val, best_state = 0, None
     for epoch in range(cfg.epochs):
-        loss, loss_ce, loss_hcdt = train_epoch(model, tr_dl, opt, sch, scaler, cfg, dt_pairs)
+        loss, loss_ce, loss_kl = train_epoch(model, tr_dl, opt, sch, scaler, cfg, sample=True)
         val_met = eval_model(model, vl_dl, cfg)
-        logger.info(f"  E{epoch+1}: loss={loss:.4f} ce={loss_ce:.4f} hcdt={loss_hcdt:.4f} | val={val_met['macro']:.4f}")
+        logger.info(f"  E{epoch+1}: loss={loss:.4f} ce={loss_ce:.4f} kl={loss_kl:.4f} | val={val_met['macro']:.4f}")
         if val_met["macro"] > best_val:
             best_val = val_met["macro"]
             best_state = {k: v.cpu().clone() for k, v in model.state_dict().items()}
@@ -564,7 +526,7 @@ def run_exp(cfg: Cfg, tag: str):
 
     result = {
         "tag": tag,
-        "method": "HCDT",
+        "method": "RDE",
         "enc": cfg.enc,
         "bench": cfg.benchmark,
         "frac": cfg.frac,
@@ -592,7 +554,7 @@ def main():
     for bench, task, n_cls in benchmarks:
         for frac in fracs:
             cfg = Cfg(benchmark=bench, task=task, enc=enc, frac=frac, n_cls=n_cls)
-            tag = f"exp40_hcdt_{enc}_{bench}_f{frac:.2f}"
+            tag = f"exp54_rde_{enc}_{bench}_f{frac:.2f}"
             try:
                 r = run_exp(cfg, tag)
                 logger.info(f"  RESULT: {tag} | macro={r['macro']:.4f} Δ={r['dpaper']:+.4f}")

@@ -1,4 +1,3 @@
-"""
 # =============================================================================
 # Theory-Track exp -- CTA (Cross-Tree Attention):
 #
@@ -210,7 +209,7 @@ class CTAModel(nn.Module):
     def __init__(self, enc_name: str, n_cls: int, n_heads: int = 4,
                  gene_compat: torch.Tensor = None):
         super().__init__()
-        self.encoder = AutoModel.from_pretrained(enc_name)
+        self.encoder = AutoModel.from_pretrained(os.path.join(KAGGLE_MODELS, enc_name), local_files_only=True)
         hidden = self.encoder.config.hidden_size
 
         # CTA layer
@@ -244,19 +243,32 @@ class CTAModel(nn.Module):
 # AST Features (auxiliary)
 # =============================================================================
 
-def extract_ast_features(code: str, max_len: int = 64) -> List[float]:
-    """Extract AST structural features."""
+def extract_ast_features(code: str, max_len: int = 128) -> List[float]:
+    """Extract AST structural features without tree-sitter dependency.
+
+    Features capture hierarchical code structure:
+    - Function/class definitions
+    - Control flow patterns
+    - Nesting depth
+    - Loop structures
+    """
     import re
+
     features = []
+
+    # Count patterns that indicate structure
     n_func = len(re.findall(r'\b(def|function|func|fn)\s+\w+', code))
     n_class = len(re.findall(r'\b(class|struct|interface|enum)\s+\w+', code))
     n_if = len(re.findall(r'\bif\s*[\(\{]', code))
     n_for = len(re.findall(r'\b(for|foreach)\s*[\(\{]', code))
     n_while = len(re.findall(r'\bwhile\s*[\(\{]', code))
     n_return = len(re.findall(r'\breturn\b', code))
-    n_import = len(re.findall(r'\b(import|from|include)\b', code))
+    n_import = len(re.findall(r'\b(import|from|include|require)\b', code))
+    n_comment = len(re.findall(r'(//|#|/\*|\'\'\'|""")', code))
 
-    max_depth, depth = 0, 0
+    # Nesting depth estimation
+    max_depth = 0
+    depth = 0
     for c in code:
         if c in '{([':
             depth += 1
@@ -264,13 +276,29 @@ def extract_ast_features(code: str, max_len: int = 64) -> List[float]:
         elif c in '})]':
             depth = max(0, depth - 1)
 
+    # Line statistics
+    lines = code.split('\n')
+    avg_indent = np.mean([len(l) - len(l.lstrip()) for l in lines if l.strip()]) if lines else 0
+
     features = [
-        n_func / 10.0, n_class / 5.0, n_if / 20.0, n_for / 10.0,
-        n_while / 10.0, n_return / 20.0, n_import / 10.0, max_depth / 15.0,
+        n_func / 10.0,
+        n_class / 5.0,
+        n_if / 20.0,
+        n_for / 10.0,
+        n_while / 10.0,
+        n_return / 20.0,
+        n_import / 10.0,
+        n_comment / 50.0,
+        max_depth / 15.0,
+        avg_indent / 10.0,
         len(code) / 10000.0,
+        len(lines) / 500.0,
     ]
+
+    # Pad to fixed length
     while len(features) < max_len:
         features.append(0.0)
+
     return features[:max_len]
 
 
@@ -433,7 +461,7 @@ def train_epoch(model, loader, opt, sch, scaler, cfg):
         mask = b["mask"].to(cfg.device)
         labs = b["label"].to(cfg.device)
 
-        with torch.autocast(device_type='cuda', enabled=(cfg.device.type == "cuda")):
+        with torch.autocast(device_type='cuda', enabled=(cfg.device == "cuda")):
             logits = model(ids, mask, labs)
             loss = F.cross_entropy(logits, labs)
 
@@ -492,7 +520,7 @@ def run_exp(cfg: Cfg, tag: str):
         vl_data = _conv_aicd(vl_raw)
         ts_data = _conv_aicd(ts_raw)
 
-    tok = AutoTokenizer.from_pretrained(cfg.enc)
+    tok = AutoTokenizer.from_pretrained(os.path.join(KAGGLE_MODELS, cfg.enc), local_files_only=True)
 
     tr_ds = FSDS(tr_data, tok, cfg.seq, frac=cfg.frac, seed=cfg.seed)
     vl_ds = FSDS(vl_data, tok, cfg.seq, frac=1.0, seed=cfg.seed + 1)

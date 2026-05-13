@@ -1,28 +1,26 @@
 # =============================================================================
-# Theory-Track exp -- HCDT (Hierarchical Contrastive over Dual Trees):
+# Theory-Track exp -- PAC-A (PAC-Bayes Authorship bound):
 #
-# ARXIV_ID      : THIS IS NEW - no prior work defines contrastive learning over
-#                 the INTERSECTION of AST tree and genealogy tree
-# NAME          : HCDT (Hierarchical Contrastive over Dual Trees)
-# ONE-LINE CLAIM: Positive pairs are defined by BOTH AST structural similarity AND
-#                 genealogical proximity; this dual-tree contrastive loss creates
-#                 representations where code clusters reflect both structures.
-# EQUATION      : L_hcdt = -log exp(⟨z_i, z_j⟩/τ) / Σ_k exp(⟨z_i, z_k⟩/τ)
-#                 where (i,j) is positive iff AST_dist(i,j) < δ_AST AND gene_dist(i,j) < δ_GENE
-# PROPERTY      : Only samples that are similar in BOTH trees form positive pairs.
-#                 This creates a representation space where the dual-tree topology is embedded.
-# WHY NOT BEFORE: Standard contrastive learning uses ONE similarity structure.
-#                 HCDT is defined over the INTERSECTION of two trees, creating a new
-#                 mathematical object only meaningful when both structures exist.
-# FALSIFIER     : If HCDT representations outperform single-tree contrastive,
-#                 then both AST and genealogy structures are necessary for attribution.
+# ARXIV_ID      : THIS IS NEW - using PAC-Bayes theory to bound the
+#                 generalization error of authorship classifiers
+# NAME          : PAC-A (PAC-Bayes Authorship bound)
+# ONE-LINE CLAIM: The PAC-Bayes bound provides a principled certificate of
+#                 OOD generalization that is tighter than VC-dimension bounds.
+# EQUATION      : E_gen ≤ E_emp + sqrt((KL(Q||P) + ln(m/δ)) / 2m)
+#                 where Q is the posterior, P is the prior, m is sample size.
+# PROPERTY      : Minimizing the PAC-Bayes bound simultaneously minimizes
+#                 the expected generalization gap.
+# WHY NOT BEFORE: Standard empirical risk minimization has no generalization
+#                 guarantees. PAC-A provides a theoretical certificate.
+# FALSIFIER     : If the empirical gap correlates with the PAC-Bayes bound,
+#                 then the bound is informative for authorship generalization.
 # =============================================================================
 from __future__ import annotations
 
 import os, sys, time, json, random, subprocess, importlib.util, warnings, glob
 from collections import defaultdict
 from dataclasses import dataclass
-from typing import Dict, List, Tuple
+from typing import List, Dict
 
 os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
 
@@ -45,58 +43,32 @@ from torch.cuda.amp import autocast, GradScaler
 warnings.filterwarnings("ignore")
 import logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s", stream=sys.stdout)
-logger = logging.getLogger("exp40")
+logger = logging.getLogger("exp49")
 
 PAPER_BASELINE = 0.6633
 
 # =============================================================================
-# NEW MATHEMATICAL OBJECT: Hierarchical Contrastive over Dual Trees (HCDT)
+# NEW MATHEMATICAL OBJECT: PAC-Bayes Authorship bound (PAC-A)
 # =============================================================================
 """
-HCDT defines positive pairs as the INTERSECTION of AST similarity and genealogy proximity.
+PAC-Bayes theory provides generalization bounds for stochastic classifiers.
 
-Standard contrastive: positive if same class
-HCDT: positive if (AST_similar AND genealogy_close)
+For a prior P(w) and posterior Q(w) on weights, with m training samples:
 
-Mathematically:
-    P_{hcdt}(i,j) = 1[AST_dist(i,j) < δ_AST ∧ Gene_dist(i,j) < δ_GENE]
+E_gen ≤ E_emp(Q) + sqrt((KL(Q||P) + ln(2√m/δ)) / 2m)
 
-This creates a representation where:
-- Close neighbors share BOTH AST structure AND genealogy
-- Distant samples differ in BOTH structures
-- The representation space topology reflects the dual-tree structure
+Key insight: We can minimize the PAC-Bayes bound by:
+1. Minimizing empirical risk on training data
+2. Minimizing KL divergence from prior (regularization)
+3. This gives principled generalization guarantees
 
-KEY INSIGHT: This is NOT just "multi-view contrastive". It's defined over
-the STRUCTURAL INTERSECTION of two trees, creating a new topological object.
+The PAC-Bayes bound is tighter than VC-dimension bounds because it
+leverages the specific structure of the hypothesis space.
 """
 
 # =============================================================================
-# Genealogy Structures
+# AST Feature Extraction
 # =============================================================================
-
-GENE_ADJ_CODET = {
-    0: [], 1: [3], 2: [], 3: [1], 4: [], 5: []
-}
-
-GENE_ADJ_AICD = {i: [(i//3)*3 + j for j in range(3) if (i//3)*3 + j != i] for i in range(12)}
-
-
-def gene_distance(u: int, v: int, adj: Dict[int, List[int]]) -> float:
-    """Compute genealogical distance via BFS."""
-    if u == v:
-        return 0.0
-    queue = [(u, 0)]
-    visited = {u}
-    while queue:
-        curr, d = queue.pop(0)
-        for neighbor in adj.get(curr, []):
-            if neighbor == v:
-                return d + 1.0
-            if neighbor not in visited:
-                visited.add(neighbor)
-                queue.append((neighbor, d + 1))
-    return float('inf')
-
 
 def extract_ast_features(code: str, max_len: int = 128) -> List[float]:
     """Extract AST structural features without tree-sitter dependency.
@@ -158,128 +130,120 @@ def extract_ast_features(code: str, max_len: int = 128) -> List[float]:
 
 
 # =============================================================================
-# HCDT Positive Pair Definition
+# PAC-Bayes Model
 # =============================================================================
 
-class DualTreePositivePairs:
-    """Defines positive pairs as intersection of AST similarity and genealogy proximity.
+class PACBayesLinear(nn.Module):
+    """Linear layer with Gaussian posterior approximation."""
+    def __init__(self, in_features: int, out_features: int, prior_std: float = 0.1):
+        super().__init__()
+        self.in_features = in_features
+        self.out_features = out_features
+        self.prior_std = prior_std
 
-    This is NOT standard contrastive learning. Positive pairs are defined by:
-    P(i,j) = 1[AST_dist(i,j) < δ_AST AND Gene_dist(i,j) < δ_GENE]
-    """
-    def __init__(self, ast_threshold: float = 0.3, gene_threshold: float = 1.0,
-                 gene_adj: Dict[int, List[int]] = None, n_cls: int = 6):
-        self.ast_threshold = ast_threshold
-        self.gene_threshold = gene_threshold
-        self.gene_adj = gene_adj or GENE_ADJ_CODET
-        self.n_cls = n_cls
+        # Posterior parameters
+        self.weight_mu = nn.Parameter(torch.randn(out_features, in_features) * 0.01)
+        self.weight_log_std = nn.Parameter(torch.full((out_features, in_features), np.log(prior_std)))
 
-    def ast_distance(self, feat1: torch.Tensor, feat2: torch.Tensor) -> float:
-        """Compute AST structural distance."""
-        return F.mse_loss(feat1, feat2).item()
+        self.bias_mu = nn.Parameter(torch.zeros(out_features))
+        self.bias_log_std = nn.Parameter(torch.full((out_features,), np.log(prior_std)))
 
-    def gene_distance_func(self, u: int, v: int) -> float:
-        """Compute genealogical distance."""
-        return gene_distance(u, v, self.gene_adj)
+    def forward(self, x, sample=True):
+        if sample:
+            # Sample weights from posterior
+            weight_std = self.weight_log_std.exp()
+            bias_std = self.bias_log_std.exp()
 
-    def is_positive_pair(self, ast_feat1: torch.Tensor, ast_feat2: torch.Tensor,
-                        label1: int, label2: int) -> bool:
-        """Check if (i,j) is a positive pair under dual-tree criterion."""
-        ast_dist = self.ast_distance(ast_feat1, ast_feat2)
-        gene_dist = self.gene_distance_func(label1, label2)
-        return (ast_dist < self.ast_threshold) and (gene_dist <= self.gene_threshold)
+            weight = self.weight_mu + torch.randn_like(self.weight_std) * self.weight_std if hasattr(self, 'weight_std') else self.weight_mu
+            bias = self.bias_mu + torch.randn_like(self.bias_std) * self.bias_std if hasattr(self, 'bias_std') else self.bias_mu
+
+            # Compute with sampled weights
+            return F.linear(x, weight, bias)
+        else:
+            # Use mean for inference
+            return F.linear(x, self.weight_mu, self.bias_mu)
+
+    def kl_divergence(self):
+        """Compute KL(Q||P) for Gaussian weights."""
+        prior_var = self.prior_std ** 2
+
+        # KL for weights
+        var_sum = self.weight_log_std.exp().pow(2).sum()
+        mu_sq_sum = (self.weight_mu ** 2).sum()
+        kl_weights = 0.5 * (var_sum / prior_var + mu_sq_sum / prior_var
+                          - self.weight_mu.numel()
+                          + self.weight_mu.numel() * np.log(prior_var)
+                          - var_sum.sum().log())
+
+        # KL for biases
+        var_sum_b = self.bias_log_std.exp().pow(2).sum()
+        mu_sq_sum_b = (self.bias_mu ** 2).sum()
+        kl_biases = 0.5 * (var_sum_b / prior_var + mu_sq_sum_b / prior_var
+                          - self.bias_mu.numel()
+                          + self.bias_mu.numel() * np.log(prior_var)
+                          - var_sum_b.sum().log())
+
+        return kl_weights + kl_biases
 
 
-# =============================================================================
-# Model
-# =============================================================================
-
-class HCDTModel(nn.Module):
-    """Hierarchical Contrastive over Dual Trees model."""
-    def __init__(self, enc_name: str, n_cls: int, tau: float = 0.07, ast_dim: int = 64):
+class PACAModel(nn.Module):
+    """PAC-Bayes Authorship model."""
+    def __init__(self, enc_name: str, n_cls: int, prior_std: float = 0.1, ast_dim: int = 64):
         super().__init__()
         self.encoder = AutoModel.from_pretrained(os.path.join(KAGGLE_MODELS, enc_name), local_files_only=True)
         hidden = self.encoder.config.hidden_size
-        self.tau = tau
 
+        # AST encoder for structural features
         self.ast_encoder = nn.Sequential(
             nn.Linear(64, 128),
             nn.GELU(),
             nn.Linear(128, ast_dim)
         )
-        self.proj = nn.Sequential(
-            nn.Linear(hidden + ast_dim, 256),
-            nn.GELU(),
-            nn.Linear(256, 128)
-        )
-        self.clf = nn.Linear(128, n_cls)
 
-    def forward(self, ids, mask, ast_feat):
+        # PAC-Bayes projection (semantic + AST)
+        combined_dim = hidden + ast_dim
+        self.proj = PACBayesLinear(combined_dim, 256, prior_std)
+        self.clf = PACBayesLinear(256, n_cls, prior_std)
+        self.n_cls = n_cls
+
+    def forward(self, ids, mask, ast_feat, sample=True):
+        # Semantic encoding
         out = self.encoder(input_ids=ids, attention_mask=mask)
         sem_emb = (out.last_hidden_state * mask.unsqueeze(-1)).sum(1) / mask.sum(1, keepdim=True).clamp(min=1)
+
+        # AST encoding
         ast_emb = self.ast_encoder(ast_feat)
-        fused = torch.cat([sem_emb, ast_emb], dim=-1)
-        proj = self.proj(fused)
-        logits = self.clf(proj)
-        return logits, proj
+
+        # Combine semantic and structural
+        combined = torch.cat([sem_emb, ast_emb], dim=-1)
+
+        h = F.gelu(self.proj(combined, sample=sample))
+        logits = self.clf(h, sample=sample)
+
+        return logits
+
+    def kl_divergence(self):
+        """Total KL divergence from prior."""
+        return self.proj.kl_divergence() + self.clf.kl_divergence()
 
 
 # =============================================================================
-# HCDT Loss
+# PAC-A Loss
 # =============================================================================
 
-def compute_hcdt_loss(emb: torch.Tensor, ast_feat: torch.Tensor,
-                    labels: torch.Tensor, dt_pairs: DualTreePositivePairs,
-                    tau: float = 0.07) -> Tuple[torch.Tensor, torch.Tensor]:
-    """Compute HCDT contrastive loss.
+def pac_a_loss(logits, labels, kl, m, delta=0.05, lambda_pac=0.5):
+    """PAC-Bayes Authorship loss.
 
-    Positive pairs: both AST similar AND genealogy close
-    Negative pairs: rest
+    L_pac = E_emp + sqrt((KL + ln(2√m/δ)) / 2m)
+
+    We use a differentiable upper bound for optimization.
     """
-    B = emb.shape[0]
-    device = emb.device
+    ce = F.cross_entropy(logits, labels)
 
-    # Normalize embeddings
-    emb = F.normalize(emb, dim=-1)
+    # PAC-Bayes bound (upper bound)
+    pac_bound = ce + torch.sqrt((kl + np.log(2 * np.sqrt(m) / delta)) / (2 * m))
 
-    # Compute all pairwise similarities
-    sim = torch.mm(emb, emb.T) / tau  # (B, B)
-
-    # Build positive mask: dual-tree criterion
-    pos_mask = torch.zeros(B, B, device=device)
-    for i in range(B):
-        for j in range(B):
-            if i == j:
-                continue
-            # Check dual-tree criterion
-            ast_dist = F.mse_loss(ast_feat[i], ast_feat[j]).item()
-            gene_dist = gene_distance(labels[i].item(), labels[j].item(), dt_pairs.gene_adj)
-            if (ast_dist < dt_pairs.ast_threshold) and (gene_dist <= dt_pairs.gene_threshold):
-                pos_mask[i, j] = 1.0
-
-    # Numerical stability
-    sim_max, _ = sim.max(dim=1, keepdim=True)
-    sim = sim - sim_max.detach()
-
-    # Exp and mask
-    exp_sim = torch.exp(sim)
-    exp_sim = exp_sim * (1 - torch.eye(B, device=device))  # Zero diagonal
-
-    # Denominator: sum of all exp similarities
-    denom = exp_sim.sum(dim=1, keepdim=True) + 1e-8
-
-    # Positive term
-    pos_exp = exp_sim * pos_mask
-    pos_term = (pos_exp.sum(dim=1) / (pos_mask.sum(dim=1) + 1e-8)).mean()
-
-    # Loss
-    loss = -pos_term
-
-    # Statistics
-    n_pos = pos_mask.sum().item()
-    alignment = pos_exp.diagonal().mean().item() if n_pos > 0 else 0.0
-
-    return loss, alignment
+    return pac_bound, ce.item(), kl.item()
 
 
 # =============================================================================
@@ -305,18 +269,11 @@ class Cfg:
     lr_proj: float = 1e-4
     lr_head: float = 1e-4
     wd: float = 0.01
-    lambda_hcdt: float = 0.3
-    tau: float = 0.07
-    ast_threshold: float = 0.3
-    gene_threshold: float = 1.0
+    lambda_pac: float = 0.5
+    prior_std: float = 0.1
+    delta: float = 0.05
     warmup: float = 0.1
     device: str = "cuda"
-
-    def __post_init__(self):
-        if self.benchmark == "codet_m4":
-            self.gene_adj = GENE_ADJ_CODET
-        else:
-            self.gene_adj = GENE_ADJ_AICD
 
 
 def _hw(cfg):
@@ -440,9 +397,9 @@ class FSDS(TD):
         }
 
 
-def train_epoch(model, loader, opt, sch, scaler, cfg, dt_pairs):
+def train_epoch(model, loader, opt, sch, scaler, cfg, m):
     model.train()
-    total_loss, total_ce, total_hcdt = 0, 0, 0
+    total_loss, total_ce, total_kl = 0, 0, 0
 
     for b in tqdm(loader, desc="Train"):
         ids = b["ids"].to(cfg.device)
@@ -451,10 +408,9 @@ def train_epoch(model, loader, opt, sch, scaler, cfg, dt_pairs):
         labs = b["label"].to(cfg.device)
 
         with torch.autocast(device_type='cuda', enabled=(cfg.device == "cuda")):
-            logits, emb = model(ids, mask, ast_feat)
-            loss_ce = F.cross_entropy(logits, labs)
-            loss_hcdt, _ = compute_hcdt_loss(emb, ast_feat, labs, dt_pairs, cfg.tau)
-            loss = loss_ce + cfg.lambda_hcdt * loss_hcdt
+            logits = model(ids, mask, ast_feat, sample=True)
+            kl = model.kl_divergence()
+            loss, ce, kl_val = pac_a_loss(logits, labs, kl, m, cfg.delta, cfg.lambda_pac)
 
         scaler.scale(loss).backward()
         scaler.unscale_(opt)
@@ -465,11 +421,11 @@ def train_epoch(model, loader, opt, sch, scaler, cfg, dt_pairs):
         sch.step()
 
         total_loss += loss.item()
-        total_ce += loss_ce.item()
-        total_hcdt += loss_hcdt.item()
+        total_ce += ce
+        total_kl += kl_val
 
     n = len(loader)
-    return total_loss / n, total_ce / n, total_hcdt / n
+    return total_loss / n, total_ce / n, total_kl / n
 
 
 @torch.no_grad()
@@ -482,7 +438,8 @@ def eval_model(model, loader, cfg):
         ast_feat = b["ast_feat"].to(cfg.device)
         labs = b["label"]
 
-        logits, _ = model(ids, mask, ast_feat)
+        # Use mean (no sampling) for evaluation
+        logits = model(ids, mask, ast_feat, sample=False)
         preds.extend(logits.argmax(dim=-1).cpu().tolist())
         labels.extend(labs.tolist())
 
@@ -498,14 +455,7 @@ def eval_model(model, loader, cfg):
 def run_exp(cfg: Cfg, tag: str):
     set_seed(cfg.seed)
     cfg = _hw(cfg)
-    logger.info(f"[exp40] HCDT: {tag} | frac={cfg.frac}")
-
-    dt_pairs = DualTreePositivePairs(
-        ast_threshold=cfg.ast_threshold,
-        gene_threshold=cfg.gene_threshold,
-        gene_adj=cfg.gene_adj,
-        n_cls=cfg.n_cls
-    )
+    logger.info(f"[exp49] PAC-A: {tag} | frac={cfg.frac}")
 
     if cfg.benchmark == "codet_m4":
         tr_raw, vl_raw, ts_raw = _load_codet()
@@ -532,7 +482,7 @@ def run_exp(cfg: Cfg, tag: str):
     vl_dl = DataLoader(vl_ds, shuffle=False, **loader_cfg)
     ts_dl = DataLoader(ts_ds, shuffle=False, **loader_cfg)
 
-    model = HCDTModel(cfg.enc, cfg.n_cls, cfg.tau).to(cfg.device)
+    model = PACAModel(cfg.enc, cfg.n_cls, cfg.prior_std).to(cfg.device)
 
     opt = torch.optim.AdamW([
         {"params": model.encoder.parameters(), "lr": cfg.lr_enc},
@@ -548,11 +498,13 @@ def run_exp(cfg: Cfg, tag: str):
     )
     scaler = GradScaler()
 
+    m = len(tr_ds)  # Sample size for PAC-Bayes bound
+
     best_val, best_state = 0, None
     for epoch in range(cfg.epochs):
-        loss, loss_ce, loss_hcdt = train_epoch(model, tr_dl, opt, sch, scaler, cfg, dt_pairs)
+        loss, loss_ce, loss_kl = train_epoch(model, tr_dl, opt, sch, scaler, cfg, m)
         val_met = eval_model(model, vl_dl, cfg)
-        logger.info(f"  E{epoch+1}: loss={loss:.4f} ce={loss_ce:.4f} hcdt={loss_hcdt:.4f} | val={val_met['macro']:.4f}")
+        logger.info(f"  E{epoch+1}: loss={loss:.4f} ce={loss_ce:.4f} kl={loss_kl:.4f} | val={val_met['macro']:.4f}")
         if val_met["macro"] > best_val:
             best_val = val_met["macro"]
             best_state = {k: v.cpu().clone() for k, v in model.state_dict().items()}
@@ -564,7 +516,7 @@ def run_exp(cfg: Cfg, tag: str):
 
     result = {
         "tag": tag,
-        "method": "HCDT",
+        "method": "PAC-A",
         "enc": cfg.enc,
         "bench": cfg.benchmark,
         "frac": cfg.frac,
@@ -592,7 +544,7 @@ def main():
     for bench, task, n_cls in benchmarks:
         for frac in fracs:
             cfg = Cfg(benchmark=bench, task=task, enc=enc, frac=frac, n_cls=n_cls)
-            tag = f"exp40_hcdt_{enc}_{bench}_f{frac:.2f}"
+            tag = f"exp49_paca_{enc}_{bench}_f{frac:.2f}"
             try:
                 r = run_exp(cfg, tag)
                 logger.info(f"  RESULT: {tag} | macro={r['macro']:.4f} Δ={r['dpaper']:+.4f}")

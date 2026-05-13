@@ -1,28 +1,28 @@
 # =============================================================================
-# Theory-Track exp -- HCDT (Hierarchical Contrastive over Dual Trees):
+# Theory-Track exp -- FRC (Functional Representation Consistency):
 #
-# ARXIV_ID      : THIS IS NEW - no prior work defines contrastive learning over
-#                 the INTERSECTION of AST tree and genealogy tree
-# NAME          : HCDT (Hierarchical Contrastive over Dual Trees)
-# ONE-LINE CLAIM: Positive pairs are defined by BOTH AST structural similarity AND
-#                 genealogical proximity; this dual-tree contrastive loss creates
-#                 representations where code clusters reflect both structures.
-# EQUATION      : L_hcdt = -log exp(⟨z_i, z_j⟩/τ) / Σ_k exp(⟨z_i, z_k⟩/τ)
-#                 where (i,j) is positive iff AST_dist(i,j) < δ_AST AND gene_dist(i,j) < δ_GENE
-# PROPERTY      : Only samples that are similar in BOTH trees form positive pairs.
-#                 This creates a representation space where the dual-tree topology is embedded.
-# WHY NOT BEFORE: Standard contrastive learning uses ONE similarity structure.
-#                 HCDT is defined over the INTERSECTION of two trees, creating a new
-#                 mathematical object only meaningful when both structures exist.
-# FALSIFIER     : If HCDT representations outperform single-tree contrastive,
-#                 then both AST and genealogy structures are necessary for attribution.
+# ARXIV_ID      : THIS IS NEW - enforcing consistency between code function
+#                 and authorship representation
+# NAME          : FRC (Functional Representation Consistency)
+# ONE-LINE CLAIM: The authorship representation should be consistent with
+#                 the functional behavior of code, measured via execution traces.
+# EQUATION      : ||h(x) - g(f(x))||² → 0
+#                 where h = authorship encoder, g = functional projector,
+#                 f = code execution trace extractor.
+# PROPERTY      : Representations that encode functional behavior are more
+#                 robust because they capture what the code DOES, not just
+#                 how it LOOKS.
+# WHY NOT BEFORE: Standard representations ignore code execution.
+#                 FRC bridges behavioral and syntactic representations.
+# FALSIFIER     : If FRC-consistent representations are more robust to
+#                 syntactic perturbations, functional semantics is key.
 # =============================================================================
 from __future__ import annotations
 
 import os, sys, time, json, random, subprocess, importlib.util, warnings, glob
 from collections import defaultdict
 from dataclasses import dataclass
-from typing import Dict, List, Tuple
+from typing import List, Dict
 
 os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
 
@@ -45,58 +45,31 @@ from torch.cuda.amp import autocast, GradScaler
 warnings.filterwarnings("ignore")
 import logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s", stream=sys.stdout)
-logger = logging.getLogger("exp40")
+logger = logging.getLogger("exp51")
 
 PAPER_BASELINE = 0.6633
 
 # =============================================================================
-# NEW MATHEMATICAL OBJECT: Hierarchical Contrastive over Dual Trees (HCDT)
+# NEW MATHEMATICAL OBJECT: Functional Representation Consistency (FRC)
 # =============================================================================
 """
-HCDT defines positive pairs as the INTERSECTION of AST similarity and genealogy proximity.
+FRC enforces that authorship representations are consistent with code function.
 
-Standard contrastive: positive if same class
-HCDT: positive if (AST_similar AND genealogy_close)
+Key insight: Code that looks different but does the same thing should have
+similar authorship representations. Conversely, code that does different things
+should have different representations (regardless of syntactic similarity).
 
-Mathematically:
-    P_{hcdt}(i,j) = 1[AST_dist(i,j) < δ_AST ∧ Gene_dist(i,j) < δ_GENE]
+||h(x) - g(f(x))||² → min
 
-This creates a representation where:
-- Close neighbors share BOTH AST structure AND genealogy
-- Distant samples differ in BOTH structures
-- The representation space topology reflects the dual-tree structure
-
-KEY INSIGHT: This is NOT just "multi-view contrastive". It's defined over
-the STRUCTURAL INTERSECTION of two trees, creating a new topological object.
+where:
+- f(x) = functional representation (execution trace, API calls, runtime)
+- h(x) = authorship representation
+- g = projector that maps functional to authorship space
 """
 
 # =============================================================================
-# Genealogy Structures
+# AST Feature Extraction + Functional Features
 # =============================================================================
-
-GENE_ADJ_CODET = {
-    0: [], 1: [3], 2: [], 3: [1], 4: [], 5: []
-}
-
-GENE_ADJ_AICD = {i: [(i//3)*3 + j for j in range(3) if (i//3)*3 + j != i] for i in range(12)}
-
-
-def gene_distance(u: int, v: int, adj: Dict[int, List[int]]) -> float:
-    """Compute genealogical distance via BFS."""
-    if u == v:
-        return 0.0
-    queue = [(u, 0)]
-    visited = {u}
-    while queue:
-        curr, d = queue.pop(0)
-        for neighbor in adj.get(curr, []):
-            if neighbor == v:
-                return d + 1.0
-            if neighbor not in visited:
-                visited.add(neighbor)
-                queue.append((neighbor, d + 1))
-    return float('inf')
-
 
 def extract_ast_features(code: str, max_len: int = 128) -> List[float]:
     """Extract AST structural features without tree-sitter dependency.
@@ -157,129 +130,128 @@ def extract_ast_features(code: str, max_len: int = 128) -> List[float]:
     return features[:max_len]
 
 
+def extract_functional_features(code: str, max_len: int = 32) -> List[float]:
+    """Extract functional features (API calls, control flow patterns)."""
+    import re
+    features = []
+
+    # API call patterns (proxy for functionality)
+    api_patterns = [
+        r'\.(read|write|open|close)\b',  # File I/O
+        r'\.(print|printf|echo|log)\b',  # Output
+        r'\.(append|insert|remove|pop|get|set)\b',  # Data structures
+        r'\b(os|sys|math|json|re|time|random)\b',  # Module imports
+        r'\b(for|while|if|try|with)\b',  # Control flow
+    ]
+
+    for pattern in api_patterns:
+        count = len(re.findall(pattern, code))
+        features.append(count / 10.0)
+
+    # Complexity proxy
+    n_loops = len(re.findall(r'\b(for|while)\s*[\(\{]', code))
+    n_conditionals = len(re.findall(r'\bif\s*[\(\{]', code))
+    n_functions = len(re.findall(r'\bdef\s+\w+', code))
+
+    features.extend([
+        n_loops / 10.0,
+        n_conditionals / 10.0,
+        n_functions / 5.0,
+        len(code.split('\n')) / 100.0,  # Line count
+    ])
+
+    while len(features) < max_len:
+        features.append(0.0)
+    return features[:max_len]
+
+
 # =============================================================================
-# HCDT Positive Pair Definition
+# FRC Model
 # =============================================================================
 
-class DualTreePositivePairs:
-    """Defines positive pairs as intersection of AST similarity and genealogy proximity.
+class FunctionalEncoder(nn.Module):
+    """Encode functional behavior."""
+    def __init__(self, in_dim: int, out_dim: int):
+        super().__init__()
+        self.encoder = nn.Sequential(
+            nn.Linear(in_dim, 64),
+            nn.GELU(),
+            nn.Linear(64, out_dim)
+        )
 
-    This is NOT standard contrastive learning. Positive pairs are defined by:
-    P(i,j) = 1[AST_dist(i,j) < δ_AST AND Gene_dist(i,j) < δ_GENE]
-    """
-    def __init__(self, ast_threshold: float = 0.3, gene_threshold: float = 1.0,
-                 gene_adj: Dict[int, List[int]] = None, n_cls: int = 6):
-        self.ast_threshold = ast_threshold
-        self.gene_threshold = gene_threshold
-        self.gene_adj = gene_adj or GENE_ADJ_CODET
-        self.n_cls = n_cls
-
-    def ast_distance(self, feat1: torch.Tensor, feat2: torch.Tensor) -> float:
-        """Compute AST structural distance."""
-        return F.mse_loss(feat1, feat2).item()
-
-    def gene_distance_func(self, u: int, v: int) -> float:
-        """Compute genealogical distance."""
-        return gene_distance(u, v, self.gene_adj)
-
-    def is_positive_pair(self, ast_feat1: torch.Tensor, ast_feat2: torch.Tensor,
-                        label1: int, label2: int) -> bool:
-        """Check if (i,j) is a positive pair under dual-tree criterion."""
-        ast_dist = self.ast_distance(ast_feat1, ast_feat2)
-        gene_dist = self.gene_distance_func(label1, label2)
-        return (ast_dist < self.ast_threshold) and (gene_dist <= self.gene_threshold)
+    def forward(self, x):
+        return self.encoder(x)
 
 
-# =============================================================================
-# Model
-# =============================================================================
-
-class HCDTModel(nn.Module):
-    """Hierarchical Contrastive over Dual Trees model."""
-    def __init__(self, enc_name: str, n_cls: int, tau: float = 0.07, ast_dim: int = 64):
+class FRCModel(nn.Module):
+    """Functional Representation Consistency model."""
+    def __init__(self, enc_name: str, n_cls: int, func_dim: int = 32,
+                 ast_dim: int = 64):
         super().__init__()
         self.encoder = AutoModel.from_pretrained(os.path.join(KAGGLE_MODELS, enc_name), local_files_only=True)
         hidden = self.encoder.config.hidden_size
-        self.tau = tau
 
-        self.ast_encoder = nn.Sequential(
-            nn.Linear(64, 128),
+        # Authorship encoder
+        self.author_encoder = nn.Sequential(
+            nn.Linear(hidden, 256),
             nn.GELU(),
-            nn.Linear(128, ast_dim)
         )
+
+        # Functional encoder
+        self.func_encoder = FunctionalEncoder(func_dim, 256)
+
+        # Projector: maps functional to authorship space
+        self.projector = nn.Sequential(
+            nn.Linear(256, 128),
+            nn.GELU(),
+        )
+
+        # Combined
         self.proj = nn.Sequential(
-            nn.Linear(hidden + ast_dim, 256),
+            nn.Linear(256 + 128, 256),
             nn.GELU(),
-            nn.Linear(256, 128)
+            nn.Dropout(0.1)
         )
-        self.clf = nn.Linear(128, n_cls)
+        self.clf = nn.Linear(256, n_cls)
 
-    def forward(self, ids, mask, ast_feat):
+        # Functional representation
+        self.func_dim = func_dim
+
+    def forward(self, ids, mask, ast_feat, func_feat):
+        # Semantic encoding
         out = self.encoder(input_ids=ids, attention_mask=mask)
         sem_emb = (out.last_hidden_state * mask.unsqueeze(-1)).sum(1) / mask.sum(1, keepdim=True).clamp(min=1)
-        ast_emb = self.ast_encoder(ast_feat)
-        fused = torch.cat([sem_emb, ast_emb], dim=-1)
-        proj = self.proj(fused)
-        logits = self.clf(proj)
-        return logits, proj
+
+        # Authorship representation
+        author_emb = self.author_encoder(sem_emb)
+
+        # Functional representation
+        func_emb = self.func_encoder(func_feat)
+
+        # Project functional to authorship space
+        func_proj = self.projector(func_emb)
+
+        # FRC consistency loss term
+        consistency = F.mse_loss(author_emb, func_proj)
+
+        # Combined
+        fused = torch.cat([author_emb, func_proj], dim=-1)
+        h = self.proj(fused)
+        logits = self.clf(h)
+
+        return logits, consistency
 
 
 # =============================================================================
-# HCDT Loss
+# FRC Loss
 # =============================================================================
 
-def compute_hcdt_loss(emb: torch.Tensor, ast_feat: torch.Tensor,
-                    labels: torch.Tensor, dt_pairs: DualTreePositivePairs,
-                    tau: float = 0.07) -> Tuple[torch.Tensor, torch.Tensor]:
-    """Compute HCDT contrastive loss.
+def frc_loss(logits, consistency, labels, lambda_frc=0.5):
+    """FRC loss with functional consistency regularization."""
+    ce = F.cross_entropy(logits, labels)
 
-    Positive pairs: both AST similar AND genealogy close
-    Negative pairs: rest
-    """
-    B = emb.shape[0]
-    device = emb.device
-
-    # Normalize embeddings
-    emb = F.normalize(emb, dim=-1)
-
-    # Compute all pairwise similarities
-    sim = torch.mm(emb, emb.T) / tau  # (B, B)
-
-    # Build positive mask: dual-tree criterion
-    pos_mask = torch.zeros(B, B, device=device)
-    for i in range(B):
-        for j in range(B):
-            if i == j:
-                continue
-            # Check dual-tree criterion
-            ast_dist = F.mse_loss(ast_feat[i], ast_feat[j]).item()
-            gene_dist = gene_distance(labels[i].item(), labels[j].item(), dt_pairs.gene_adj)
-            if (ast_dist < dt_pairs.ast_threshold) and (gene_dist <= dt_pairs.gene_threshold):
-                pos_mask[i, j] = 1.0
-
-    # Numerical stability
-    sim_max, _ = sim.max(dim=1, keepdim=True)
-    sim = sim - sim_max.detach()
-
-    # Exp and mask
-    exp_sim = torch.exp(sim)
-    exp_sim = exp_sim * (1 - torch.eye(B, device=device))  # Zero diagonal
-
-    # Denominator: sum of all exp similarities
-    denom = exp_sim.sum(dim=1, keepdim=True) + 1e-8
-
-    # Positive term
-    pos_exp = exp_sim * pos_mask
-    pos_term = (pos_exp.sum(dim=1) / (pos_mask.sum(dim=1) + 1e-8)).mean()
-
-    # Loss
-    loss = -pos_term
-
-    # Statistics
-    n_pos = pos_mask.sum().item()
-    alignment = pos_exp.diagonal().mean().item() if n_pos > 0 else 0.0
-
-    return loss, alignment
+    # Functional consistency: authorship and functional representations should align
+    return ce + lambda_frc * consistency, ce.item(), consistency.item()
 
 
 # =============================================================================
@@ -305,18 +277,10 @@ class Cfg:
     lr_proj: float = 1e-4
     lr_head: float = 1e-4
     wd: float = 0.01
-    lambda_hcdt: float = 0.3
-    tau: float = 0.07
-    ast_threshold: float = 0.3
-    gene_threshold: float = 1.0
+    lambda_frc: float = 0.5
+    func_dim: int = 32
     warmup: float = 0.1
     device: str = "cuda"
-
-    def __post_init__(self):
-        if self.benchmark == "codet_m4":
-            self.gene_adj = GENE_ADJ_CODET
-        else:
-            self.gene_adj = GENE_ADJ_AICD
 
 
 def _hw(cfg):
@@ -433,28 +397,29 @@ class FSDS(TD):
         ids = enc["input_ids"].squeeze(0)
         mask = enc["attention_mask"].squeeze(0)
         ast_feat = extract_ast_features(code, 128)
+        func_feat = extract_functional_features(code, 32)
         return {
             "ids": ids, "mask": mask,
             "ast_feat": torch.tensor(ast_feat, dtype=torch.float32),
+            "func_feat": torch.tensor(func_feat, dtype=torch.float32),
             "label": r["label"]
         }
 
 
-def train_epoch(model, loader, opt, sch, scaler, cfg, dt_pairs):
+def train_epoch(model, loader, opt, sch, scaler, cfg):
     model.train()
-    total_loss, total_ce, total_hcdt = 0, 0, 0
+    total_loss, total_ce, total_frc = 0, 0, 0
 
     for b in tqdm(loader, desc="Train"):
         ids = b["ids"].to(cfg.device)
         mask = b["mask"].to(cfg.device)
         ast_feat = b["ast_feat"].to(cfg.device)
+        func_feat = b["func_feat"].to(cfg.device)
         labs = b["label"].to(cfg.device)
 
         with torch.autocast(device_type='cuda', enabled=(cfg.device == "cuda")):
-            logits, emb = model(ids, mask, ast_feat)
-            loss_ce = F.cross_entropy(logits, labs)
-            loss_hcdt, _ = compute_hcdt_loss(emb, ast_feat, labs, dt_pairs, cfg.tau)
-            loss = loss_ce + cfg.lambda_hcdt * loss_hcdt
+            logits, consistency = model(ids, mask, ast_feat, func_feat)
+            loss, ce, frc = frc_loss(logits, consistency, labs, cfg.lambda_frc)
 
         scaler.scale(loss).backward()
         scaler.unscale_(opt)
@@ -465,11 +430,11 @@ def train_epoch(model, loader, opt, sch, scaler, cfg, dt_pairs):
         sch.step()
 
         total_loss += loss.item()
-        total_ce += loss_ce.item()
-        total_hcdt += loss_hcdt.item()
+        total_ce += ce
+        total_frc += frc
 
     n = len(loader)
-    return total_loss / n, total_ce / n, total_hcdt / n
+    return total_loss / n, total_ce / n, total_frc / n
 
 
 @torch.no_grad()
@@ -480,9 +445,10 @@ def eval_model(model, loader, cfg):
         ids = b["ids"].to(cfg.device)
         mask = b["mask"].to(cfg.device)
         ast_feat = b["ast_feat"].to(cfg.device)
+        func_feat = b["func_feat"].to(cfg.device)
         labs = b["label"]
 
-        logits, _ = model(ids, mask, ast_feat)
+        logits, _ = model(ids, mask, ast_feat, func_feat)
         preds.extend(logits.argmax(dim=-1).cpu().tolist())
         labels.extend(labs.tolist())
 
@@ -498,14 +464,7 @@ def eval_model(model, loader, cfg):
 def run_exp(cfg: Cfg, tag: str):
     set_seed(cfg.seed)
     cfg = _hw(cfg)
-    logger.info(f"[exp40] HCDT: {tag} | frac={cfg.frac}")
-
-    dt_pairs = DualTreePositivePairs(
-        ast_threshold=cfg.ast_threshold,
-        gene_threshold=cfg.gene_threshold,
-        gene_adj=cfg.gene_adj,
-        n_cls=cfg.n_cls
-    )
+    logger.info(f"[exp51] FRC: {tag} | frac={cfg.frac}")
 
     if cfg.benchmark == "codet_m4":
         tr_raw, vl_raw, ts_raw = _load_codet()
@@ -532,27 +491,29 @@ def run_exp(cfg: Cfg, tag: str):
     vl_dl = DataLoader(vl_ds, shuffle=False, **loader_cfg)
     ts_dl = DataLoader(ts_ds, shuffle=False, **loader_cfg)
 
-    model = HCDTModel(cfg.enc, cfg.n_cls, cfg.tau).to(cfg.device)
+    model = FRCModel(cfg.enc, cfg.n_cls, cfg.func_dim).to(cfg.device)
 
     opt = torch.optim.AdamW([
         {"params": model.encoder.parameters(), "lr": cfg.lr_enc},
-        {"params": model.ast_encoder.parameters(), "lr": cfg.lr_proj},
+        {"params": model.author_encoder.parameters(), "lr": cfg.lr_proj},
+        {"params": model.func_encoder.parameters(), "lr": cfg.lr_proj},
+        {"params": model.projector.parameters(), "lr": cfg.lr_proj},
         {"params": model.proj.parameters(), "lr": cfg.lr_proj},
         {"params": model.clf.parameters(), "lr": cfg.lr_head}
     ], weight_decay=cfg.wd)
 
     total_steps = len(tr_dl) * cfg.epochs
     sch = torch.optim.lr_scheduler.OneCycleLR(
-        opt, max_lr=[cfg.lr_enc, cfg.lr_proj, cfg.lr_proj, cfg.lr_head],
+        opt, max_lr=[cfg.lr_enc, cfg.lr_proj, cfg.lr_proj, cfg.lr_proj, cfg.lr_proj, cfg.lr_head],
         total_steps=total_steps, pct_start=cfg.warmup
     )
     scaler = GradScaler()
 
     best_val, best_state = 0, None
     for epoch in range(cfg.epochs):
-        loss, loss_ce, loss_hcdt = train_epoch(model, tr_dl, opt, sch, scaler, cfg, dt_pairs)
+        loss, loss_ce, loss_frc = train_epoch(model, tr_dl, opt, sch, scaler, cfg)
         val_met = eval_model(model, vl_dl, cfg)
-        logger.info(f"  E{epoch+1}: loss={loss:.4f} ce={loss_ce:.4f} hcdt={loss_hcdt:.4f} | val={val_met['macro']:.4f}")
+        logger.info(f"  E{epoch+1}: loss={loss:.4f} ce={loss_ce:.4f} frc={loss_frc:.4f} | val={val_met['macro']:.4f}")
         if val_met["macro"] > best_val:
             best_val = val_met["macro"]
             best_state = {k: v.cpu().clone() for k, v in model.state_dict().items()}
@@ -564,7 +525,7 @@ def run_exp(cfg: Cfg, tag: str):
 
     result = {
         "tag": tag,
-        "method": "HCDT",
+        "method": "FRC",
         "enc": cfg.enc,
         "bench": cfg.benchmark,
         "frac": cfg.frac,
@@ -592,7 +553,7 @@ def main():
     for bench, task, n_cls in benchmarks:
         for frac in fracs:
             cfg = Cfg(benchmark=bench, task=task, enc=enc, frac=frac, n_cls=n_cls)
-            tag = f"exp40_hcdt_{enc}_{bench}_f{frac:.2f}"
+            tag = f"exp51_frc_{enc}_{bench}_f{frac:.2f}"
             try:
                 r = run_exp(cfg, tag)
                 logger.info(f"  RESULT: {tag} | macro={r['macro']:.4f} Δ={r['dpaper']:+.4f}")

@@ -245,7 +245,8 @@ class GAKAModel(nn.Module):
     """
     def __init__(self, enc_name: str, n_cls: int, ast_dim: int = 64):
         super().__init__()
-        self.encoder = AutoModel.from_pretrained(enc_name)
+        enc_path = os.path.join(KAGGLE_MODELS, enc_name)
+        self.encoder = AutoModel.from_pretrained(enc_path, local_files_only=True)
         hidden = self.encoder.config.hidden_size
 
         # AST structural encoder (NEW: encodes code structure, not semantics)
@@ -503,7 +504,7 @@ def train_epoch(model, loader, opt, sch, scaler, cfg):
         ast_feat = b["ast_feat"].to(cfg.device)
         labs = b["label"].to(cfg.device)
 
-        with torch.autocast(device_type='cuda', enabled=(cfg.device.type == "cuda")):
+        with torch.autocast(device_type='cuda', enabled=(cfg.device == "cuda")):
             logits, sem_emb, ast_emb = model(ids, mask, ast_feat, return_gaka=True)
             loss_ce = F.cross_entropy(logits, labs)
             loss_gaka, align = compute_gaka_loss(sem_emb, ast_emb, labs, cfg.gene_tree, None)
@@ -566,7 +567,7 @@ def run_exp(cfg: Cfg, tag: str):
         vl_data = _conv_aicd(vl_raw)
         ts_data = _conv_aicd(ts_raw)
 
-    tok = AutoTokenizer.from_pretrained(cfg.enc)
+    tok = AutoTokenizer.from_pretrained(os.path.join(KAGGLE_MODELS, cfg.enc), local_files_only=True)
 
     tr_ds = FSDS(tr_data, tok, cfg.seq, frac=cfg.frac, seed=cfg.seed)
     vl_ds = FSDS(vl_data, tok, cfg.seq, frac=1.0, seed=cfg.seed + 1)

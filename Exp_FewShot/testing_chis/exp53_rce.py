@@ -1,28 +1,26 @@
 # =============================================================================
-# Theory-Track exp -- HCDT (Hierarchical Contrastive over Dual Trees):
+# Theory-Track exp -- RCE (Representation Causal Effect):
 #
-# ARXIV_ID      : THIS IS NEW - no prior work defines contrastive learning over
-#                 the INTERSECTION of AST tree and genealogy tree
-# NAME          : HCDT (Hierarchical Contrastive over Dual Trees)
-# ONE-LINE CLAIM: Positive pairs are defined by BOTH AST structural similarity AND
-#                 genealogical proximity; this dual-tree contrastive loss creates
-#                 representations where code clusters reflect both structures.
-# EQUATION      : L_hcdt = -log exp(⟨z_i, z_j⟩/τ) / Σ_k exp(⟨z_i, z_k⟩/τ)
-#                 where (i,j) is positive iff AST_dist(i,j) < δ_AST AND gene_dist(i,j) < δ_GENE
-# PROPERTY      : Only samples that are similar in BOTH trees form positive pairs.
-#                 This creates a representation space where the dual-tree topology is embedded.
-# WHY NOT BEFORE: Standard contrastive learning uses ONE similarity structure.
-#                 HCDT is defined over the INTERSECTION of two trees, creating a new
-#                 mathematical object only meaningful when both structures exist.
-# FALSIFIER     : If HCDT representations outperform single-tree contrastive,
-#                 then both AST and genealogy structures are necessary for attribution.
+# ARXIV_ID      : THIS IS NEW - measuring the causal effect of representation
+#                 components on authorship prediction
+# NAME          : RCE (Representation Causal Effect)
+# ONE-LINE CLAIM: The causal effect of each representation component (semantic,
+#                 structural, genealogical) on authorship is measured via
+#                 intervening on representation dimensions.
+# EQUATION      : ACE_k = E[Y | do(h_k = 1)] - E[Y | do(h_k = 0)]
+#                 where h_k is the k-th representation component.
+# PROPERTY      : Components with high ACE are causal for attribution.
+# WHY NOT BEFORE: Prior work doesn't decompose representation effects.
+#                 RCE quantifies which representation aspects are causal.
+# FALSIFIER     : If high-ACE components are necessary for attribution accuracy,
+#                 then causal representation decomposition is key.
 # =============================================================================
 from __future__ import annotations
 
 import os, sys, time, json, random, subprocess, importlib.util, warnings, glob
 from collections import defaultdict
 from dataclasses import dataclass
-from typing import Dict, List, Tuple
+from typing import List, Dict
 
 os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
 
@@ -31,7 +29,7 @@ def _ensure(pkg):
         subprocess.check_call([sys.executable, "-m", "pip", "install", "-q", pkg])
 
 _ensure("numpy"); _ensure("torch"); _ensure("datasets")
-_ensure("transformers"); _ensure("scikit-learn"); _ensure("tqdm")
+_ensure("transformers"); _ensure("sklearn"); _ensure("tqdm")
 
 import numpy as np
 import torch, torch.nn as nn, torch.nn.functional as F
@@ -45,58 +43,28 @@ from torch.cuda.amp import autocast, GradScaler
 warnings.filterwarnings("ignore")
 import logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s", stream=sys.stdout)
-logger = logging.getLogger("exp40")
+logger = logging.getLogger("exp53")
 
 PAPER_BASELINE = 0.6633
 
 # =============================================================================
-# NEW MATHEMATICAL OBJECT: Hierarchical Contrastive over Dual Trees (HCDT)
+# NEW MATHEMATICAL OBJECT: Representation Causal Effect (RCE)
 # =============================================================================
 """
-HCDT defines positive pairs as the INTERSECTION of AST similarity and genealogy proximity.
+RCE measures the Average Causal Effect of each representation component.
 
-Standard contrastive: positive if same class
-HCDT: positive if (AST_similar AND genealogy_close)
+For representation h = [h_sem, h_ast, h_gene]:
+- ACE_sem = E[Y | do(h_sem = intervention)] - baseline
+- ACE_ast = E[Y | do(h_ast = intervention)] - baseline
+- ACE_gene = E[Y | do(h_gene = intervention)] - baseline
 
-Mathematically:
-    P_{hcdt}(i,j) = 1[AST_dist(i,j) < δ_AST ∧ Gene_dist(i,j) < δ_GENE]
-
-This creates a representation where:
-- Close neighbors share BOTH AST structure AND genealogy
-- Distant samples differ in BOTH structures
-- The representation space topology reflects the dual-tree structure
-
-KEY INSIGHT: This is NOT just "multi-view contrastive". It's defined over
-the STRUCTURAL INTERSECTION of two trees, creating a new topological object.
+Components with higher ACE are more causal for attribution.
+This gives a principled way to understand which representation aspects matter.
 """
 
 # =============================================================================
-# Genealogy Structures
+# AST Feature Extraction
 # =============================================================================
-
-GENE_ADJ_CODET = {
-    0: [], 1: [3], 2: [], 3: [1], 4: [], 5: []
-}
-
-GENE_ADJ_AICD = {i: [(i//3)*3 + j for j in range(3) if (i//3)*3 + j != i] for i in range(12)}
-
-
-def gene_distance(u: int, v: int, adj: Dict[int, List[int]]) -> float:
-    """Compute genealogical distance via BFS."""
-    if u == v:
-        return 0.0
-    queue = [(u, 0)]
-    visited = {u}
-    while queue:
-        curr, d = queue.pop(0)
-        for neighbor in adj.get(curr, []):
-            if neighbor == v:
-                return d + 1.0
-            if neighbor not in visited:
-                visited.add(neighbor)
-                queue.append((neighbor, d + 1))
-    return float('inf')
-
 
 def extract_ast_features(code: str, max_len: int = 128) -> List[float]:
     """Extract AST structural features without tree-sitter dependency.
@@ -158,128 +126,99 @@ def extract_ast_features(code: str, max_len: int = 128) -> List[float]:
 
 
 # =============================================================================
-# HCDT Positive Pair Definition
+# RCE Model
 # =============================================================================
 
-class DualTreePositivePairs:
-    """Defines positive pairs as intersection of AST similarity and genealogy proximity.
+class CausalGate(nn.Module):
+    """Gate that learns causal effect of input component."""
+    def __init__(self, dim: int):
+        super().__init__()
+        self.effect = nn.Parameter(torch.zeros(dim))
 
-    This is NOT standard contrastive learning. Positive pairs are defined by:
-    P(i,j) = 1[AST_dist(i,j) < δ_AST AND Gene_dist(i,j) < δ_GENE]
-    """
-    def __init__(self, ast_threshold: float = 0.3, gene_threshold: float = 1.0,
-                 gene_adj: Dict[int, List[int]] = None, n_cls: int = 6):
-        self.ast_threshold = ast_threshold
-        self.gene_threshold = gene_threshold
-        self.gene_adj = gene_adj or GENE_ADJ_CODET
-        self.n_cls = n_cls
-
-    def ast_distance(self, feat1: torch.Tensor, feat2: torch.Tensor) -> float:
-        """Compute AST structural distance."""
-        return F.mse_loss(feat1, feat2).item()
-
-    def gene_distance_func(self, u: int, v: int) -> float:
-        """Compute genealogical distance."""
-        return gene_distance(u, v, self.gene_adj)
-
-    def is_positive_pair(self, ast_feat1: torch.Tensor, ast_feat2: torch.Tensor,
-                        label1: int, label2: int) -> bool:
-        """Check if (i,j) is a positive pair under dual-tree criterion."""
-        ast_dist = self.ast_distance(ast_feat1, ast_feat2)
-        gene_dist = self.gene_distance_func(label1, label2)
-        return (ast_dist < self.ast_threshold) and (gene_dist <= self.gene_threshold)
+    def forward(self, h):
+        # Apply causal intervention: add learned effect
+        return h + self.effect
 
 
-# =============================================================================
-# Model
-# =============================================================================
-
-class HCDTModel(nn.Module):
-    """Hierarchical Contrastive over Dual Trees model."""
-    def __init__(self, enc_name: str, n_cls: int, tau: float = 0.07, ast_dim: int = 64):
+class RCEModel(nn.Module):
+    """Representation Causal Effect model."""
+    def __init__(self, enc_name: str, n_cls: int, ast_dim: int = 64):
         super().__init__()
         self.encoder = AutoModel.from_pretrained(os.path.join(KAGGLE_MODELS, enc_name), local_files_only=True)
         hidden = self.encoder.config.hidden_size
-        self.tau = tau
 
+        # Semantic encoder
+        self.sem_encoder = nn.Sequential(
+            nn.Linear(hidden, 128),
+            nn.GELU(),
+        )
+
+        # Structural encoder
         self.ast_encoder = nn.Sequential(
             nn.Linear(64, 128),
             nn.GELU(),
-            nn.Linear(128, ast_dim)
         )
+
+        # Causal gates (learn the effect of each component)
+        self.sem_gate = CausalGate(128)
+        self.ast_gate = CausalGate(128)
+
+        # Combined with causal intervention
         self.proj = nn.Sequential(
-            nn.Linear(hidden + ast_dim, 256),
+            nn.Linear(256, 128),
             nn.GELU(),
-            nn.Linear(256, 128)
+            nn.Dropout(0.1)
         )
         self.clf = nn.Linear(128, n_cls)
 
-    def forward(self, ids, mask, ast_feat):
+    def forward(self, ids, mask, ast_feat, intervene=False):
+        # Semantic encoding
         out = self.encoder(input_ids=ids, attention_mask=mask)
         sem_emb = (out.last_hidden_state * mask.unsqueeze(-1)).sum(1) / mask.sum(1, keepdim=True).clamp(min=1)
-        ast_emb = self.ast_encoder(ast_feat)
-        fused = torch.cat([sem_emb, ast_emb], dim=-1)
-        proj = self.proj(fused)
-        logits = self.clf(proj)
-        return logits, proj
+        sem = self.sem_encoder(sem_emb)
+
+        # Structural encoding
+        ast = self.ast_encoder(ast_feat)
+
+        # Apply causal intervention (during training)
+        if intervene:
+            sem = self.sem_gate(sem)
+            ast = self.ast_gate(ast)
+
+        # Combined
+        fused = torch.cat([sem, ast], dim=-1)
+        h = self.proj(fused)
+        logits = self.clf(h)
+
+        return logits, sem, ast
+
+    def causal_effects(self):
+        """Return learned causal effects for each component."""
+        return {
+            "sem_effect": self.sem_gate.effect.abs().mean().item(),
+            "ast_effect": self.ast_gate.effect.abs().mean().item(),
+        }
 
 
 # =============================================================================
-# HCDT Loss
+# RCE Loss
 # =============================================================================
 
-def compute_hcdt_loss(emb: torch.Tensor, ast_feat: torch.Tensor,
-                    labels: torch.Tensor, dt_pairs: DualTreePositivePairs,
-                    tau: float = 0.07) -> Tuple[torch.Tensor, torch.Tensor]:
-    """Compute HCDT contrastive loss.
+def rce_loss(logits, sem, ast, labels, lambda_rce=0.1):
+    """RCE loss with causal effect regularization.
 
-    Positive pairs: both AST similar AND genealogy close
-    Negative pairs: rest
+    The causal effect regularization encourages the learned effects
+    to be non-zero and meaningful.
     """
-    B = emb.shape[0]
-    device = emb.device
+    ce = F.cross_entropy(logits, labels)
 
-    # Normalize embeddings
-    emb = F.normalize(emb, dim=-1)
+    # Causal effect regularization
+    # Encourage non-trivial causal effects
+    sem_effect = sem.mean().abs()
+    ast_effect = ast.mean().abs()
+    effect_reg = -((sem_effect - 0.1).pow(2) + (ast_effect - 0.1).pow(2))
 
-    # Compute all pairwise similarities
-    sim = torch.mm(emb, emb.T) / tau  # (B, B)
-
-    # Build positive mask: dual-tree criterion
-    pos_mask = torch.zeros(B, B, device=device)
-    for i in range(B):
-        for j in range(B):
-            if i == j:
-                continue
-            # Check dual-tree criterion
-            ast_dist = F.mse_loss(ast_feat[i], ast_feat[j]).item()
-            gene_dist = gene_distance(labels[i].item(), labels[j].item(), dt_pairs.gene_adj)
-            if (ast_dist < dt_pairs.ast_threshold) and (gene_dist <= dt_pairs.gene_threshold):
-                pos_mask[i, j] = 1.0
-
-    # Numerical stability
-    sim_max, _ = sim.max(dim=1, keepdim=True)
-    sim = sim - sim_max.detach()
-
-    # Exp and mask
-    exp_sim = torch.exp(sim)
-    exp_sim = exp_sim * (1 - torch.eye(B, device=device))  # Zero diagonal
-
-    # Denominator: sum of all exp similarities
-    denom = exp_sim.sum(dim=1, keepdim=True) + 1e-8
-
-    # Positive term
-    pos_exp = exp_sim * pos_mask
-    pos_term = (pos_exp.sum(dim=1) / (pos_mask.sum(dim=1) + 1e-8)).mean()
-
-    # Loss
-    loss = -pos_term
-
-    # Statistics
-    n_pos = pos_mask.sum().item()
-    alignment = pos_exp.diagonal().mean().item() if n_pos > 0 else 0.0
-
-    return loss, alignment
+    return ce + lambda_rce * effect_reg, ce.item(), effect_reg.item()
 
 
 # =============================================================================
@@ -305,18 +244,9 @@ class Cfg:
     lr_proj: float = 1e-4
     lr_head: float = 1e-4
     wd: float = 0.01
-    lambda_hcdt: float = 0.3
-    tau: float = 0.07
-    ast_threshold: float = 0.3
-    gene_threshold: float = 1.0
+    lambda_rce: float = 0.1
     warmup: float = 0.1
     device: str = "cuda"
-
-    def __post_init__(self):
-        if self.benchmark == "codet_m4":
-            self.gene_adj = GENE_ADJ_CODET
-        else:
-            self.gene_adj = GENE_ADJ_AICD
 
 
 def _hw(cfg):
@@ -440,9 +370,9 @@ class FSDS(TD):
         }
 
 
-def train_epoch(model, loader, opt, sch, scaler, cfg, dt_pairs):
+def train_epoch(model, loader, opt, sch, scaler, cfg, intervene=True):
     model.train()
-    total_loss, total_ce, total_hcdt = 0, 0, 0
+    total_loss, total_ce, total_rce = 0, 0, 0
 
     for b in tqdm(loader, desc="Train"):
         ids = b["ids"].to(cfg.device)
@@ -451,10 +381,8 @@ def train_epoch(model, loader, opt, sch, scaler, cfg, dt_pairs):
         labs = b["label"].to(cfg.device)
 
         with torch.autocast(device_type='cuda', enabled=(cfg.device == "cuda")):
-            logits, emb = model(ids, mask, ast_feat)
-            loss_ce = F.cross_entropy(logits, labs)
-            loss_hcdt, _ = compute_hcdt_loss(emb, ast_feat, labs, dt_pairs, cfg.tau)
-            loss = loss_ce + cfg.lambda_hcdt * loss_hcdt
+            logits, sem, ast = model(ids, mask, ast_feat, intervene=intervene)
+            loss, ce, rce = rce_loss(logits, sem, ast, labs, cfg.lambda_rce)
 
         scaler.scale(loss).backward()
         scaler.unscale_(opt)
@@ -465,11 +393,11 @@ def train_epoch(model, loader, opt, sch, scaler, cfg, dt_pairs):
         sch.step()
 
         total_loss += loss.item()
-        total_ce += loss_ce.item()
-        total_hcdt += loss_hcdt.item()
+        total_ce += ce
+        total_rce += rce
 
     n = len(loader)
-    return total_loss / n, total_ce / n, total_hcdt / n
+    return total_loss / n, total_ce / n, total_rce / n
 
 
 @torch.no_grad()
@@ -482,7 +410,7 @@ def eval_model(model, loader, cfg):
         ast_feat = b["ast_feat"].to(cfg.device)
         labs = b["label"]
 
-        logits, _ = model(ids, mask, ast_feat)
+        logits, _, _ = model(ids, mask, ast_feat, intervene=False)
         preds.extend(logits.argmax(dim=-1).cpu().tolist())
         labels.extend(labs.tolist())
 
@@ -498,14 +426,7 @@ def eval_model(model, loader, cfg):
 def run_exp(cfg: Cfg, tag: str):
     set_seed(cfg.seed)
     cfg = _hw(cfg)
-    logger.info(f"[exp40] HCDT: {tag} | frac={cfg.frac}")
-
-    dt_pairs = DualTreePositivePairs(
-        ast_threshold=cfg.ast_threshold,
-        gene_threshold=cfg.gene_threshold,
-        gene_adj=cfg.gene_adj,
-        n_cls=cfg.n_cls
-    )
+    logger.info(f"[exp53] RCE: {tag} | frac={cfg.frac}")
 
     if cfg.benchmark == "codet_m4":
         tr_raw, vl_raw, ts_raw = _load_codet()
@@ -532,27 +453,31 @@ def run_exp(cfg: Cfg, tag: str):
     vl_dl = DataLoader(vl_ds, shuffle=False, **loader_cfg)
     ts_dl = DataLoader(ts_ds, shuffle=False, **loader_cfg)
 
-    model = HCDTModel(cfg.enc, cfg.n_cls, cfg.tau).to(cfg.device)
+    model = RCEModel(cfg.enc, cfg.n_cls).to(cfg.device)
 
     opt = torch.optim.AdamW([
         {"params": model.encoder.parameters(), "lr": cfg.lr_enc},
+        {"params": model.sem_encoder.parameters(), "lr": cfg.lr_proj},
         {"params": model.ast_encoder.parameters(), "lr": cfg.lr_proj},
         {"params": model.proj.parameters(), "lr": cfg.lr_proj},
-        {"params": model.clf.parameters(), "lr": cfg.lr_head}
+        {"params": model.clf.parameters(), "lr": cfg.lr_head},
+        {"params": model.sem_gate.parameters(), "lr": 1e-3},
+        {"params": model.ast_gate.parameters(), "lr": 1e-3}
     ], weight_decay=cfg.wd)
 
     total_steps = len(tr_dl) * cfg.epochs
     sch = torch.optim.lr_scheduler.OneCycleLR(
-        opt, max_lr=[cfg.lr_enc, cfg.lr_proj, cfg.lr_proj, cfg.lr_head],
+        opt, max_lr=[cfg.lr_enc, cfg.lr_proj, cfg.lr_proj, cfg.lr_proj, cfg.lr_head, 1e-3, 1e-3],
         total_steps=total_steps, pct_start=cfg.warmup
     )
     scaler = GradScaler()
 
     best_val, best_state = 0, None
     for epoch in range(cfg.epochs):
-        loss, loss_ce, loss_hcdt = train_epoch(model, tr_dl, opt, sch, scaler, cfg, dt_pairs)
+        loss, loss_ce, loss_rce = train_epoch(model, tr_dl, opt, sch, scaler, cfg, intervene=(epoch > 0))
         val_met = eval_model(model, vl_dl, cfg)
-        logger.info(f"  E{epoch+1}: loss={loss:.4f} ce={loss_ce:.4f} hcdt={loss_hcdt:.4f} | val={val_met['macro']:.4f}")
+        effects = model.causal_effects()
+        logger.info(f"  E{epoch+1}: loss={loss:.4f} ce={loss_ce:.4f} rce={loss_rce:.4f} | sem_eff={effects['sem_effect']:.4f} ast_eff={effects['ast_effect']:.4f} | val={val_met['macro']:.4f}")
         if val_met["macro"] > best_val:
             best_val = val_met["macro"]
             best_state = {k: v.cpu().clone() for k, v in model.state_dict().items()}
@@ -564,7 +489,7 @@ def run_exp(cfg: Cfg, tag: str):
 
     result = {
         "tag": tag,
-        "method": "HCDT",
+        "method": "RCE",
         "enc": cfg.enc,
         "bench": cfg.benchmark,
         "frac": cfg.frac,
@@ -573,6 +498,7 @@ def run_exp(cfg: Cfg, tag: str):
         "acc": ts_met["acc"],
         "dpaper": ts_met["macro"] - PAPER_BASELINE,
         "per_class_f1": ts_met["per_class"],
+        "causal_effects": model.causal_effects(),
         "timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
     }
 
@@ -592,7 +518,7 @@ def main():
     for bench, task, n_cls in benchmarks:
         for frac in fracs:
             cfg = Cfg(benchmark=bench, task=task, enc=enc, frac=frac, n_cls=n_cls)
-            tag = f"exp40_hcdt_{enc}_{bench}_f{frac:.2f}"
+            tag = f"exp53_rce_{enc}_{bench}_f{frac:.2f}"
             try:
                 r = run_exp(cfg, tag)
                 logger.info(f"  RESULT: {tag} | macro={r['macro']:.4f} Δ={r['dpaper']:+.4f}")

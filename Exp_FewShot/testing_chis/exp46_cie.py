@@ -1,28 +1,29 @@
 # =============================================================================
-# Theory-Track exp -- HCDT (Hierarchical Contrastive over Dual Trees):
+# Theory-Track exp -- CIE (Causal Intervention Effect):
 #
-# ARXIV_ID      : THIS IS NEW - no prior work defines contrastive learning over
-#                 the INTERSECTION of AST tree and genealogy tree
-# NAME          : HCDT (Hierarchical Contrastive over Dual Trees)
-# ONE-LINE CLAIM: Positive pairs are defined by BOTH AST structural similarity AND
-#                 genealogical proximity; this dual-tree contrastive loss creates
-#                 representations where code clusters reflect both structures.
-# EQUATION      : L_hcdt = -log exp(⟨z_i, z_j⟩/τ) / Σ_k exp(⟨z_i, z_k⟩/τ)
-#                 where (i,j) is positive iff AST_dist(i,j) < δ_AST AND gene_dist(i,j) < δ_GENE
-# PROPERTY      : Only samples that are similar in BOTH trees form positive pairs.
-#                 This creates a representation space where the dual-tree topology is embedded.
-# WHY NOT BEFORE: Standard contrastive learning uses ONE similarity structure.
-#                 HCDT is defined over the INTERSECTION of two trees, creating a new
-#                 mathematical object only meaningful when both structures exist.
-# FALSIFIER     : If HCDT representations outperform single-tree contrastive,
-#                 then both AST and genealogy structures are necessary for attribution.
+# ARXIV_ID      : THIS IS NEW - applying do-calculus to measure causal effect
+#                 of AST structural patterns on authorship attribution
+# NAME          : CIE (Causal Intervention Effect)
+# ONE-LINE CLAIM: The causal effect of AST structure on authorship is isolated
+#                 via backdoor adjustment, giving a causal estimator that
+#                 is robust to spurious correlations.
+# EQUATION      : P(Y | do(AST=a)) = Σ_s P(Y | AST=a, S=s) P(S=s)
+#                 where S is a confounder (e.g., source/location)
+# PROPERTY      : The causal estimator removes confounding from source bias,
+#                 giving attribution based purely on structural authorship.
+# WHY NOT BEFORE: Standard classifiers learn spurious correlations between
+#                 source and AST patterns. CIE applies Pearl's do-calculus
+#                 to isolate the causal effect of structure on authorship.
+# FALSIFIER     : If CIE-adjusted predictions are more robust to source
+#                 distribution shift than raw predictions, then causal
+#                 adjustment is the key to OOD generalization.
 # =============================================================================
 from __future__ import annotations
 
 import os, sys, time, json, random, subprocess, importlib.util, warnings, glob
 from collections import defaultdict
 from dataclasses import dataclass
-from typing import Dict, List, Tuple
+from typing import List, Dict
 
 os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
 
@@ -45,58 +46,34 @@ from torch.cuda.amp import autocast, GradScaler
 warnings.filterwarnings("ignore")
 import logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s", stream=sys.stdout)
-logger = logging.getLogger("exp40")
+logger = logging.getLogger("exp46")
 
 PAPER_BASELINE = 0.6633
 
 # =============================================================================
-# NEW MATHEMATICAL OBJECT: Hierarchical Contrastive over Dual Trees (HCDT)
+# NEW MATHEMATICAL OBJECT: Causal Intervention Effect (CIE)
 # =============================================================================
 """
-HCDT defines positive pairs as the INTERSECTION of AST similarity and genealogy proximity.
+CIE applies Pearl's do-calculus to isolate the causal effect of AST structure on authorship.
 
-Standard contrastive: positive if same class
-HCDT: positive if (AST_similar AND genealogy_close)
+The causal DAG:
+    S (source) --> AST (structure)
+    S (source) --> Y (authorship)
+    AST (structure) --> Y (authorship)
 
-Mathematically:
-    P_{hcdt}(i,j) = 1[AST_dist(i,j) < δ_AST ∧ Gene_dist(i,j) < δ_GENE]
+We want: P(Y | do(AST=a)) - the effect of structure on authorship,
+controlling for source confounding via backdoor adjustment.
 
-This creates a representation where:
-- Close neighbors share BOTH AST structure AND genealogy
-- Distant samples differ in BOTH structures
-- The representation space topology reflects the dual-tree structure
+P(Y | do(AST=a)) = Σ_s P(Y | AST=a, S=s) P(S=s)
 
-KEY INSIGHT: This is NOT just "multi-view contrastive". It's defined over
-the STRUCTURAL INTERSECTION of two trees, creating a new topological object.
+KEY INSIGHT: This removes source bias from the attribution by computing
+what the authorship distribution would be IF we intervened to set AST=a,
+averaging over all source confounders.
 """
 
 # =============================================================================
-# Genealogy Structures
+# AST Feature Extraction
 # =============================================================================
-
-GENE_ADJ_CODET = {
-    0: [], 1: [3], 2: [], 3: [1], 4: [], 5: []
-}
-
-GENE_ADJ_AICD = {i: [(i//3)*3 + j for j in range(3) if (i//3)*3 + j != i] for i in range(12)}
-
-
-def gene_distance(u: int, v: int, adj: Dict[int, List[int]]) -> float:
-    """Compute genealogical distance via BFS."""
-    if u == v:
-        return 0.0
-    queue = [(u, 0)]
-    visited = {u}
-    while queue:
-        curr, d = queue.pop(0)
-        for neighbor in adj.get(curr, []):
-            if neighbor == v:
-                return d + 1.0
-            if neighbor not in visited:
-                visited.add(neighbor)
-                queue.append((neighbor, d + 1))
-    return float('inf')
-
 
 def extract_ast_features(code: str, max_len: int = 128) -> List[float]:
     """Extract AST structural features without tree-sitter dependency.
@@ -158,128 +135,135 @@ def extract_ast_features(code: str, max_len: int = 128) -> List[float]:
 
 
 # =============================================================================
-# HCDT Positive Pair Definition
+# CIE Model with Backdoor Adjustment
 # =============================================================================
 
-class DualTreePositivePairs:
-    """Defines positive pairs as intersection of AST similarity and genealogy proximity.
+class SourceEncoder(nn.Module):
+    """Encode source/confounder into latent space."""
+    def __init__(self, embed_dim: int = 32):
+        super().__init__()
+        self.embed = nn.Embedding(100, embed_dim)  # Max 100 sources
 
-    This is NOT standard contrastive learning. Positive pairs are defined by:
-    P(i,j) = 1[AST_dist(i,j) < δ_AST AND Gene_dist(i,j) < δ_GENE]
-    """
-    def __init__(self, ast_threshold: float = 0.3, gene_threshold: float = 1.0,
-                 gene_adj: Dict[int, List[int]] = None, n_cls: int = 6):
-        self.ast_threshold = ast_threshold
-        self.gene_threshold = gene_threshold
-        self.gene_adj = gene_adj or GENE_ADJ_CODET
-        self.n_cls = n_cls
-
-    def ast_distance(self, feat1: torch.Tensor, feat2: torch.Tensor) -> float:
-        """Compute AST structural distance."""
-        return F.mse_loss(feat1, feat2).item()
-
-    def gene_distance_func(self, u: int, v: int) -> float:
-        """Compute genealogical distance."""
-        return gene_distance(u, v, self.gene_adj)
-
-    def is_positive_pair(self, ast_feat1: torch.Tensor, ast_feat2: torch.Tensor,
-                        label1: int, label2: int) -> bool:
-        """Check if (i,j) is a positive pair under dual-tree criterion."""
-        ast_dist = self.ast_distance(ast_feat1, ast_feat2)
-        gene_dist = self.gene_distance_func(label1, label2)
-        return (ast_dist < self.ast_threshold) and (gene_dist <= self.gene_threshold)
+    def forward(self, source_ids):
+        return self.embed(source_ids)
 
 
-# =============================================================================
-# Model
-# =============================================================================
-
-class HCDTModel(nn.Module):
-    """Hierarchical Contrastive over Dual Trees model."""
-    def __init__(self, enc_name: str, n_cls: int, tau: float = 0.07, ast_dim: int = 64):
+class CIEModel(nn.Module):
+    """Causal Intervention Effect model with backdoor adjustment."""
+    def __init__(self, enc_name: str, n_cls: int, n_sources: int = 50,
+                 embed_dim: int = 64, ast_dim: int = 64):
         super().__init__()
         self.encoder = AutoModel.from_pretrained(os.path.join(KAGGLE_MODELS, enc_name), local_files_only=True)
         hidden = self.encoder.config.hidden_size
-        self.tau = tau
 
+        # Source/confounder encoder
+        self.source_encoder = SourceEncoder(n_sources)
+
+        # AST structural encoder
         self.ast_encoder = nn.Sequential(
             nn.Linear(64, 128),
             nn.GELU(),
             nn.Linear(128, ast_dim)
         )
-        self.proj = nn.Sequential(
-            nn.Linear(hidden + ast_dim, 256),
+
+        # Intervention adjustment network
+        # Learns P(Y | AST, S) for backdoor adjustment
+        self.adjust_net = nn.Sequential(
+            nn.Linear(hidden + ast_dim + embed_dim, 256),
             nn.GELU(),
-            nn.Linear(256, 128)
+            nn.Dropout(0.1),
+            nn.Linear(256, 128),
+            nn.GELU()
         )
+
+        # Classifier (on adjusted features)
         self.clf = nn.Linear(128, n_cls)
 
-    def forward(self, ids, mask, ast_feat):
+        # Store source distributions for backdoor adjustment
+        self.register_buffer("source_prior", torch.zeros(n_sources))
+        self.n_sources = n_sources
+
+    def backdoor_adjust(self, sem_emb, ast_emb, source_ids):
+        """Compute causal intervention via backdoor adjustment.
+
+        P(Y | do(AST)) = Σ_s P(Y | AST, S=s) P(S=s)
+        """
+        B = sem_emb.size(0)
+        device = sem_emb.device
+
+        # Get source embeddings
+        source_emb = self.source_encoder(source_ids)
+
+        # Combine features
+        combined = torch.cat([sem_emb, ast_emb, source_emb], dim=-1)
+        adjusted = self.adjust_net(combined)
+
+        # Backdoor adjustment: average over source confounders
+        # This is the key causal operation
+        source_dist = F.softmax(self.source_prior, dim=0)
+
+        # For each sample, adjust by marginalizing over source
+        # P(Y | do(AST)) = Σ_s P(Y | AST, S=s) * P(S=s)
+        adjusted_outputs = []
+        for s in range(min(self.n_sources, 100)):
+            s_emb = self.source_encoder(torch.tensor([s], device=device).expand(B))
+            combined_s = torch.cat([sem_emb, ast_emb, s_emb], dim=-1)
+            out_s = self.adjust_net(combined_s)
+            weight = source_dist[s].item()
+            adjusted_outputs.append(out_s * weight)
+
+        # Weighted average (causal intervention)
+        adjusted = sum(adjusted_outputs)
+
+        return adjusted
+
+    def update_source_prior(self, source_ids):
+        """Update source prior distribution from batch."""
+        with torch.no_grad():
+            for s in range(min(self.n_sources, 100)):
+                count = (source_ids == s).sum().item()
+                self.source_prior[s] = self.source_prior[s] * 0.99 + count * 0.01
+
+    def forward(self, ids, mask, ast_feat, source_ids, use_adjustment=True):
+        # Semantic encoding
         out = self.encoder(input_ids=ids, attention_mask=mask)
         sem_emb = (out.last_hidden_state * mask.unsqueeze(-1)).sum(1) / mask.sum(1, keepdim=True).clamp(min=1)
+
+        # AST encoding
         ast_emb = self.ast_encoder(ast_feat)
-        fused = torch.cat([sem_emb, ast_emb], dim=-1)
-        proj = self.proj(fused)
-        logits = self.clf(proj)
-        return logits, proj
+
+        if use_adjustment:
+            # Causal intervention via backdoor adjustment
+            adjusted = self.backdoor_adjust(sem_emb, ast_emb, source_ids)
+            logits = self.clf(adjusted)
+        else:
+            # Standard (confounded) prediction
+            combined = torch.cat([sem_emb, ast_emb], dim=-1)
+            logits = self.clf(self.adjust_net(combined)[:, :128])
+
+        return logits
 
 
 # =============================================================================
-# HCDT Loss
+# CIE Loss with Causal Regularization
 # =============================================================================
 
-def compute_hcdt_loss(emb: torch.Tensor, ast_feat: torch.Tensor,
-                    labels: torch.Tensor, dt_pairs: DualTreePositivePairs,
-                    tau: float = 0.07) -> Tuple[torch.Tensor, torch.Tensor]:
-    """Compute HCDT contrastive loss.
+def cie_loss(logits_causal, logits_confounded, labels, lambda_cie=0.5):
+    """CIE loss: CE on causal predictions + consistency regularization.
 
-    Positive pairs: both AST similar AND genealogy close
-    Negative pairs: rest
+    The consistency term encourages causal and confounded predictions
+    to agree, while the causal term emphasizes causal adjustment.
     """
-    B = emb.shape[0]
-    device = emb.device
+    # Standard CE on causal predictions
+    ce_causal = F.cross_entropy(logits_causal, labels)
 
-    # Normalize embeddings
-    emb = F.normalize(emb, dim=-1)
+    # Consistency loss: causal and confounded should agree on confident predictions
+    confounded_probs = F.softmax(logits_confounded, dim=-1)
+    causal_probs = F.softmax(logits_causal, dim=-1)
+    max_conf = confounded_probs.max(dim=-1)[0]
+    consistency = ((causal_probs - confounded_probs).abs() * max_conf.unsqueeze(-1)).mean()
 
-    # Compute all pairwise similarities
-    sim = torch.mm(emb, emb.T) / tau  # (B, B)
-
-    # Build positive mask: dual-tree criterion
-    pos_mask = torch.zeros(B, B, device=device)
-    for i in range(B):
-        for j in range(B):
-            if i == j:
-                continue
-            # Check dual-tree criterion
-            ast_dist = F.mse_loss(ast_feat[i], ast_feat[j]).item()
-            gene_dist = gene_distance(labels[i].item(), labels[j].item(), dt_pairs.gene_adj)
-            if (ast_dist < dt_pairs.ast_threshold) and (gene_dist <= dt_pairs.gene_threshold):
-                pos_mask[i, j] = 1.0
-
-    # Numerical stability
-    sim_max, _ = sim.max(dim=1, keepdim=True)
-    sim = sim - sim_max.detach()
-
-    # Exp and mask
-    exp_sim = torch.exp(sim)
-    exp_sim = exp_sim * (1 - torch.eye(B, device=device))  # Zero diagonal
-
-    # Denominator: sum of all exp similarities
-    denom = exp_sim.sum(dim=1, keepdim=True) + 1e-8
-
-    # Positive term
-    pos_exp = exp_sim * pos_mask
-    pos_term = (pos_exp.sum(dim=1) / (pos_mask.sum(dim=1) + 1e-8)).mean()
-
-    # Loss
-    loss = -pos_term
-
-    # Statistics
-    n_pos = pos_mask.sum().item()
-    alignment = pos_exp.diagonal().mean().item() if n_pos > 0 else 0.0
-
-    return loss, alignment
+    return ce_causal + lambda_cie * consistency, ce_causal.item(), consistency.item()
 
 
 # =============================================================================
@@ -305,18 +289,9 @@ class Cfg:
     lr_proj: float = 1e-4
     lr_head: float = 1e-4
     wd: float = 0.01
-    lambda_hcdt: float = 0.3
-    tau: float = 0.07
-    ast_threshold: float = 0.3
-    gene_threshold: float = 1.0
+    lambda_cie: float = 0.5
     warmup: float = 0.1
     device: str = "cuda"
-
-    def __post_init__(self):
-        if self.benchmark == "codet_m4":
-            self.gene_adj = GENE_ADJ_CODET
-        else:
-            self.gene_adj = GENE_ADJ_AICD
 
 
 def _hw(cfg):
@@ -357,14 +332,19 @@ def _conv_codet(split, task, vocab):
                 label = 0
             else:
                 label = vocab.get(str(r.get("model", "") or "").strip(), -1)
-        return {"code": code, "label": label}
+        # Extract source hash for confounder
+        source = str(r.get("source", "") or r.get("language", "")).strip().lower()
+        source_id = hash(source) % 50
+        return {"code": code, "label": label, "source_id": source_id}
     out = split.map(row, remove_columns=split.column_names)
     return out.filter(lambda x: x["label"] >= 0 and len(x["code"].strip()) > 0)
 
 
 def _conv_aicd(split):
     def row(r):
-        return {"code": str(r.get("code", "")).strip(), "label": int(r.get("label", -1))}
+        source = str(r.get("source", "") or r.get("language", "")).strip().lower()
+        source_id = hash(source) % 50
+        return {"code": str(r.get("code", "")).strip(), "label": int(r.get("label", -1)), "source_id": source_id}
     out = split.map(row, remove_columns=split.column_names)
     return out.filter(lambda x: x["label"] >= 0 and len(x["code"].strip()) > 0)
 
@@ -433,28 +413,37 @@ class FSDS(TD):
         ids = enc["input_ids"].squeeze(0)
         mask = enc["attention_mask"].squeeze(0)
         ast_feat = extract_ast_features(code, 128)
+        source_id = r.get("source_id", 0)
         return {
             "ids": ids, "mask": mask,
             "ast_feat": torch.tensor(ast_feat, dtype=torch.float32),
-            "label": r["label"]
+            "label": r["label"],
+            "source_id": source_id
         }
 
 
-def train_epoch(model, loader, opt, sch, scaler, cfg, dt_pairs):
+def train_epoch(model, loader, opt, sch, scaler, cfg):
     model.train()
-    total_loss, total_ce, total_hcdt = 0, 0, 0
+    total_loss, total_ce, total_cons = 0, 0, 0
 
     for b in tqdm(loader, desc="Train"):
         ids = b["ids"].to(cfg.device)
         mask = b["mask"].to(cfg.device)
         ast_feat = b["ast_feat"].to(cfg.device)
         labs = b["label"].to(cfg.device)
+        source_ids = b["source_id"].to(cfg.device)
+
+        # Update source prior for backdoor adjustment
+        model.update_source_prior(source_ids)
 
         with torch.autocast(device_type='cuda', enabled=(cfg.device == "cuda")):
-            logits, emb = model(ids, mask, ast_feat)
-            loss_ce = F.cross_entropy(logits, labs)
-            loss_hcdt, _ = compute_hcdt_loss(emb, ast_feat, labs, dt_pairs, cfg.tau)
-            loss = loss_ce + cfg.lambda_hcdt * loss_hcdt
+            # Causal prediction (with backdoor adjustment)
+            logits_causal = model(ids, mask, ast_feat, source_ids, use_adjustment=True)
+            # Confounded prediction (without adjustment)
+            logits_confounded = model(ids, mask, ast_feat, source_ids, use_adjustment=False)
+
+            loss, ce, cons = cie_loss(logits_causal, logits_confounded, labs, cfg.lambda_cie)
+            loss = loss
 
         scaler.scale(loss).backward()
         scaler.unscale_(opt)
@@ -465,11 +454,11 @@ def train_epoch(model, loader, opt, sch, scaler, cfg, dt_pairs):
         sch.step()
 
         total_loss += loss.item()
-        total_ce += loss_ce.item()
-        total_hcdt += loss_hcdt.item()
+        total_ce += ce
+        total_cons += cons
 
     n = len(loader)
-    return total_loss / n, total_ce / n, total_hcdt / n
+    return total_loss / n, total_ce / n, total_cons / n
 
 
 @torch.no_grad()
@@ -481,8 +470,10 @@ def eval_model(model, loader, cfg):
         mask = b["mask"].to(cfg.device)
         ast_feat = b["ast_feat"].to(cfg.device)
         labs = b["label"]
+        source_ids = b["source_id"].to(cfg.device)
 
-        logits, _ = model(ids, mask, ast_feat)
+        # Use causal predictions for evaluation
+        logits = model(ids, mask, ast_feat, source_ids, use_adjustment=True)
         preds.extend(logits.argmax(dim=-1).cpu().tolist())
         labels.extend(labs.tolist())
 
@@ -498,14 +489,7 @@ def eval_model(model, loader, cfg):
 def run_exp(cfg: Cfg, tag: str):
     set_seed(cfg.seed)
     cfg = _hw(cfg)
-    logger.info(f"[exp40] HCDT: {tag} | frac={cfg.frac}")
-
-    dt_pairs = DualTreePositivePairs(
-        ast_threshold=cfg.ast_threshold,
-        gene_threshold=cfg.gene_threshold,
-        gene_adj=cfg.gene_adj,
-        n_cls=cfg.n_cls
-    )
+    logger.info(f"[exp46] CIE: {tag} | frac={cfg.frac}")
 
     if cfg.benchmark == "codet_m4":
         tr_raw, vl_raw, ts_raw = _load_codet()
@@ -532,12 +516,12 @@ def run_exp(cfg: Cfg, tag: str):
     vl_dl = DataLoader(vl_ds, shuffle=False, **loader_cfg)
     ts_dl = DataLoader(ts_ds, shuffle=False, **loader_cfg)
 
-    model = HCDTModel(cfg.enc, cfg.n_cls, cfg.tau).to(cfg.device)
+    model = CIEModel(cfg.enc, cfg.n_cls).to(cfg.device)
 
     opt = torch.optim.AdamW([
         {"params": model.encoder.parameters(), "lr": cfg.lr_enc},
         {"params": model.ast_encoder.parameters(), "lr": cfg.lr_proj},
-        {"params": model.proj.parameters(), "lr": cfg.lr_proj},
+        {"params": model.adjust_net.parameters(), "lr": cfg.lr_proj},
         {"params": model.clf.parameters(), "lr": cfg.lr_head}
     ], weight_decay=cfg.wd)
 
@@ -550,9 +534,9 @@ def run_exp(cfg: Cfg, tag: str):
 
     best_val, best_state = 0, None
     for epoch in range(cfg.epochs):
-        loss, loss_ce, loss_hcdt = train_epoch(model, tr_dl, opt, sch, scaler, cfg, dt_pairs)
+        loss, loss_ce, loss_cons = train_epoch(model, tr_dl, opt, sch, scaler, cfg)
         val_met = eval_model(model, vl_dl, cfg)
-        logger.info(f"  E{epoch+1}: loss={loss:.4f} ce={loss_ce:.4f} hcdt={loss_hcdt:.4f} | val={val_met['macro']:.4f}")
+        logger.info(f"  E{epoch+1}: loss={loss:.4f} ce={loss_ce:.4f} cons={loss_cons:.4f} | val={val_met['macro']:.4f}")
         if val_met["macro"] > best_val:
             best_val = val_met["macro"]
             best_state = {k: v.cpu().clone() for k, v in model.state_dict().items()}
@@ -564,7 +548,7 @@ def run_exp(cfg: Cfg, tag: str):
 
     result = {
         "tag": tag,
-        "method": "HCDT",
+        "method": "CIE",
         "enc": cfg.enc,
         "bench": cfg.benchmark,
         "frac": cfg.frac,
@@ -592,7 +576,7 @@ def main():
     for bench, task, n_cls in benchmarks:
         for frac in fracs:
             cfg = Cfg(benchmark=bench, task=task, enc=enc, frac=frac, n_cls=n_cls)
-            tag = f"exp40_hcdt_{enc}_{bench}_f{frac:.2f}"
+            tag = f"exp46_cie_{enc}_{bench}_f{frac:.2f}"
             try:
                 r = run_exp(cfg, tag)
                 logger.info(f"  RESULT: {tag} | macro={r['macro']:.4f} Δ={r['dpaper']:+.4f}")

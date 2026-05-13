@@ -62,6 +62,7 @@ import warnings
 from collections import Counter, defaultdict
 from dataclasses import dataclass
 from datetime import datetime
+from glob import glob
 from typing import Dict, List, Optional, Tuple
 
 os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
@@ -136,7 +137,7 @@ class FSConfig:
     train_fraction: float = 0.0
     n_classes: int = 6
     fs_seed: int = 42
-    encoder_name: str = "answerdotai/ModernBERT-base"
+    encoder_name: str = "ModernBERT-base"
     max_length: int = 384
     epochs: int = 1
     batch_size: int = 16
@@ -416,19 +417,25 @@ class FSClassifier(nn.Module):
         self.encoder = AutoModel.from_pretrained(enc_path, local_files_only=True)
         h = self.encoder.config.hidden_size
         self.dropout = nn.Dropout(0.1)
+        self.vib_head = VIBHead(h, h)  # z_dim = hidden_size for VIB
         self.classifier = nn.Linear(h, cfg.n_classes)
         self.ntk_proj = nn.Sequential(nn.Linear(h, cfg.ntk_proj_dim), nn.GELU(),
                                        nn.Linear(cfg.ntk_proj_dim, cfg.ntk_proj_dim))
 
-    def forward(self, ids, mask):
+    def forward(self, ids, mask, sample=True):
         out = self.encoder(input_ids=ids, attention_mask=mask)
         e = _pool(out.last_hidden_state, mask)
-        return {"logits": self.classifier(self.dropout(e)),
-                "ntk_proj": F.normalize(self.ntk_proj(e), dim=-1)}
+        z, kl = self.vib_head(e, sample=sample)
+        logits = self.classifier(self.dropout(z))
+        return {"logits": logits,
+                "ntk_proj": F.normalize(self.ntk_proj(z), dim=-1),
+                "kl": kl}
 
     def param_groups(self):
         enc = list(self.encoder.parameters())
-        head = list(self.classifier.parameters()) + list(self.ntk_proj.parameters())
+        head = (list(self.classifier.parameters()) + 
+                list(self.ntk_proj.parameters()) +
+                list(self.vib_head.parameters()))
         return [{"params": enc, "lr": self.cfg.lr_encoder, "weight_decay": self.cfg.weight_decay},
                 {"params": head, "lr": self.cfg.lr_heads, "weight_decay": self.cfg.weight_decay}]
 
@@ -483,7 +490,7 @@ def _eval(model, loader, cfg, dev):
         m = b["attention_mask"].to(dev, non_blocking=True)
         with autocast(device_type="cuda" if dev.type == "cuda" else "cpu",
                       enabled=dev.type == "cuda", dtype=dt):
-            out = model(ids, m)
+            out = model(ids, m, sample=False)  # deterministic for eval
         p = out["logits"].argmax(-1).cpu().numpy()
         P.extend(p.tolist()); L.extend(b["labels"].tolist())
         La.extend(b.get("languages", [""] * len(p)))
@@ -535,7 +542,7 @@ def train(cfg, model, train_l, val_l, test_l, lambda_method):
             opt.zero_grad(set_to_none=True)
             with autocast(device_type="cuda" if dev.type == "cuda" else "cpu",
                           enabled=dev.type == "cuda", dtype=dt):
-                out = model(ids, mask)
+                out = model(ids, mask, sample=True)  # stochastic for training
                 losses = vib_loss(out, y, beta=lambda_method, class_weights=cw)
                 loss = losses["total"]
             if scaler.is_enabled():

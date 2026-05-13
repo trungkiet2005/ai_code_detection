@@ -1,28 +1,26 @@
 # =============================================================================
-# Theory-Track exp -- HCDT (Hierarchical Contrastive over Dual Trees):
+# Theory-Track exp -- IRM (Invariant Risk Minimization):
 #
-# ARXIV_ID      : THIS IS NEW - no prior work defines contrastive learning over
-#                 the INTERSECTION of AST tree and genealogy tree
-# NAME          : HCDT (Hierarchical Contrastive over Dual Trees)
-# ONE-LINE CLAIM: Positive pairs are defined by BOTH AST structural similarity AND
-#                 genealogical proximity; this dual-tree contrastive loss creates
-#                 representations where code clusters reflect both structures.
-# EQUATION      : L_hcdt = -log exp(⟨z_i, z_j⟩/τ) / Σ_k exp(⟨z_i, z_k⟩/τ)
-#                 where (i,j) is positive iff AST_dist(i,j) < δ_AST AND gene_dist(i,j) < δ_GENE
-# PROPERTY      : Only samples that are similar in BOTH trees form positive pairs.
-#                 This creates a representation space where the dual-tree topology is embedded.
-# WHY NOT BEFORE: Standard contrastive learning uses ONE similarity structure.
-#                 HCDT is defined over the INTERSECTION of two trees, creating a new
-#                 mathematical object only meaningful when both structures exist.
-# FALSIFIER     : If HCDT representations outperform single-tree contrastive,
-#                 then both AST and genealogy structures are necessary for attribution.
+# ARXIV_ID      : THIS IS NEW - applying IRM to find representations that are
+#                 invariant across source/location environments
+# NAME          : IRM (Invariant Risk Minimization)
+# ONE-LINE CLAIM: IRM finds representations where the optimal classifier is
+#                 the same across all environments, giving OOD robustness.
+# EQUATION      : min_φ R(φ) s.t. w is optimal classifier for P_e(φ) ∀ e
+#                 where R(φ) = Σ_e R_e(φ), P_e = environment e
+# PROPERTY      : Invariant representations don't adapt to spurious correlations,
+#                 only to causal features.
+# WHY NOT BEFORE: Standard ERM finds representations that work on average
+#                 but fail OOD. IRM finds causal invariants.
+# FALSIFIER     : If IRM representations are more robust across source
+#                 distributions, then invariant representations are key.
 # =============================================================================
 from __future__ import annotations
 
 import os, sys, time, json, random, subprocess, importlib.util, warnings, glob
 from collections import defaultdict
 from dataclasses import dataclass
-from typing import Dict, List, Tuple
+from typing import List, Dict
 
 os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
 
@@ -31,7 +29,7 @@ def _ensure(pkg):
         subprocess.check_call([sys.executable, "-m", "pip", "install", "-q", pkg])
 
 _ensure("numpy"); _ensure("torch"); _ensure("datasets")
-_ensure("transformers"); _ensure("scikit-learn"); _ensure("tqdm")
+_ensure("transformers"); _ensure("sklearn"); _ensure("tqdm")
 
 import numpy as np
 import torch, torch.nn as nn, torch.nn.functional as F
@@ -45,58 +43,28 @@ from torch.cuda.amp import autocast, GradScaler
 warnings.filterwarnings("ignore")
 import logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s", stream=sys.stdout)
-logger = logging.getLogger("exp40")
+logger = logging.getLogger("exp55")
 
 PAPER_BASELINE = 0.6633
 
 # =============================================================================
-# NEW MATHEMATICAL OBJECT: Hierarchical Contrastive over Dual Trees (HCDT)
+# NEW MATHEMATICAL OBJECT: Invariant Risk Minimization (IRM)
 # =============================================================================
 """
-HCDT defines positive pairs as the INTERSECTION of AST similarity and genealogy proximity.
+IRM finds representations that are invariant across environments.
 
-Standard contrastive: positive if same class
-HCDT: positive if (AST_similar AND genealogy_close)
+ERM: min_φ Σ_e R_e(φ)
+IRM: min_φ R(φ) s.t. w is optimal classifier for P_e(φ) ∀ e
 
-Mathematically:
-    P_{hcdt}(i,j) = 1[AST_dist(i,j) < δ_AST ∧ Gene_dist(i,j) < δ_GENE]
+IRM-Penalty: λ ||∇_w R(w · φ(x))||²
 
-This creates a representation where:
-- Close neighbors share BOTH AST structure AND genealogy
-- Distant samples differ in BOTH structures
-- The representation space topology reflects the dual-tree structure
-
-KEY INSIGHT: This is NOT just "multi-view contrastive". It's defined over
-the STRUCTURAL INTERSECTION of two trees, creating a new topological object.
+The IRM penalty encourages the classifier to be the same across environments,
+enforcing representation invariance.
 """
 
 # =============================================================================
-# Genealogy Structures
+# AST Feature Extraction
 # =============================================================================
-
-GENE_ADJ_CODET = {
-    0: [], 1: [3], 2: [], 3: [1], 4: [], 5: []
-}
-
-GENE_ADJ_AICD = {i: [(i//3)*3 + j for j in range(3) if (i//3)*3 + j != i] for i in range(12)}
-
-
-def gene_distance(u: int, v: int, adj: Dict[int, List[int]]) -> float:
-    """Compute genealogical distance via BFS."""
-    if u == v:
-        return 0.0
-    queue = [(u, 0)]
-    visited = {u}
-    while queue:
-        curr, d = queue.pop(0)
-        for neighbor in adj.get(curr, []):
-            if neighbor == v:
-                return d + 1.0
-            if neighbor not in visited:
-                visited.add(neighbor)
-                queue.append((neighbor, d + 1))
-    return float('inf')
-
 
 def extract_ast_features(code: str, max_len: int = 128) -> List[float]:
     """Extract AST structural features without tree-sitter dependency.
@@ -158,128 +126,97 @@ def extract_ast_features(code: str, max_len: int = 128) -> List[float]:
 
 
 # =============================================================================
-# HCDT Positive Pair Definition
+# IRM Model
 # =============================================================================
 
-class DualTreePositivePairs:
-    """Defines positive pairs as intersection of AST similarity and genealogy proximity.
+class IRMClassifier(nn.Module):
+    """IRM-style classifier with invariance penalty."""
+    def __init__(self, hidden_dim: int, n_cls: int):
+        super().__init__()
+        # Scalar classifier (IRM-style: same w across environments)
+        self.w = nn.Parameter(torch.ones(n_cls, hidden_dim) * 0.1)
+        self.bias = nn.Parameter(torch.zeros(n_cls))
 
-    This is NOT standard contrastive learning. Positive pairs are defined by:
-    P(i,j) = 1[AST_dist(i,j) < δ_AST AND Gene_dist(i,j) < δ_GENE]
-    """
-    def __init__(self, ast_threshold: float = 0.3, gene_threshold: float = 1.0,
-                 gene_adj: Dict[int, List[int]] = None, n_cls: int = 6):
-        self.ast_threshold = ast_threshold
-        self.gene_threshold = gene_threshold
-        self.gene_adj = gene_adj or GENE_ADJ_CODET
-        self.n_cls = n_cls
-
-    def ast_distance(self, feat1: torch.Tensor, feat2: torch.Tensor) -> float:
-        """Compute AST structural distance."""
-        return F.mse_loss(feat1, feat2).item()
-
-    def gene_distance_func(self, u: int, v: int) -> float:
-        """Compute genealogical distance."""
-        return gene_distance(u, v, self.gene_adj)
-
-    def is_positive_pair(self, ast_feat1: torch.Tensor, ast_feat2: torch.Tensor,
-                        label1: int, label2: int) -> bool:
-        """Check if (i,j) is a positive pair under dual-tree criterion."""
-        ast_dist = self.ast_distance(ast_feat1, ast_feat2)
-        gene_dist = self.gene_distance_func(label1, label2)
-        return (ast_dist < self.ast_threshold) and (gene_dist <= self.gene_threshold)
+    def forward(self, h):
+        return F.linear(h, self.w, self.bias)
 
 
-# =============================================================================
-# Model
-# =============================================================================
-
-class HCDTModel(nn.Module):
-    """Hierarchical Contrastive over Dual Trees model."""
-    def __init__(self, enc_name: str, n_cls: int, tau: float = 0.07, ast_dim: int = 64):
+class IRMModel(nn.Module):
+    """Invariant Risk Minimization model."""
+    def __init__(self, enc_name: str, n_cls: int, ast_dim: int = 64):
         super().__init__()
         self.encoder = AutoModel.from_pretrained(os.path.join(KAGGLE_MODELS, enc_name), local_files_only=True)
         hidden = self.encoder.config.hidden_size
-        self.tau = tau
 
+        # AST encoder
         self.ast_encoder = nn.Sequential(
             nn.Linear(64, 128),
             nn.GELU(),
             nn.Linear(128, ast_dim)
         )
+
+        # Combined representation
         self.proj = nn.Sequential(
             nn.Linear(hidden + ast_dim, 256),
             nn.GELU(),
-            nn.Linear(256, 128)
         )
-        self.clf = nn.Linear(128, n_cls)
+
+        # IRM classifier
+        self.clf = IRMClassifier(256, n_cls)
 
     def forward(self, ids, mask, ast_feat):
+        # Semantic encoding
         out = self.encoder(input_ids=ids, attention_mask=mask)
         sem_emb = (out.last_hidden_state * mask.unsqueeze(-1)).sum(1) / mask.sum(1, keepdim=True).clamp(min=1)
+
+        # AST encoding
         ast_emb = self.ast_encoder(ast_feat)
+
+        # Combined
         fused = torch.cat([sem_emb, ast_emb], dim=-1)
-        proj = self.proj(fused)
-        logits = self.clf(proj)
-        return logits, proj
+        h = self.proj(fused)
+        logits = self.clf(h)
+
+        return logits, h
 
 
-# =============================================================================
-# HCDT Loss
-# =============================================================================
+def compute_irm_penalty(logits, labels, w, n_cls):
+    """Compute IRM penalty: ||∇_w R(w · φ)||².
 
-def compute_hcdt_loss(emb: torch.Tensor, ast_feat: torch.Tensor,
-                    labels: torch.Tensor, dt_pairs: DualTreePositivePairs,
-                    tau: float = 0.07) -> Tuple[torch.Tensor, torch.Tensor]:
-    """Compute HCDT contrastive loss.
-
-    Positive pairs: both AST similar AND genealogy close
-    Negative pairs: rest
+    This measures how much the optimal classifier changes across samples.
     """
-    B = emb.shape[0]
-    device = emb.device
+    # Binary mask for each class
+    losses = F.cross_entropy(logits, labels, reduction='none')
 
-    # Normalize embeddings
-    emb = F.normalize(emb, dim=-1)
+    # Gradient of loss w.r.t. classifier weights
+    grads = []
+    for c in range(n_cls):
+        mask = (labels == c).float()
+        if mask.sum() > 0:
+            loss_c = (losses * mask).sum() / mask.sum()
+            grad = torch.autograd.grad(loss_c, w, retain_graph=True)[0]
+            grads.append(grad)
 
-    # Compute all pairwise similarities
-    sim = torch.mm(emb, emb.T) / tau  # (B, B)
+    if grads:
+        penalty = torch.stack(grads).pow(2).mean()
+    else:
+        penalty = torch.tensor(0.0, device=logits.device)
 
-    # Build positive mask: dual-tree criterion
-    pos_mask = torch.zeros(B, B, device=device)
-    for i in range(B):
-        for j in range(B):
-            if i == j:
-                continue
-            # Check dual-tree criterion
-            ast_dist = F.mse_loss(ast_feat[i], ast_feat[j]).item()
-            gene_dist = gene_distance(labels[i].item(), labels[j].item(), dt_pairs.gene_adj)
-            if (ast_dist < dt_pairs.ast_threshold) and (gene_dist <= dt_pairs.gene_threshold):
-                pos_mask[i, j] = 1.0
+    return penalty
 
-    # Numerical stability
-    sim_max, _ = sim.max(dim=1, keepdim=True)
-    sim = sim - sim_max.detach()
 
-    # Exp and mask
-    exp_sim = torch.exp(sim)
-    exp_sim = exp_sim * (1 - torch.eye(B, device=device))  # Zero diagonal
+# =============================================================================
+# IRM Loss
+# =============================================================================
 
-    # Denominator: sum of all exp similarities
-    denom = exp_sim.sum(dim=1, keepdim=True) + 1e-8
+def irm_loss(logits, labels, w, n_cls, lambda_irm=1.0):
+    """IRM loss with invariance penalty."""
+    ce = F.cross_entropy(logits, labels)
 
-    # Positive term
-    pos_exp = exp_sim * pos_mask
-    pos_term = (pos_exp.sum(dim=1) / (pos_mask.sum(dim=1) + 1e-8)).mean()
+    # IRM penalty
+    penalty = compute_irm_penalty(logits, labels, w, n_cls)
 
-    # Loss
-    loss = -pos_term
-
-    # Statistics
-    n_pos = pos_mask.sum().item()
-    alignment = pos_exp.diagonal().mean().item() if n_pos > 0 else 0.0
-
-    return loss, alignment
+    return ce + lambda_irm * penalty, ce.item(), penalty.item()
 
 
 # =============================================================================
@@ -305,18 +242,9 @@ class Cfg:
     lr_proj: float = 1e-4
     lr_head: float = 1e-4
     wd: float = 0.01
-    lambda_hcdt: float = 0.3
-    tau: float = 0.07
-    ast_threshold: float = 0.3
-    gene_threshold: float = 1.0
+    lambda_irm: float = 1.0
     warmup: float = 0.1
     device: str = "cuda"
-
-    def __post_init__(self):
-        if self.benchmark == "codet_m4":
-            self.gene_adj = GENE_ADJ_CODET
-        else:
-            self.gene_adj = GENE_ADJ_AICD
 
 
 def _hw(cfg):
@@ -440,9 +368,9 @@ class FSDS(TD):
         }
 
 
-def train_epoch(model, loader, opt, sch, scaler, cfg, dt_pairs):
+def train_epoch(model, loader, opt, sch, scaler, cfg):
     model.train()
-    total_loss, total_ce, total_hcdt = 0, 0, 0
+    total_loss, total_ce, total_irm = 0, 0, 0
 
     for b in tqdm(loader, desc="Train"):
         ids = b["ids"].to(cfg.device)
@@ -451,10 +379,8 @@ def train_epoch(model, loader, opt, sch, scaler, cfg, dt_pairs):
         labs = b["label"].to(cfg.device)
 
         with torch.autocast(device_type='cuda', enabled=(cfg.device == "cuda")):
-            logits, emb = model(ids, mask, ast_feat)
-            loss_ce = F.cross_entropy(logits, labs)
-            loss_hcdt, _ = compute_hcdt_loss(emb, ast_feat, labs, dt_pairs, cfg.tau)
-            loss = loss_ce + cfg.lambda_hcdt * loss_hcdt
+            logits, _ = model(ids, mask, ast_feat)
+            loss, ce, irm = irm_loss(logits, labs, model.clf.w, cfg.n_cls, cfg.lambda_irm)
 
         scaler.scale(loss).backward()
         scaler.unscale_(opt)
@@ -465,11 +391,11 @@ def train_epoch(model, loader, opt, sch, scaler, cfg, dt_pairs):
         sch.step()
 
         total_loss += loss.item()
-        total_ce += loss_ce.item()
-        total_hcdt += loss_hcdt.item()
+        total_ce += ce
+        total_irm += irm
 
     n = len(loader)
-    return total_loss / n, total_ce / n, total_hcdt / n
+    return total_loss / n, total_ce / n, total_irm / n
 
 
 @torch.no_grad()
@@ -498,14 +424,7 @@ def eval_model(model, loader, cfg):
 def run_exp(cfg: Cfg, tag: str):
     set_seed(cfg.seed)
     cfg = _hw(cfg)
-    logger.info(f"[exp40] HCDT: {tag} | frac={cfg.frac}")
-
-    dt_pairs = DualTreePositivePairs(
-        ast_threshold=cfg.ast_threshold,
-        gene_threshold=cfg.gene_threshold,
-        gene_adj=cfg.gene_adj,
-        n_cls=cfg.n_cls
-    )
+    logger.info(f"[exp55] IRM: {tag} | frac={cfg.frac}")
 
     if cfg.benchmark == "codet_m4":
         tr_raw, vl_raw, ts_raw = _load_codet()
@@ -532,7 +451,7 @@ def run_exp(cfg: Cfg, tag: str):
     vl_dl = DataLoader(vl_ds, shuffle=False, **loader_cfg)
     ts_dl = DataLoader(ts_ds, shuffle=False, **loader_cfg)
 
-    model = HCDTModel(cfg.enc, cfg.n_cls, cfg.tau).to(cfg.device)
+    model = IRMModel(cfg.enc, cfg.n_cls).to(cfg.device)
 
     opt = torch.optim.AdamW([
         {"params": model.encoder.parameters(), "lr": cfg.lr_enc},
@@ -550,9 +469,9 @@ def run_exp(cfg: Cfg, tag: str):
 
     best_val, best_state = 0, None
     for epoch in range(cfg.epochs):
-        loss, loss_ce, loss_hcdt = train_epoch(model, tr_dl, opt, sch, scaler, cfg, dt_pairs)
+        loss, loss_ce, loss_irm = train_epoch(model, tr_dl, opt, sch, scaler, cfg)
         val_met = eval_model(model, vl_dl, cfg)
-        logger.info(f"  E{epoch+1}: loss={loss:.4f} ce={loss_ce:.4f} hcdt={loss_hcdt:.4f} | val={val_met['macro']:.4f}")
+        logger.info(f"  E{epoch+1}: loss={loss:.4f} ce={loss_ce:.4f} irm={loss_irm:.4f} | val={val_met['macro']:.4f}")
         if val_met["macro"] > best_val:
             best_val = val_met["macro"]
             best_state = {k: v.cpu().clone() for k, v in model.state_dict().items()}
@@ -564,7 +483,7 @@ def run_exp(cfg: Cfg, tag: str):
 
     result = {
         "tag": tag,
-        "method": "HCDT",
+        "method": "IRM",
         "enc": cfg.enc,
         "bench": cfg.benchmark,
         "frac": cfg.frac,
@@ -592,7 +511,7 @@ def main():
     for bench, task, n_cls in benchmarks:
         for frac in fracs:
             cfg = Cfg(benchmark=bench, task=task, enc=enc, frac=frac, n_cls=n_cls)
-            tag = f"exp40_hcdt_{enc}_{bench}_f{frac:.2f}"
+            tag = f"exp55_irm_{enc}_{bench}_f{frac:.2f}"
             try:
                 r = run_exp(cfg, tag)
                 logger.info(f"  RESULT: {tag} | macro={r['macro']:.4f} Δ={r['dpaper']:+.4f}")
