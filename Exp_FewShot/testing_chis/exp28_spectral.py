@@ -72,7 +72,7 @@ class Cfg:
     enc: str = "ModernBERT-base"
     n_cls: int = 6
     seed: int = 42
-    bs: int = 256
+    bs: int = 64
     seq: int = 512
     epochs: int = 3
     lr_enc: float = 2e-5

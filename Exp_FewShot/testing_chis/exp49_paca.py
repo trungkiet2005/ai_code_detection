@@ -17,6 +17,9 @@
 # =============================================================================
 from __future__ import annotations
 
+# === KAGGLE PATHS ===
+KAGGLE_MODELS = "/kaggle/input/datasets/chiboiz/ai-detection-encoders/models"
+
 import os, sys, time, json, random, subprocess, importlib.util, warnings, glob
 from collections import defaultdict
 from dataclasses import dataclass
@@ -71,61 +74,88 @@ leverages the specific structure of the hypothesis space.
 # =============================================================================
 
 def extract_ast_features(code: str, max_len: int = 128) -> List[float]:
-    """Extract AST structural features without tree-sitter dependency.
+    """Extract structural code features (legacy-aligned, offline-only).
 
-    Features capture hierarchical code structure:
-    - Function/class definitions
-    - Control flow patterns
-    - Nesting depth
-    - Loop structures
+    Mirrors legacy/Exp_DM_weak/exp06_ast_irm.py::extract_structural_features:
+    richer 22-feature structural vector, normalized + padded to max_len.
+    No tree-sitter dependency (offline-safe).
     """
-    import re
+    import re as _re
 
-    features = []
+    lines = code.split("\n")
+    num_lines = max(len(lines), 1)
+    line_lens = [len(l) for l in lines]
+    avg_line_len = float(np.mean(line_lens)) if line_lens else 0.0
+    max_line_len = float(max(line_lens)) if line_lens else 0.0
 
-    # Count patterns that indicate structure
-    n_func = len(re.findall(r'\b(def|function|func|fn)\s+\w+', code))
-    n_class = len(re.findall(r'\b(class|struct|interface|enum)\s+\w+', code))
-    n_if = len(re.findall(r'\bif\s*[\(\{]', code))
-    n_for = len(re.findall(r'\b(for|foreach)\s*[\(\{]', code))
-    n_while = len(re.findall(r'\bwhile\s*[\(\{]', code))
-    n_return = len(re.findall(r'\breturn\b', code))
-    n_import = len(re.findall(r'\b(import|from|include|require)\b', code))
-    n_comment = len(re.findall(r'(//|#|/\*|\'\'\'|""")', code))
+    indents = [len(l) - len(l.lstrip()) for l in lines if l.strip()]
+    avg_indent = float(np.mean(indents)) if indents else 0.0
+    max_indent = float(max(indents)) if indents else 0.0
+    indent_var = float(np.var(indents)) if indents else 0.0
 
-    # Nesting depth estimation
+    n_func = len(_re.findall(r"\b(def|function|func|fn)\s+\w+", code))
+    n_class = len(_re.findall(r"\b(class|struct|interface|enum)\s+\w+", code))
+    n_for = len(_re.findall(r"\b(for|foreach)\s*[\(\{]", code))
+    n_while = len(_re.findall(r"\bwhile\s*[\(\{]", code))
+    n_loops = n_for + n_while
+    n_if = len(_re.findall(r"\bif\s*[\(\{]", code))
+    n_else = code.count("else ") + code.count("elif ")
+    n_cond = n_if + n_else
+    n_return = len(_re.findall(r"\breturn\b", code))
+    n_comment = code.count("//") + code.count("#") + code.count("/*")
+    n_import = len(_re.findall(r"\b(import|from|include|require|using)\b", code))
+    n_try = code.count("try") + code.count("catch") + code.count("except")
+
     max_depth = 0
     depth = 0
     for c in code:
-        if c in '{([':
+        if c in "{([":
             depth += 1
-            max_depth = max(max_depth, depth)
-        elif c in '})]':
+            if depth > max_depth:
+                max_depth = depth
+        elif c in "})]":
             depth = max(0, depth - 1)
 
-    # Line statistics
-    lines = code.split('\n')
-    avg_indent = np.mean([len(l) - len(l.lstrip()) for l in lines if l.strip()]) if lines else 0
+    identifiers = _re.findall(r"\b[a-zA-Z_]\w*\b", code)
+    n_ids = max(len(identifiers), 1)
+    snake_ratio = sum(1 for i in identifiers if "_" in i and i.islower()) / n_ids
+    camel_ratio = sum(1 for i in identifiers if any(c.isupper() for c in i[1:]) and "_" not in i) / n_ids
+    short_ratio = sum(1 for i in identifiers if len(i) == 1) / n_ids
+    avg_id_len = float(np.mean([len(i) for i in identifiers])) if identifiers else 0.0
+
+    empty_ratio = sum(1 for l in lines if not l.strip()) / num_lines
+    code_len = max(len(code), 1)
+    alpha_ratio = sum(c.isalpha() for c in code) / code_len
+    digit_ratio = sum(c.isdigit() for c in code) / code_len
+    space_ratio = sum(c.isspace() for c in code) / code_len
 
     features = [
+        num_lines / 500.0,
+        avg_line_len / 80.0,
+        max_line_len / 200.0,
+        avg_indent / 10.0,
+        max_indent / 20.0,
+        indent_var / 50.0,
         n_func / 10.0,
         n_class / 5.0,
-        n_if / 20.0,
-        n_for / 10.0,
-        n_while / 10.0,
+        n_loops / 10.0,
+        n_cond / 20.0,
         n_return / 20.0,
-        n_import / 10.0,
         n_comment / 50.0,
+        n_import / 10.0,
+        n_try / 10.0,
         max_depth / 15.0,
-        avg_indent / 10.0,
-        len(code) / 10000.0,
-        len(lines) / 500.0,
+        snake_ratio,
+        camel_ratio,
+        short_ratio,
+        avg_id_len / 10.0,
+        empty_ratio,
+        alpha_ratio,
+        digit_ratio,
     ]
 
-    # Pad to fixed length
-    while len(features) < max_len:
-        features.append(0.0)
-
+    if len(features) < max_len:
+        features = features + [0.0] * (max_len - len(features))
     return features[:max_len]
 
 
@@ -150,14 +180,13 @@ class PACBayesLinear(nn.Module):
 
     def forward(self, x, sample=True):
         if sample:
-            # Sample weights from posterior
+            # Sample weights from posterior (reparameterization)
             weight_std = self.weight_log_std.exp()
             bias_std = self.bias_log_std.exp()
 
-            weight = self.weight_mu + torch.randn_like(self.weight_std) * self.weight_std if hasattr(self, 'weight_std') else self.weight_mu
-            bias = self.bias_mu + torch.randn_like(self.bias_std) * self.bias_std if hasattr(self, 'bias_std') else self.bias_mu
+            weight = self.weight_mu + torch.randn_like(weight_std) * weight_std
+            bias = self.bias_mu + torch.randn_like(bias_std) * bias_std
 
-            # Compute with sampled weights
             return F.linear(x, weight, bias)
         else:
             # Use mean for inference
@@ -276,11 +305,19 @@ class Cfg:
     device: str = "cuda"
 
 
-def _hw(cfg):
+def _hw(cfg: Cfg) -> Cfg:
     if torch.cuda.is_available():
         torch.backends.cuda.matmul.allow_tf32 = True
         torch.backends.cudnn.allow_tf32 = True
         torch.backends.cudnn.benchmark = True
+        mem = torch.cuda.get_device_properties(0).total_memory / 1e9
+        if mem >= 40:
+            cfg.bs, cfg.seq = 256, 512
+        elif mem >= 10:
+            cfg.bs, cfg.seq = 128, 384
+        else:
+            cfg.bs, cfg.seq = 64, 256
+        logger.info(f"[hw] mem={mem:.1f}GB bs={cfg.bs} seq={cfg.seq}")
     return cfg
 
 
@@ -363,10 +400,11 @@ def _load_aicd(task):
 
 
 class FSDS(TD):
-    def __init__(self, data, tok, seq_len, frac=1.0, seed=42):
+    def __init__(self, data, tok, seq_len, ast_dim=64, frac=1.0, seed=42):
         self.data = data
         self.tok = tok
         self.seq_len = seq_len
+        self.ast_dim = ast_dim
         if frac < 1.0:
             rng = random.Random(seed)
             labels = list(range(max(self.data["label"]) + 1))
@@ -389,7 +427,7 @@ class FSDS(TD):
                       truncation=True, return_tensors="pt")
         ids = enc["input_ids"].squeeze(0)
         mask = enc["attention_mask"].squeeze(0)
-        ast_feat = extract_ast_features(code, 128)
+        ast_feat = extract_ast_features(code, self.ast_dim)
         return {
             "ids": ids, "mask": mask,
             "ast_feat": torch.tensor(ast_feat, dtype=torch.float32),
@@ -407,7 +445,7 @@ def train_epoch(model, loader, opt, sch, scaler, cfg, m):
         ast_feat = b["ast_feat"].to(cfg.device)
         labs = b["label"].to(cfg.device)
 
-        with torch.autocast(device_type='cuda', enabled=(cfg.device == "cuda")):
+        with torch.autocast(device_type='cuda', dtype=torch.bfloat16, enabled=(cfg.device == "cuda")):
             logits = model(ids, mask, ast_feat, sample=True)
             kl = model.kl_divergence()
             loss, ce, kl_val = pac_a_loss(logits, labs, kl, m, cfg.delta, cfg.lambda_pac)
@@ -455,8 +493,6 @@ def eval_model(model, loader, cfg):
 def run_exp(cfg: Cfg, tag: str):
     set_seed(cfg.seed)
     cfg = _hw(cfg)
-    logger.info(f"[exp49] PAC-A: {tag} | frac={cfg.frac}")
-
     if cfg.benchmark == "codet_m4":
         tr_raw, vl_raw, ts_raw = _load_codet()
         vocab = _vocab(tr_raw)
@@ -477,7 +513,7 @@ def run_exp(cfg: Cfg, tag: str):
 
     logger.info(f"  Train: {len(tr_ds)} | Val: {len(vl_ds)} | Test: {len(ts_ds)}")
 
-    loader_cfg = dict(batch_size=cfg.bs, num_workers=2, pin_memory=True)
+    loader_cfg = dict(batch_size=cfg.bs, num_workers=4, pin_memory=True)
     tr_dl = DataLoader(tr_ds, shuffle=True, **loader_cfg)
     vl_dl = DataLoader(vl_ds, shuffle=False, **loader_cfg)
     ts_dl = DataLoader(ts_ds, shuffle=False, **loader_cfg)
@@ -504,16 +540,13 @@ def run_exp(cfg: Cfg, tag: str):
     for epoch in range(cfg.epochs):
         loss, loss_ce, loss_kl = train_epoch(model, tr_dl, opt, sch, scaler, cfg, m)
         val_met = eval_model(model, vl_dl, cfg)
-        logger.info(f"  E{epoch+1}: loss={loss:.4f} ce={loss_ce:.4f} kl={loss_kl:.4f} | val={val_met['macro']:.4f}")
+        logger.info(f"[epoch {epoch+1}] val={val_met['macro']:.4f}")
         if val_met["macro"] > best_val:
             best_val = val_met["macro"]
             best_state = {k: v.cpu().clone() for k, v in model.state_dict().items()}
 
     model.load_state_dict(best_state)
     ts_met = eval_model(model, ts_dl, cfg)
-
-    logger.info(f"  Test: macro={ts_met['macro']:.4f} | Δ={ts_met['macro']-PAPER_BASELINE:+.4f}")
-
     result = {
         "tag": tag,
         "method": "PAC-A",
@@ -527,29 +560,50 @@ def run_exp(cfg: Cfg, tag: str):
         "per_class_f1": ts_met["per_class"],
         "timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
     }
-
-    out_dir = os.path.join(os.path.dirname(__file__), "results")
-    os.makedirs(out_dir, exist_ok=True)
-    with open(os.path.join(out_dir, f"{tag}_results.json"), "w") as f:
-        json.dump(result, f, indent=2)
-
     return result
 
 
 def main():
-    enc = "unixcoder-base"
+    encoders = ["unixcoder-base"]
     benchmarks = [("codet_m4", "author", 6), ("aicd_t2", "t2", 12)]
     fracs = [0.01, 0.05, 0.20]
 
-    for bench, task, n_cls in benchmarks:
-        for frac in fracs:
-            cfg = Cfg(benchmark=bench, task=task, enc=enc, frac=frac, n_cls=n_cls)
-            tag = f"exp49_paca_{enc}_{bench}_f{frac:.2f}"
-            try:
-                r = run_exp(cfg, tag)
-                logger.info(f"  RESULT: {tag} | macro={r['macro']:.4f} Δ={r['dpaper']:+.4f}")
-            except Exception as e:
-                logger.error(f"  FAILED: {tag} | {e}")
+    results = []
+    for enc in encoders:
+        for bench, task, n_cls in benchmarks:
+            for frac in fracs:
+                cfg = Cfg(benchmark=bench, task=task, enc=enc, frac=frac, n_cls=n_cls)
+                cfg = _hw(cfg)
+                tag = f"exp49_paca_{enc}_{bench}_f{frac}"
+                logger.info(f"=== {tag} ===")
+                t0 = time.time()
+                try:
+                    res = run_exp(cfg, tag)
+                    elapsed = time.time() - t0
+                    res["wall"] = round(elapsed, 1)
+                    results.append(res)
+                    logger.info(f"[{tag}] MacroF1={res['macro']:.4f} ({res['macro']-PAPER_BASELINE:+.4f} vs paper) time={elapsed:.0f}s")
+                except Exception as e:
+                    logger.error(f"[{tag}] FAILED: {e}")
+                import gc; gc.collect()
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+
+    out_dir = os.path.join(os.path.dirname(os.path.realpath(__file__)), "results")
+    os.makedirs(out_dir, exist_ok=True)
+    with open(os.path.join(out_dir, "exp49_paca_results.json"), "w") as f:
+        json.dump(results, f, indent=2)
+
+    print("\n" + "=" * 100)
+    print(f"{'Encoder':<22} {'Benchmark':<12} {'Frac':>6} {'Macro-F1':>10} {'dPaper':>10} {'Weighted':>10} {'Wall':>8}")
+    print("-" * 100)
+    for r in results:
+        print(f"{r['enc']:<22} {r['bench']:<12} {r['frac']:>6.0%} {r['macro']:>10.4f} "
+              f"{r['dpaper']:>+10.4f} {r['weighted']:>10.4f} {r['wall']:>8.0f}s")
+    print("=" * 100)
+    if results:
+        best = max(results, key=lambda x: x["macro"])
+        print(f"\nBest Macro-F1: {best['macro']:.4f} @ {best['tag']}")
 
 
 if __name__ == "__main__":

@@ -110,7 +110,7 @@ def _lambda_tree(n_train, n_star, beta=5.0):
 class Cfg:
     benchmark: str = "codet_m4"; task: str = "author"; enc: str = "unixcoder-base"
     frac: float = 0.05; n_cls: int = 6; seed: int = 42
-    bs: int = 256; seq: int = 512; epochs: int = 3
+    bs: int = 64; seq: int = 512; epochs: int = 3
     lr_enc: float = 2e-5; lr_head: float = 1e-4; wd: float = 0.01
     warmup: float = 0.1; device: str = "cuda"
     htka_max_weight: float = 0.3  # Maximum weight for HTKA loss

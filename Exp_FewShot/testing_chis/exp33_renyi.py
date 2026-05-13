@@ -130,7 +130,7 @@ def renyi_divergence_loss(logits, targets, alpha=2.0, weight=None):
 class Cfg:
     benchmark: str = "codet_m4"; task: str = "author"; enc: str = "unixcoder-base"
     frac: float = 0.05; n_cls: int = 6; seed: int = 42
-    bs: int = 256; seq: int = 512; epochs: int = 3
+    bs: int = 64; seq: int = 512; epochs: int = 3
     lr_enc: float = 2e-5; lr_head: float = 1e-4; wd: float = 0.01
     warmup: float = 0.1; device: str = "cuda"
     renyi_alpha: float = 2.0  # Rényi α parameter

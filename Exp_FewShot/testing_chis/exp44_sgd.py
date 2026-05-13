@@ -1,23 +1,37 @@
 # =============================================================================
-# Theory-Track exp -- SGD (Structural Genealogy Distance):
+# Theory-Track exp -- TKE (Tree-Kernel Embedding):
 #
-# ARXIV_ID      : THIS IS NEW - no prior work defines a distance metric that
-#                 combines AST structural distance with genealogical tree distance
-# NAME          : SGD (Structural Genealogy Distance)
-# ONE-LINE CLAIM: The distance between code samples should be defined as a
-#                 weighted combination of AST structural distance and genealogical
-#                 distance, creating a unified metric for code similarity.
-# EQUATION      : d_sgd(x,y) = α · d_AST(x,y) + (1-α) · β · d_gene(label(x), label(y))
-#                 where α ∈ [0,1], β is scaling
-# PROPERTY      : When α=1: pure structural distance; when α=0: pure genealogical distance.
-#                 The optimal α reveals the relative importance of structure vs authorship.
-# WHY NOT BEFORE: Prior distance metrics consider only one aspect (semantic or structural).
-#                 SGD is defined over the COMBINATION of AST and genealogy, creating a
-#                 unified code similarity metric that only makes sense for attribution.
-# FALSIFIER     : If SGD-based representations outperform semantic-only, then
-#                 structural distance is a key component of code similarity.
+# ARXIV_ID      : NEW. Related: Bourgain's embedding theorem (Bourgain 1985),
+#                 Linial-London-Rabinovich (1995) on metric embeddings,
+#                 Sarkar (2011) Lorentzian tree embedding, Nickel-Kiela (2017)
+#                 Poincare embedding. We do not embed in hyperbolic space;
+#                 we instead train representations to be an *isometric*
+#                 Euclidean embedding of the LABEL tree.
+# NAME          : TKE (Tree-Kernel Embedding)
+# ONE-LINE CLAIM: Train the encoder so that pairwise Euclidean distance between
+#                 representations is faithful to the genealogy tree distance
+#                 between labels: ||z_i - z_j||^2 ~ beta * d_tree(y_i, y_j).
+# EQUATION      : L_tke = E_{i,j}[ ( ||z_i - z_j||^2 - beta * d_tree(y_i, y_j) )^2 ]
+#                 d_tree precomputed by BFS on the genealogy adjacency graph;
+#                 beta learnable scalar.
+# PROPERTY      : (a) For two same-class samples d_tree = 0, so they are pulled
+#                 together. (b) Across-class distance is *quantitatively*
+#                 set by tree distance, not just any positive margin. (c) The
+#                 induced kernel k(z_i, z_j) = -||z_i - z_j||^2 is a conditionally
+#                 negative-definite Euclidean realisation of the tree metric
+#                 (Bourgain distortion O(log K) bound).
+# WHY NOT BEFORE: Standard metric learning (Triplet, ProxyNCA, ArcFace) uses
+#                 margin-based losses that ignore the *quantitative* magnitude
+#                 of label distance. TKE is the first attribution loss to
+#                 enforce metric faithfulness to a known label tree.
+# FALSIFIER     : If learned ||z_i - z_j|| correlates with d_tree(y_i, y_j)
+#                 but classification does not improve, isometric embedding
+#                 alone is insufficient.
 # =============================================================================
 from __future__ import annotations
+
+# === KAGGLE PATHS ===
+KAGGLE_MODELS = "/kaggle/input/datasets/chiboiz/ai-detection-encoders/models"
 
 import os, sys, time, json, random, subprocess, importlib.util, warnings, glob
 from collections import defaultdict
@@ -45,31 +59,27 @@ from torch.cuda.amp import autocast, GradScaler
 warnings.filterwarnings("ignore")
 import logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s", stream=sys.stdout)
-logger = logging.getLogger("exp44")
+logger = logging.getLogger("exp44_tke")
 
 PAPER_BASELINE = 0.6633
 
 # =============================================================================
-# NEW MATHEMATICAL OBJECT: Structural Genealogy Distance (SGD)
+# NEW MATHEMATICAL OBJECT: Tree-Kernel Embedding (TKE)
 # =============================================================================
 """
-SGD defines a unified distance metric combining AST structural distance and genealogical distance.
+TKE trains the encoder so that pairwise Euclidean distance in representation
+space is faithful to the genealogy tree distance between labels:
 
-d_sgd(x, y) = α · d_AST(x, y) + (1-α) · β · d_gene(label(x), label(y))
+    ||z_i - z_j||^2  ~  beta * d_tree(y_i, y_j)
 
-where:
-- d_AST(x, y) = normalized AST structural distance (computed from AST features)
-- d_gene(u, v) = genealogical tree distance between generators
-- α ∈ [0, 1] = structural weight (learned or fixed)
-- β = genealogical scaling factor
+Loss:  L_tke = E_{i, j} [ ( ||z_i - z_j||^2 - beta * d_tree(y_i, y_j) )^2 ]
+combined with standard CE: L = CE + lambda_tke * L_tke.
 
-KEY INSIGHT: This creates a representation space where:
-- Close neighbors share BOTH structural AND genealogical similarity
-- The geometry encodes both syntactic style AND authorship
-- The α parameter reveals the relative importance of each
-
-This is NOT just "weighted distance". It's a mathematical object that combines
-TWO structured spaces (AST tree + Genealogy tree) into one unified metric.
+KEY INSIGHT: prior metric losses (Triplet, ProxyNCA, ArcFace) only ask for
+a *positive margin* between classes; TKE pins the *magnitude* of inter-class
+distance to a known structural prior. By Bourgain's theorem any tree metric
+embeds in Euclidean space with distortion O(log K), so a perfect fit is
+information-theoretically attainable for our 6/12-class trees.
 """
 
 # =============================================================================
@@ -108,61 +118,88 @@ def normalized_gene_distance(u: int, v: int, adj: Dict[int, List[int]], max_dist
 # =============================================================================
 
 def extract_ast_features(code: str, max_len: int = 128) -> List[float]:
-    """Extract AST structural features without tree-sitter dependency.
+    """Extract structural code features (legacy-aligned, offline-only).
 
-    Features capture hierarchical code structure:
-    - Function/class definitions
-    - Control flow patterns
-    - Nesting depth
-    - Loop structures
+    Mirrors legacy/Exp_DM_weak/exp06_ast_irm.py::extract_structural_features:
+    richer 22-feature structural vector, normalized + padded to max_len.
+    No tree-sitter dependency (offline-safe).
     """
-    import re
+    import re as _re
 
-    features = []
+    lines = code.split("\n")
+    num_lines = max(len(lines), 1)
+    line_lens = [len(l) for l in lines]
+    avg_line_len = float(np.mean(line_lens)) if line_lens else 0.0
+    max_line_len = float(max(line_lens)) if line_lens else 0.0
 
-    # Count patterns that indicate structure
-    n_func = len(re.findall(r'\b(def|function|func|fn)\s+\w+', code))
-    n_class = len(re.findall(r'\b(class|struct|interface|enum)\s+\w+', code))
-    n_if = len(re.findall(r'\bif\s*[\(\{]', code))
-    n_for = len(re.findall(r'\b(for|foreach)\s*[\(\{]', code))
-    n_while = len(re.findall(r'\bwhile\s*[\(\{]', code))
-    n_return = len(re.findall(r'\breturn\b', code))
-    n_import = len(re.findall(r'\b(import|from|include|require)\b', code))
-    n_comment = len(re.findall(r'(//|#|/\*|\'\'\'|""")', code))
+    indents = [len(l) - len(l.lstrip()) for l in lines if l.strip()]
+    avg_indent = float(np.mean(indents)) if indents else 0.0
+    max_indent = float(max(indents)) if indents else 0.0
+    indent_var = float(np.var(indents)) if indents else 0.0
 
-    # Nesting depth estimation
+    n_func = len(_re.findall(r"\b(def|function|func|fn)\s+\w+", code))
+    n_class = len(_re.findall(r"\b(class|struct|interface|enum)\s+\w+", code))
+    n_for = len(_re.findall(r"\b(for|foreach)\s*[\(\{]", code))
+    n_while = len(_re.findall(r"\bwhile\s*[\(\{]", code))
+    n_loops = n_for + n_while
+    n_if = len(_re.findall(r"\bif\s*[\(\{]", code))
+    n_else = code.count("else ") + code.count("elif ")
+    n_cond = n_if + n_else
+    n_return = len(_re.findall(r"\breturn\b", code))
+    n_comment = code.count("//") + code.count("#") + code.count("/*")
+    n_import = len(_re.findall(r"\b(import|from|include|require|using)\b", code))
+    n_try = code.count("try") + code.count("catch") + code.count("except")
+
     max_depth = 0
     depth = 0
     for c in code:
-        if c in '{([':
+        if c in "{([":
             depth += 1
-            max_depth = max(max_depth, depth)
-        elif c in '})]':
+            if depth > max_depth:
+                max_depth = depth
+        elif c in "})]":
             depth = max(0, depth - 1)
 
-    # Line statistics
-    lines = code.split('\n')
-    avg_indent = np.mean([len(l) - len(l.lstrip()) for l in lines if l.strip()]) if lines else 0
+    identifiers = _re.findall(r"\b[a-zA-Z_]\w*\b", code)
+    n_ids = max(len(identifiers), 1)
+    snake_ratio = sum(1 for i in identifiers if "_" in i and i.islower()) / n_ids
+    camel_ratio = sum(1 for i in identifiers if any(c.isupper() for c in i[1:]) and "_" not in i) / n_ids
+    short_ratio = sum(1 for i in identifiers if len(i) == 1) / n_ids
+    avg_id_len = float(np.mean([len(i) for i in identifiers])) if identifiers else 0.0
+
+    empty_ratio = sum(1 for l in lines if not l.strip()) / num_lines
+    code_len = max(len(code), 1)
+    alpha_ratio = sum(c.isalpha() for c in code) / code_len
+    digit_ratio = sum(c.isdigit() for c in code) / code_len
+    space_ratio = sum(c.isspace() for c in code) / code_len
 
     features = [
+        num_lines / 500.0,
+        avg_line_len / 80.0,
+        max_line_len / 200.0,
+        avg_indent / 10.0,
+        max_indent / 20.0,
+        indent_var / 50.0,
         n_func / 10.0,
         n_class / 5.0,
-        n_if / 20.0,
-        n_for / 10.0,
-        n_while / 10.0,
+        n_loops / 10.0,
+        n_cond / 20.0,
         n_return / 20.0,
-        n_import / 10.0,
         n_comment / 50.0,
+        n_import / 10.0,
+        n_try / 10.0,
         max_depth / 15.0,
-        avg_indent / 10.0,
-        len(code) / 10000.0,
-        len(lines) / 500.0,
+        snake_ratio,
+        camel_ratio,
+        short_ratio,
+        avg_id_len / 10.0,
+        empty_ratio,
+        alpha_ratio,
+        digit_ratio,
     ]
 
-    # Pad to fixed length
-    while len(features) < max_len:
-        features.append(0.0)
-
+    if len(features) < max_len:
+        features = features + [0.0] * (max_len - len(features))
     return features[:max_len]
 
 
@@ -170,138 +207,87 @@ def extract_ast_features(code: str, max_len: int = 128) -> List[float]:
 # SGD-based Model
 # =============================================================================
 
-class SGDModel(nn.Module):
-    """Structural Genealogy Distance model."""
-    def __init__(self, enc_name: str, n_cls: int, ast_dim: int = 64,
-                 alpha: float = 0.5, gene_adj: Dict = None):
+def build_tree_distance_matrix(n_cls: int, adj: Dict[int, List[int]]) -> torch.Tensor:
+    """BFS distance matrix on genealogy adjacency graph; unreachable saturated to 4.0."""
+    INFTY = 4.0
+    D = torch.full((n_cls, n_cls), INFTY)
+    for u in range(n_cls):
+        D[u, u] = 0.0
+        seen = {u}
+        frontier = [(u, 0)]
+        while frontier:
+            curr, d = frontier.pop(0)
+            for v in adj.get(curr, []):
+                if v in seen or v >= n_cls:
+                    continue
+                seen.add(v)
+                D[u, v] = float(d + 1)
+                frontier.append((v, d + 1))
+    return D
+
+
+class TKEModel(nn.Module):
+    """Encoder + projection head whose Euclidean geometry will be aligned
+    isometrically to the genealogy tree metric via TKE loss.
+
+    Returns (logits, z) where z is the metric embedding used by L_tke.
+    """
+    def __init__(self, enc_name: str, n_cls: int, n_cls_tree: int,
+                 gene_adj: Dict[int, List[int]], ast_dim: int = 64,
+                 z_dim: int = 128):
         super().__init__()
         self.encoder = AutoModel.from_pretrained(os.path.join(KAGGLE_MODELS, enc_name), local_files_only=True)
         hidden = self.encoder.config.hidden_size
-        self.alpha = nn.Parameter(torch.tensor(alpha), requires_grad=True)
-        self.gene_adj = gene_adj
 
-        # AST structural encoder
         self.ast_encoder = nn.Sequential(
             nn.Linear(64, 128),
             nn.GELU(),
-            nn.Linear(128, ast_dim)
+            nn.Linear(128, ast_dim),
         )
-
-        # Learnable scaling for genealogical distance
-        self.beta = nn.Parameter(torch.tensor(1.0), requires_grad=True)
-
-        # Projectors
         self.proj = nn.Sequential(
             nn.Linear(hidden + ast_dim, 256),
             nn.GELU(),
-            nn.Dropout(0.1)
+            nn.Linear(256, z_dim),
         )
-        self.clf = nn.Linear(256, n_cls)
+        self.clf = nn.Linear(z_dim, n_cls)
 
-    def ast_distance(self, feat1: torch.Tensor, feat2: torch.Tensor) -> torch.Tensor:
-        """Compute normalized AST structural distance."""
-        diff = (feat1 - feat2) ** 2
-        return diff.sum(dim=-1) ** 0.5
+        # Learnable scaling factor beta in L_tke = E[(||z_i-z_j||^2 - beta*d_tree)^2].
+        self.log_beta = nn.Parameter(torch.zeros(1))
 
-    def gene_distance(self, labels1: torch.Tensor, labels2: torch.Tensor) -> torch.Tensor:
-        """Compute genealogical distance matrix."""
-        B = labels1.shape[0]
-        device = labels1.device
-        dist = torch.zeros(B, B, device=device)
+        # Precomputed (n_cls, n_cls) BFS tree-distance matrix, as a buffer.
+        self.register_buffer("tree_dist", build_tree_distance_matrix(n_cls_tree, gene_adj))
 
-        for i in range(B):
-            for j in range(B):
-                l1, l2 = labels1[i].item(), labels2[j].item()
-                d = _gene_distance(l1, l2, self.gene_adj)
-                dist[i, j] = min(d / 4.0, 1.0)  # Normalize
-
-        return dist
-
-    def sgd_distance(self, emb_struct: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
-        """Compute SGD distance matrix.
-
-        d_sgd = α · d_AST + (1-α) · β · d_gene
-        """
-        B = emb_struct.shape[0]
-
-        # AST distance
-        d_ast = torch.cdist(emb_struct, emb_struct, p=2)
-        d_ast = d_ast / (d_ast.max() + 1e-8)  # Normalize
-
-        # Gene distance
-        d_gene = self.gene_distance(labels, labels)
-
-        # SGD
-        alpha = torch.sigmoid(self.alpha)
-        beta = torch.sigmoid(self.beta)
-        d_sgd = alpha * d_ast + (1 - alpha) * beta * d_gene
-
-        return d_sgd
-
-    def forward(self, ids, mask, ast_feat, labels, return_dist=False):
-        # Semantic encoding
+    def forward(self, ids, mask, ast_feat):
         out = self.encoder(input_ids=ids, attention_mask=mask)
         sem_emb = (out.last_hidden_state * mask.unsqueeze(-1)).sum(1) / mask.sum(1, keepdim=True).clamp(min=1)
-
-        # AST structural encoding
         ast_emb = self.ast_encoder(ast_feat)
-
-        # Project
-        fused = torch.cat([sem_emb, ast_emb], dim=-1)
-        proj = self.proj(fused)
-
-        # Classify
-        logits = self.clf(proj)
-
-        if return_dist:
-            d_sgd = self.sgd_distance(ast_emb, labels)
-            return logits, proj, d_sgd
-        return logits
+        z = self.proj(torch.cat([sem_emb, ast_emb], dim=-1))
+        logits = self.clf(z)
+        return logits, z
 
 
-# =============================================================================
-# SGD Loss
-# =============================================================================
-
-def compute_sgd_loss(proj: torch.Tensor, d_sgd: torch.Tensor,
-                    labels: torch.Tensor, tau: float = 0.1) -> tuple:
-    """Compute SGD-based contrastive loss.
-
-    Samples close in SGD space should have similar labels.
+def compute_tke_loss(z: torch.Tensor, labels: torch.Tensor,
+                     tree_dist: torch.Tensor, log_beta: torch.Tensor) -> torch.Tensor:
+    """L_tke = E_{i,j}[ ( ||z_i - z_j||^2 - beta * d_tree(y_i, y_j) )^2 ]
+       (off-diagonal only; vectorised; no Python pairwise loop)
     """
-    B = proj.shape[0]
-    device = proj.device
+    B = z.size(0)
+    device = z.device
+    # Squared Euclidean distances (B, B).
+    z_sq = (z * z).sum(dim=-1, keepdim=True)              # (B, 1)
+    dist_sq = z_sq + z_sq.T - 2.0 * (z @ z.T)             # (B, B)
+    dist_sq = dist_sq.clamp(min=0.0)
 
-    # Normalize
-    proj_norm = F.normalize(proj, dim=-1)
+    # Target distances from precomputed tree-distance lookup (no grad).
+    target = tree_dist[labels][:, labels].to(device)      # (B, B)
+    beta = log_beta.exp()                                  # positive scalar
+    target_scaled = beta * target
 
-    # Semantic similarity
-    sim = torch.mm(proj_norm, proj_norm.T) / tau
-
-    # SGD-based weighting: emphasize close pairs, de-emphasize distant
-    weight = torch.exp(-d_sgd)  # Higher weight for closer pairs
-
-    # Positive mask: same class
-    pos_mask = (labels.unsqueeze(1) == labels.unsqueeze(0)).float()
-    pos_mask = pos_mask - torch.eye(B, device=device)  # Remove diagonal
-
-    # Weighted contrastive loss
-    exp_sim = torch.exp(sim)
-    exp_sim = exp_sim * (1 - torch.eye(B, device=device))
-
-    # Weighted denominator
-    denom = (exp_sim * weight).sum(dim=1, keepdim=True) + 1e-8
-
-    # Weighted numerator
-    numer = (exp_sim * pos_mask * weight).sum(dim=1, keepdim=True)
-
-    loss = -torch.log(numer / denom + 1e-8).mean()
-
-    # Also compute alignment regularization
-    alpha = torch.sigmoid(proj.mean())  # Approximate alpha from batch
-    align_loss = torch.abs(alpha - 0.5)  # Encourage alpha toward 0.5
-
-    return loss, align_loss.item()
+    # Mask out the diagonal.
+    eye = torch.eye(B, device=device, dtype=torch.bool)
+    diff = (dist_sq - target_scaled).masked_fill(eye, 0.0)
+    denom = max(B * (B - 1), 1)
+    return (diff.pow(2).sum()) / denom
 
 
 # =============================================================================
@@ -327,9 +313,7 @@ class Cfg:
     lr_proj: float = 1e-4
     lr_head: float = 1e-4
     wd: float = 0.01
-    lambda_sgd: float = 0.3
-    alpha_init: float = 0.5
-    tau: float = 0.1
+    lambda_tke: float = 0.3
     warmup: float = 0.1
     device: str = "cuda"
 
@@ -340,11 +324,19 @@ class Cfg:
             self.gene_adj = GENE_ADJ_AICD
 
 
-def _hw(cfg):
+def _hw(cfg: Cfg) -> Cfg:
     if torch.cuda.is_available():
         torch.backends.cuda.matmul.allow_tf32 = True
         torch.backends.cudnn.allow_tf32 = True
         torch.backends.cudnn.benchmark = True
+        mem = torch.cuda.get_device_properties(0).total_memory / 1e9
+        if mem >= 40:
+            cfg.bs, cfg.seq = 256, 512
+        elif mem >= 10:
+            cfg.bs, cfg.seq = 128, 384
+        else:
+            cfg.bs, cfg.seq = 64, 256
+        logger.info(f"[hw] mem={mem:.1f}GB bs={cfg.bs} seq={cfg.seq}")
     return cfg
 
 
@@ -427,10 +419,11 @@ def _load_aicd(task):
 
 
 class FSDS(TD):
-    def __init__(self, data, tok, seq_len, frac=1.0, seed=42):
+    def __init__(self, data, tok, seq_len, ast_dim=64, frac=1.0, seed=42):
         self.data = data
         self.tok = tok
         self.seq_len = seq_len
+        self.ast_dim = ast_dim
         if frac < 1.0:
             rng = random.Random(seed)
             labels = list(range(max(self.data["label"]) + 1))
@@ -453,7 +446,7 @@ class FSDS(TD):
                       truncation=True, return_tensors="pt")
         ids = enc["input_ids"].squeeze(0)
         mask = enc["attention_mask"].squeeze(0)
-        ast_feat = extract_ast_features(code, 128)
+        ast_feat = extract_ast_features(code, self.ast_dim)
         return {
             "ids": ids, "mask": mask,
             "ast_feat": torch.tensor(ast_feat, dtype=torch.float32),
@@ -463,7 +456,7 @@ class FSDS(TD):
 
 def train_epoch(model, loader, opt, sch, scaler, cfg):
     model.train()
-    total_loss, total_ce, total_sgd = 0, 0, 0
+    total_loss, total_ce, total_tke = 0.0, 0.0, 0.0
 
     for b in tqdm(loader, desc="Train"):
         ids = b["ids"].to(cfg.device)
@@ -471,11 +464,11 @@ def train_epoch(model, loader, opt, sch, scaler, cfg):
         ast_feat = b["ast_feat"].to(cfg.device)
         labs = b["label"].to(cfg.device)
 
-        with torch.autocast(device_type='cuda', enabled=(cfg.device == "cuda")):
-            logits, proj, d_sgd = model(ids, mask, ast_feat, labs, return_dist=True)
+        with torch.autocast(device_type='cuda', dtype=torch.bfloat16, enabled=(cfg.device == "cuda")):
+            logits, z = model(ids, mask, ast_feat)
             loss_ce = F.cross_entropy(logits, labs)
-            loss_sgd, _ = compute_sgd_loss(proj, d_sgd, labs, cfg.tau)
-            loss = loss_ce + cfg.lambda_sgd * loss_sgd
+            loss_tke = compute_tke_loss(z, labs, model.tree_dist, model.log_beta)
+            loss = loss_ce + cfg.lambda_tke * loss_tke
 
         scaler.scale(loss).backward()
         scaler.unscale_(opt)
@@ -487,10 +480,10 @@ def train_epoch(model, loader, opt, sch, scaler, cfg):
 
         total_loss += loss.item()
         total_ce += loss_ce.item()
-        total_sgd += loss_sgd.item()
+        total_tke += loss_tke.item()
 
     n = len(loader)
-    return total_loss / n, total_ce / n, total_sgd / n
+    return total_loss / n, total_ce / n, total_tke / n
 
 
 @torch.no_grad()
@@ -503,7 +496,7 @@ def eval_model(model, loader, cfg):
         ast_feat = b["ast_feat"].to(cfg.device)
         labs = b["label"]
 
-        logits = model(ids, mask, ast_feat, labs)
+        logits, _ = model(ids, mask, ast_feat)
         preds.extend(logits.argmax(dim=-1).cpu().tolist())
         labels.extend(labs.tolist())
 
@@ -519,8 +512,6 @@ def eval_model(model, loader, cfg):
 def run_exp(cfg: Cfg, tag: str):
     set_seed(cfg.seed)
     cfg = _hw(cfg)
-    logger.info(f"[exp44] SGD: {tag} | frac={cfg.frac}")
-
     if cfg.benchmark == "codet_m4":
         tr_raw, vl_raw, ts_raw = _load_codet()
         vocab = _vocab(tr_raw)
@@ -541,19 +532,20 @@ def run_exp(cfg: Cfg, tag: str):
 
     logger.info(f"  Train: {len(tr_ds)} | Val: {len(vl_ds)} | Test: {len(ts_ds)}")
 
-    loader_cfg = dict(batch_size=cfg.bs, num_workers=2, pin_memory=True)
+    loader_cfg = dict(batch_size=cfg.bs, num_workers=4, pin_memory=True)
     tr_dl = DataLoader(tr_ds, shuffle=True, **loader_cfg)
     vl_dl = DataLoader(vl_ds, shuffle=False, **loader_cfg)
     ts_dl = DataLoader(ts_ds, shuffle=False, **loader_cfg)
 
-    model = SGDModel(cfg.enc, cfg.n_cls, alpha=cfg.alpha_init, gene_adj=cfg.gene_adj).to(cfg.device)
+    model = TKEModel(cfg.enc, cfg.n_cls, n_cls_tree=cfg.n_cls,
+                     gene_adj=cfg.gene_adj).to(cfg.device)
 
     opt = torch.optim.AdamW([
         {"params": model.encoder.parameters(), "lr": cfg.lr_enc},
         {"params": model.ast_encoder.parameters(), "lr": cfg.lr_proj},
         {"params": model.proj.parameters(), "lr": cfg.lr_proj},
         {"params": model.clf.parameters(), "lr": cfg.lr_head},
-        {"params": [model.alpha, model.beta], "lr": 1e-3}
+        {"params": [model.log_beta], "lr": 1e-3},
     ], weight_decay=cfg.wd)
 
     total_steps = len(tr_dl) * cfg.epochs
@@ -565,22 +557,18 @@ def run_exp(cfg: Cfg, tag: str):
 
     best_val, best_state = 0, None
     for epoch in range(cfg.epochs):
-        loss, loss_ce, loss_sgd = train_epoch(model, tr_dl, opt, sch, scaler, cfg)
+        loss, loss_ce, loss_tke = train_epoch(model, tr_dl, opt, sch, scaler, cfg)
         val_met = eval_model(model, vl_dl, cfg)
-        alpha_val = torch.sigmoid(model.alpha).item()
-        logger.info(f"  E{epoch+1}: loss={loss:.4f} ce={loss_ce:.4f} sgd={loss_sgd:.4f} | α={alpha_val:.3f} | val={val_met['macro']:.4f}")
+        logger.info(f"[epoch {epoch+1}] val={val_met['macro']:.4f}")
         if val_met["macro"] > best_val:
             best_val = val_met["macro"]
             best_state = {k: v.cpu().clone() for k, v in model.state_dict().items()}
 
     model.load_state_dict(best_state)
     ts_met = eval_model(model, ts_dl, cfg)
-
-    logger.info(f"  Test: macro={ts_met['macro']:.4f} | Δ={ts_met['macro']-PAPER_BASELINE:+.4f}")
-
     result = {
         "tag": tag,
-        "method": "SGD",
+        "method": "TKE",
         "enc": cfg.enc,
         "bench": cfg.benchmark,
         "frac": cfg.frac,
@@ -592,29 +580,50 @@ def run_exp(cfg: Cfg, tag: str):
         "alpha": torch.sigmoid(model.alpha).item(),
         "timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
     }
-
-    out_dir = os.path.join(os.path.dirname(__file__), "results")
-    os.makedirs(out_dir, exist_ok=True)
-    with open(os.path.join(out_dir, f"{tag}_results.json"), "w") as f:
-        json.dump(result, f, indent=2)
-
     return result
 
 
 def main():
-    enc = "unixcoder-base"
+    encoders = ["unixcoder-base"]
     benchmarks = [("codet_m4", "author", 6), ("aicd_t2", "t2", 12)]
     fracs = [0.01, 0.05, 0.20]
 
-    for bench, task, n_cls in benchmarks:
-        for frac in fracs:
-            cfg = Cfg(benchmark=bench, task=task, enc=enc, frac=frac, n_cls=n_cls)
-            tag = f"exp44_sgd_{enc}_{bench}_f{frac:.2f}"
-            try:
-                r = run_exp(cfg, tag)
-                logger.info(f"  RESULT: {tag} | macro={r['macro']:.4f} Δ={r['dpaper']:+.4f}")
-            except Exception as e:
-                logger.error(f"  FAILED: {tag} | {e}")
+    results = []
+    for enc in encoders:
+        for bench, task, n_cls in benchmarks:
+            for frac in fracs:
+                cfg = Cfg(benchmark=bench, task=task, enc=enc, frac=frac, n_cls=n_cls)
+                cfg = _hw(cfg)
+                tag = f"exp44_tke_{enc}_{bench}_f{frac}"
+                logger.info(f"=== {tag} ===")
+                t0 = time.time()
+                try:
+                    res = run_exp(cfg, tag)
+                    elapsed = time.time() - t0
+                    res["wall"] = round(elapsed, 1)
+                    results.append(res)
+                    logger.info(f"[{tag}] MacroF1={res['macro']:.4f} ({res['macro']-PAPER_BASELINE:+.4f} vs paper) time={elapsed:.0f}s")
+                except Exception as e:
+                    logger.error(f"[{tag}] FAILED: {e}")
+                import gc; gc.collect()
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+
+    out_dir = os.path.join(os.path.dirname(os.path.realpath(__file__)), "results")
+    os.makedirs(out_dir, exist_ok=True)
+    with open(os.path.join(out_dir, "exp44_tke_results.json"), "w") as f:
+        json.dump(results, f, indent=2)
+
+    print("\n" + "=" * 100)
+    print(f"{'Encoder':<22} {'Benchmark':<12} {'Frac':>6} {'Macro-F1':>10} {'dPaper':>10} {'Weighted':>10} {'Wall':>8}")
+    print("-" * 100)
+    for r in results:
+        print(f"{r['enc']:<22} {r['bench']:<12} {r['frac']:>6.0%} {r['macro']:>10.4f} "
+              f"{r['dpaper']:>+10.4f} {r['weighted']:>10.4f} {r['wall']:>8.0f}s")
+    print("=" * 100)
+    if results:
+        best = max(results, key=lambda x: x["macro"])
+        print(f"\nBest Macro-F1: {best['macro']:.4f} @ {best['tag']}")
 
 
 if __name__ == "__main__":

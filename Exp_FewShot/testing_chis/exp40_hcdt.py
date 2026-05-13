@@ -1,23 +1,37 @@
 # =============================================================================
-# Theory-Track exp -- HCDT (Hierarchical Contrastive over Dual Trees):
+# Theory-Track exp -- TPNL (Tree-Path Negative Lifting):
 #
-# ARXIV_ID      : THIS IS NEW - no prior work defines contrastive learning over
-#                 the INTERSECTION of AST tree and genealogy tree
-# NAME          : HCDT (Hierarchical Contrastive over Dual Trees)
-# ONE-LINE CLAIM: Positive pairs are defined by BOTH AST structural similarity AND
-#                 genealogical proximity; this dual-tree contrastive loss creates
-#                 representations where code clusters reflect both structures.
-# EQUATION      : L_hcdt = -log exp(⟨z_i, z_j⟩/τ) / Σ_k exp(⟨z_i, z_k⟩/τ)
-#                 where (i,j) is positive iff AST_dist(i,j) < δ_AST AND gene_dist(i,j) < δ_GENE
-# PROPERTY      : Only samples that are similar in BOTH trees form positive pairs.
-#                 This creates a representation space where the dual-tree topology is embedded.
-# WHY NOT BEFORE: Standard contrastive learning uses ONE similarity structure.
-#                 HCDT is defined over the INTERSECTION of two trees, creating a new
-#                 mathematical object only meaningful when both structures exist.
-# FALSIFIER     : If HCDT representations outperform single-tree contrastive,
-#                 then both AST and genealogy structures are necessary for attribution.
+# ARXIV_ID      : NEW. Builds on InfoNCE (van den Oord 2018) and SupCon
+#                 (Khosla 2020), but introduces a genealogy-structured negative
+#                 reweighting that is specific to label-tree tasks.
+# NAME          : TPNL (Tree-Path Negative Lifting)
+# ONE-LINE CLAIM: In genealogy-structured attribution the hardest negatives are
+#                 siblings on the family tree. Lifting their weight by
+#                 exp(-alpha * d_tree) yields a tighter InfoNCE lower bound on
+#                 I(z; family).
+# EQUATION      : L_tpnl = -E_i[ log( exp(s_ip/tau)
+#                       / ( exp(s_ip/tau) + sum_{n != p} w_ip(n) * exp(s_in/tau) ) ) ]
+#                 with  w_ip(n) = exp(-alpha * d_tree(y_p, y_n)),
+#                       s_ij   = <z_i, z_j>,
+#                       (i, p) positive: same label;  n: all other indices.
+# PROPERTY      : (a) alpha=0 recovers vanilla supervised InfoNCE.
+#                 (b) alpha -> infty makes only siblings count as negatives.
+#                 (c) For tree-uniform labels, gradient norm scales as
+#                     O(alpha * d_tree), giving a temperature-free hard-negative
+#                     focus controlled by genealogy.
+# WHY NOT BEFORE: SupCon/ArcFace/Triplet treat all non-positives uniformly.
+#                 TPNL replaces the negative term with a tree-weighted sum,
+#                 which is only meaningful if labels carry a metric tree
+#                 structure - i.e., the AI-code attribution setting we study.
+# FALSIFIER     : If sweeping alpha in {0, 0.5, 1, 2, 4} shows monotone
+#                 degradation, tree-lifted negatives are not informative.
 # =============================================================================
 from __future__ import annotations
+
+# === KAGGLE PATHS ===
+KAGGLE_MODELS = "/kaggle/input/datasets/chiboiz/ai-detection-encoders/models"
+KAGGLE_CODET = "/kaggle/input/datasets/chiboiz/codetm4/dataset_without_comments.parquet"
+KAGGLE_AICD = "/kaggle/input/datasets/chiboiz/ai-code-detection/AICD-Bench"
 
 import os, sys, time, json, random, subprocess, importlib.util, warnings, glob
 from collections import defaultdict
@@ -45,29 +59,29 @@ from torch.cuda.amp import autocast, GradScaler
 warnings.filterwarnings("ignore")
 import logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s", stream=sys.stdout)
-logger = logging.getLogger("exp40")
+logger = logging.getLogger("exp40_tpnl")
 
 PAPER_BASELINE = 0.6633
 
 # =============================================================================
-# NEW MATHEMATICAL OBJECT: Hierarchical Contrastive over Dual Trees (HCDT)
+# NEW MATHEMATICAL OBJECT: Tree-Path Negative Lifting (TPNL)
 # =============================================================================
 """
-HCDT defines positive pairs as the INTERSECTION of AST similarity and genealogy proximity.
+TPNL is a supervised InfoNCE objective in which every negative is reweighted
+by its position on the genealogy tree.
 
-Standard contrastive: positive if same class
-HCDT: positive if (AST_similar AND genealogy_close)
+Vanilla InfoNCE (Oord 2018):
+    L = -E[ log( exp(s_pos/tau) / sum_j exp(s_j/tau) ) ]
 
-Mathematically:
-    P_{hcdt}(i,j) = 1[AST_dist(i,j) < δ_AST ∧ Gene_dist(i,j) < δ_GENE]
+TPNL:
+    L = -E[ log( exp(s_pos/tau) / ( exp(s_pos/tau) + sum_n w(p,n)*exp(s_n/tau) ) ) ]
+where w(p, n) = exp(-alpha * d_tree(y_p, y_n)) and d_tree is BFS distance on
+the genealogy adjacency graph.
 
-This creates a representation where:
-- Close neighbors share BOTH AST structure AND genealogy
-- Distant samples differ in BOTH structures
-- The representation space topology reflects the dual-tree structure
-
-KEY INSIGHT: This is NOT just "multi-view contrastive". It's defined over
-the STRUCTURAL INTERSECTION of two trees, creating a new topological object.
+KEY INSIGHT: this is a contrastive lower bound on I(z; family) in which the
+proposal distribution over negatives is the *Boltzmann distribution on tree
+distance*. It is sharp exactly when the data manifold is organised by
+genealogy - which is the structural prior of LLM authorship attribution.
 """
 
 # =============================================================================
@@ -99,103 +113,147 @@ def gene_distance(u: int, v: int, adj: Dict[int, List[int]]) -> float:
 
 
 def extract_ast_features(code: str, max_len: int = 128) -> List[float]:
-    """Extract AST structural features without tree-sitter dependency.
+    """Extract structural code features (legacy-aligned, offline-only).
 
-    Features capture hierarchical code structure:
-    - Function/class definitions
-    - Control flow patterns
-    - Nesting depth
-    - Loop structures
+    Mirrors legacy/Exp_DM_weak/exp06_ast_irm.py::extract_structural_features:
+    richer 22-feature structural vector, normalized + padded to max_len.
+    No tree-sitter dependency (offline-safe).
     """
-    import re
+    import re as _re
 
-    features = []
+    lines = code.split("\n")
+    num_lines = max(len(lines), 1)
+    line_lens = [len(l) for l in lines]
+    avg_line_len = float(np.mean(line_lens)) if line_lens else 0.0
+    max_line_len = float(max(line_lens)) if line_lens else 0.0
 
-    # Count patterns that indicate structure
-    n_func = len(re.findall(r'\b(def|function|func|fn)\s+\w+', code))
-    n_class = len(re.findall(r'\b(class|struct|interface|enum)\s+\w+', code))
-    n_if = len(re.findall(r'\bif\s*[\(\{]', code))
-    n_for = len(re.findall(r'\b(for|foreach)\s*[\(\{]', code))
-    n_while = len(re.findall(r'\bwhile\s*[\(\{]', code))
-    n_return = len(re.findall(r'\breturn\b', code))
-    n_import = len(re.findall(r'\b(import|from|include|require)\b', code))
-    n_comment = len(re.findall(r'(//|#|/\*|\'\'\'|""")', code))
+    indents = [len(l) - len(l.lstrip()) for l in lines if l.strip()]
+    avg_indent = float(np.mean(indents)) if indents else 0.0
+    max_indent = float(max(indents)) if indents else 0.0
+    indent_var = float(np.var(indents)) if indents else 0.0
 
-    # Nesting depth estimation
+    n_func = len(_re.findall(r"\b(def|function|func|fn)\s+\w+", code))
+    n_class = len(_re.findall(r"\b(class|struct|interface|enum)\s+\w+", code))
+    n_for = len(_re.findall(r"\b(for|foreach)\s*[\(\{]", code))
+    n_while = len(_re.findall(r"\bwhile\s*[\(\{]", code))
+    n_loops = n_for + n_while
+    n_if = len(_re.findall(r"\bif\s*[\(\{]", code))
+    n_else = code.count("else ") + code.count("elif ")
+    n_cond = n_if + n_else
+    n_return = len(_re.findall(r"\breturn\b", code))
+    n_comment = code.count("//") + code.count("#") + code.count("/*")
+    n_import = len(_re.findall(r"\b(import|from|include|require|using)\b", code))
+    n_try = code.count("try") + code.count("catch") + code.count("except")
+
     max_depth = 0
     depth = 0
     for c in code:
-        if c in '{([':
+        if c in "{([":
             depth += 1
-            max_depth = max(max_depth, depth)
-        elif c in '})]':
+            if depth > max_depth:
+                max_depth = depth
+        elif c in "})]":
             depth = max(0, depth - 1)
 
-    # Line statistics
-    lines = code.split('\n')
-    avg_indent = np.mean([len(l) - len(l.lstrip()) for l in lines if l.strip()]) if lines else 0
+    identifiers = _re.findall(r"\b[a-zA-Z_]\w*\b", code)
+    n_ids = max(len(identifiers), 1)
+    snake_ratio = sum(1 for i in identifiers if "_" in i and i.islower()) / n_ids
+    camel_ratio = sum(1 for i in identifiers if any(c.isupper() for c in i[1:]) and "_" not in i) / n_ids
+    short_ratio = sum(1 for i in identifiers if len(i) == 1) / n_ids
+    avg_id_len = float(np.mean([len(i) for i in identifiers])) if identifiers else 0.0
+
+    empty_ratio = sum(1 for l in lines if not l.strip()) / num_lines
+    code_len = max(len(code), 1)
+    alpha_ratio = sum(c.isalpha() for c in code) / code_len
+    digit_ratio = sum(c.isdigit() for c in code) / code_len
+    space_ratio = sum(c.isspace() for c in code) / code_len
 
     features = [
+        num_lines / 500.0,
+        avg_line_len / 80.0,
+        max_line_len / 200.0,
+        avg_indent / 10.0,
+        max_indent / 20.0,
+        indent_var / 50.0,
         n_func / 10.0,
         n_class / 5.0,
-        n_if / 20.0,
-        n_for / 10.0,
-        n_while / 10.0,
+        n_loops / 10.0,
+        n_cond / 20.0,
         n_return / 20.0,
-        n_import / 10.0,
         n_comment / 50.0,
+        n_import / 10.0,
+        n_try / 10.0,
         max_depth / 15.0,
-        avg_indent / 10.0,
-        len(code) / 10000.0,
-        len(lines) / 500.0,
+        snake_ratio,
+        camel_ratio,
+        short_ratio,
+        avg_id_len / 10.0,
+        empty_ratio,
+        alpha_ratio,
+        digit_ratio,
     ]
 
-    # Pad to fixed length
-    while len(features) < max_len:
-        features.append(0.0)
-
+    if len(features) < max_len:
+        features = features + [0.0] * (max_len - len(features))
     return features[:max_len]
 
 
 # =============================================================================
-# HCDT Positive Pair Definition
+# Tree-Path Negative Lifting (TPNL) primitives
 # =============================================================================
 
-class DualTreePositivePairs:
-    """Defines positive pairs as intersection of AST similarity and genealogy proximity.
+def build_tree_distance_matrix(n_cls: int, adj: Dict[int, List[int]]) -> torch.Tensor:
+    """Precompute (n_cls, n_cls) BFS distance matrix on the genealogy graph.
 
-    This is NOT standard contrastive learning. Positive pairs are defined by:
-    P(i,j) = 1[AST_dist(i,j) < δ_AST AND Gene_dist(i,j) < δ_GENE]
+    Unreachable pairs are saturated to INFTY = 4 (CoDET-tree depth + 2).
     """
-    def __init__(self, ast_threshold: float = 0.3, gene_threshold: float = 1.0,
-                 gene_adj: Dict[int, List[int]] = None, n_cls: int = 6):
-        self.ast_threshold = ast_threshold
-        self.gene_threshold = gene_threshold
-        self.gene_adj = gene_adj or GENE_ADJ_CODET
+    INFTY = 4.0
+    D = torch.full((n_cls, n_cls), INFTY)
+    for u in range(n_cls):
+        D[u, u] = 0.0
+        seen = {u}
+        frontier = [(u, 0)]
+        while frontier:
+            curr, d = frontier.pop(0)
+            for v in adj.get(curr, []):
+                if v in seen or v >= n_cls:
+                    continue
+                seen.add(v)
+                D[u, v] = float(d + 1)
+                frontier.append((v, d + 1))
+    return D
+
+
+class TreePathNegativeLifter:
+    """Wraps the precomputed (n_cls, n_cls) tree-distance matrix.
+
+    Given a batch of labels (B,) returns a (B, B) reweighting matrix
+       W[i, j] = exp(-alpha * d_tree(y_i, y_j))   (i != j),  W[i, i] = 0
+    used as the genealogy-aware reweighting of negatives in TPNL.
+    """
+    def __init__(self, n_cls: int, gene_adj: Dict[int, List[int]], alpha: float = 1.0):
         self.n_cls = n_cls
+        self.alpha = alpha
+        self.dist = build_tree_distance_matrix(n_cls, gene_adj)   # CPU (n_cls, n_cls)
 
-    def ast_distance(self, feat1: torch.Tensor, feat2: torch.Tensor) -> float:
-        """Compute AST structural distance."""
-        return F.mse_loss(feat1, feat2).item()
-
-    def gene_distance_func(self, u: int, v: int) -> float:
-        """Compute genealogical distance."""
-        return gene_distance(u, v, self.gene_adj)
-
-    def is_positive_pair(self, ast_feat1: torch.Tensor, ast_feat2: torch.Tensor,
-                        label1: int, label2: int) -> bool:
-        """Check if (i,j) is a positive pair under dual-tree criterion."""
-        ast_dist = self.ast_distance(ast_feat1, ast_feat2)
-        gene_dist = self.gene_distance_func(label1, label2)
-        return (ast_dist < self.ast_threshold) and (gene_dist <= self.gene_threshold)
+    def lift_weights(self, labels: torch.Tensor) -> torch.Tensor:
+        dist_b = self.dist.to(labels.device)[labels][:, labels]   # (B, B)
+        W = torch.exp(-self.alpha * dist_b)
+        W.fill_diagonal_(0.0)
+        return W
 
 
 # =============================================================================
 # Model
 # =============================================================================
 
-class HCDTModel(nn.Module):
-    """Hierarchical Contrastive over Dual Trees model."""
+class TPNLModel(nn.Module):
+    """Encoder + contrastive projection head for TPNL.
+
+    Two heads:
+      - z (128-dim, L2-normalized): used inside TPNL InfoNCE
+      - logits (n_cls):              CE supervision
+    """
     def __init__(self, enc_name: str, n_cls: int, tau: float = 0.07, ast_dim: int = 64):
         super().__init__()
         self.encoder = AutoModel.from_pretrained(os.path.join(KAGGLE_MODELS, enc_name), local_files_only=True)
@@ -205,12 +263,12 @@ class HCDTModel(nn.Module):
         self.ast_encoder = nn.Sequential(
             nn.Linear(64, 128),
             nn.GELU(),
-            nn.Linear(128, ast_dim)
+            nn.Linear(128, ast_dim),
         )
         self.proj = nn.Sequential(
             nn.Linear(hidden + ast_dim, 256),
             nn.GELU(),
-            nn.Linear(256, 128)
+            nn.Linear(256, 128),
         )
         self.clf = nn.Linear(128, n_cls)
 
@@ -219,75 +277,72 @@ class HCDTModel(nn.Module):
         sem_emb = (out.last_hidden_state * mask.unsqueeze(-1)).sum(1) / mask.sum(1, keepdim=True).clamp(min=1)
         ast_emb = self.ast_encoder(ast_feat)
         fused = torch.cat([sem_emb, ast_emb], dim=-1)
-        proj = self.proj(fused)
-        logits = self.clf(proj)
-        return logits, proj
+        z = self.proj(fused)
+        z = F.normalize(z, dim=-1)
+        logits = self.clf(z)
+        return logits, z
 
 
 # =============================================================================
 # HCDT Loss
 # =============================================================================
 
-def compute_hcdt_loss(emb: torch.Tensor, ast_feat: torch.Tensor,
-                    labels: torch.Tensor, dt_pairs: DualTreePositivePairs,
-                    tau: float = 0.07) -> Tuple[torch.Tensor, torch.Tensor]:
-    """Compute HCDT contrastive loss.
+def compute_tpnl_loss(z: torch.Tensor, labels: torch.Tensor,
+                      lifter: "TreePathNegativeLifter",
+                      tau: float = 0.1) -> Tuple[torch.Tensor, float]:
+    """Vectorised Tree-Path Negative Lifted InfoNCE.
 
-    Positive pairs: both AST similar AND genealogy close
-    Negative pairs: rest
+    Args:
+      z:      (B, D) L2-normalised projections.
+      labels: (B,) generator labels.
+      lifter: TreePathNegativeLifter (provides w_ij = exp(-alpha * d_tree)).
+      tau:    InfoNCE temperature.
+
+    Returns:
+      (loss, mean_pos_weight) for logging.
     """
-    B = emb.shape[0]
-    device = emb.device
+    B = z.size(0)
+    device = z.device
 
-    # Normalize embeddings
-    emb = F.normalize(emb, dim=-1)
+    # Pairwise similarity / tau, with diagonal masked.
+    sim = (z @ z.T) / tau                                # (B, B)
+    eye = torch.eye(B, device=device, dtype=torch.bool)
+    sim = sim.masked_fill(eye, float("-inf"))
 
-    # Compute all pairwise similarities
-    sim = torch.mm(emb, emb.T) / tau  # (B, B)
+    # Stable log-sum-exp trick: shift by row-max (computed with -inf-safe).
+    sim_max = sim.detach().max(dim=1, keepdim=True).values
+    sim_shift = sim - sim_max
 
-    # Build positive mask: dual-tree criterion
-    pos_mask = torch.zeros(B, B, device=device)
-    for i in range(B):
-        for j in range(B):
-            if i == j:
-                continue
-            # Check dual-tree criterion
-            ast_dist = F.mse_loss(ast_feat[i], ast_feat[j]).item()
-            gene_dist = gene_distance(labels[i].item(), labels[j].item(), dt_pairs.gene_adj)
-            if (ast_dist < dt_pairs.ast_threshold) and (gene_dist <= dt_pairs.gene_threshold):
-                pos_mask[i, j] = 1.0
+    # Positive mask: same generator (excluding self).
+    pos_mask = (labels.unsqueeze(1) == labels.unsqueeze(0)) & ~eye      # (B, B)
+    pos_mask_f = pos_mask.float()
 
-    # Numerical stability
-    sim_max, _ = sim.max(dim=1, keepdim=True)
-    sim = sim - sim_max.detach()
+    # Tree-lifted negative weights w_ij (B, B), diag = 0.
+    W = lifter.lift_weights(labels).to(device)                          # (B, B), no-grad
 
-    # Exp and mask
-    exp_sim = torch.exp(sim)
-    exp_sim = exp_sim * (1 - torch.eye(B, device=device))  # Zero diagonal
+    exp_sim = torch.exp(sim_shift)                                       # (B, B)
+    exp_sim = exp_sim.masked_fill(eye, 0.0)
 
-    # Denominator: sum of all exp similarities
-    denom = exp_sim.sum(dim=1, keepdim=True) + 1e-8
+    # Numerator: sum over positives of exp(sim).
+    num = (exp_sim * pos_mask_f).sum(dim=1)                              # (B,)
+    # Denominator: numerator + tree-lifted negatives.
+    neg_mask_f = (~pos_mask & ~eye).float()
+    den = num + (exp_sim * W * neg_mask_f).sum(dim=1)                    # (B,)
 
-    # Positive term
-    pos_exp = exp_sim * pos_mask
-    pos_term = (pos_exp.sum(dim=1) / (pos_mask.sum(dim=1) + 1e-8)).mean()
+    valid = pos_mask_f.sum(dim=1) > 0
+    loss_terms = -torch.log((num + 1e-12) / (den + 1e-12))
+    if valid.any():
+        loss = loss_terms[valid].mean()
+    else:
+        loss = z.new_zeros(())
 
-    # Loss
-    loss = -pos_term
-
-    # Statistics
-    n_pos = pos_mask.sum().item()
-    alignment = pos_exp.diagonal().mean().item() if n_pos > 0 else 0.0
-
-    return loss, alignment
+    mean_pos_w = float(W.masked_select(pos_mask).mean().item()) if pos_mask.any() else 0.0
+    return loss, mean_pos_w
 
 
 # =============================================================================
 # Config and Data Loading
 # =============================================================================
-
-KAGGLE_CODET = "/kaggle/input/datasets/chiboiz/codetm4/dataset_without_comments.parquet"
-KAGGLE_AICD = "/kaggle/input/datasets/chiboiz/ai-code-detection/AICD-Bench"
 
 
 @dataclass
@@ -305,10 +360,9 @@ class Cfg:
     lr_proj: float = 1e-4
     lr_head: float = 1e-4
     wd: float = 0.01
-    lambda_hcdt: float = 0.3
-    tau: float = 0.07
-    ast_threshold: float = 0.3
-    gene_threshold: float = 1.0
+    lambda_tpnl: float = 0.5
+    tau: float = 0.1
+    tpnl_alpha: float = 1.0
     warmup: float = 0.1
     device: str = "cuda"
 
@@ -319,11 +373,19 @@ class Cfg:
             self.gene_adj = GENE_ADJ_AICD
 
 
-def _hw(cfg):
+def _hw(cfg: Cfg) -> Cfg:
     if torch.cuda.is_available():
         torch.backends.cuda.matmul.allow_tf32 = True
         torch.backends.cudnn.allow_tf32 = True
         torch.backends.cudnn.benchmark = True
+        mem = torch.cuda.get_device_properties(0).total_memory / 1e9
+        if mem >= 40:
+            cfg.bs, cfg.seq = 256, 512
+        elif mem >= 10:
+            cfg.bs, cfg.seq = 128, 384
+        else:
+            cfg.bs, cfg.seq = 64, 256
+        logger.info(f"[hw] mem={mem:.1f}GB bs={cfg.bs} seq={cfg.seq}")
     return cfg
 
 
@@ -406,10 +468,11 @@ def _load_aicd(task):
 
 
 class FSDS(TD):
-    def __init__(self, data, tok, seq_len, frac=1.0, seed=42):
+    def __init__(self, data, tok, seq_len, ast_dim=64, frac=1.0, seed=42):
         self.data = data
         self.tok = tok
         self.seq_len = seq_len
+        self.ast_dim = ast_dim
         if frac < 1.0:
             rng = random.Random(seed)
             labels = list(range(max(self.data["label"]) + 1))
@@ -432,7 +495,7 @@ class FSDS(TD):
                       truncation=True, return_tensors="pt")
         ids = enc["input_ids"].squeeze(0)
         mask = enc["attention_mask"].squeeze(0)
-        ast_feat = extract_ast_features(code, 128)
+        ast_feat = extract_ast_features(code, self.ast_dim)
         return {
             "ids": ids, "mask": mask,
             "ast_feat": torch.tensor(ast_feat, dtype=torch.float32),
@@ -440,9 +503,9 @@ class FSDS(TD):
         }
 
 
-def train_epoch(model, loader, opt, sch, scaler, cfg, dt_pairs):
+def train_epoch(model, loader, opt, sch, scaler, cfg, lifter):
     model.train()
-    total_loss, total_ce, total_hcdt = 0, 0, 0
+    total_loss, total_ce, total_tpnl = 0.0, 0.0, 0.0
 
     for b in tqdm(loader, desc="Train"):
         ids = b["ids"].to(cfg.device)
@@ -450,11 +513,11 @@ def train_epoch(model, loader, opt, sch, scaler, cfg, dt_pairs):
         ast_feat = b["ast_feat"].to(cfg.device)
         labs = b["label"].to(cfg.device)
 
-        with torch.autocast(device_type='cuda', enabled=(cfg.device == "cuda")):
-            logits, emb = model(ids, mask, ast_feat)
+        with torch.autocast(device_type='cuda', dtype=torch.bfloat16, enabled=(cfg.device == "cuda")):
+            logits, z = model(ids, mask, ast_feat)
             loss_ce = F.cross_entropy(logits, labs)
-            loss_hcdt, _ = compute_hcdt_loss(emb, ast_feat, labs, dt_pairs, cfg.tau)
-            loss = loss_ce + cfg.lambda_hcdt * loss_hcdt
+            loss_tpnl, _ = compute_tpnl_loss(z, labs, lifter, cfg.tau)
+            loss = loss_ce + cfg.lambda_tpnl * loss_tpnl
 
         scaler.scale(loss).backward()
         scaler.unscale_(opt)
@@ -466,10 +529,10 @@ def train_epoch(model, loader, opt, sch, scaler, cfg, dt_pairs):
 
         total_loss += loss.item()
         total_ce += loss_ce.item()
-        total_hcdt += loss_hcdt.item()
+        total_tpnl += loss_tpnl.item()
 
     n = len(loader)
-    return total_loss / n, total_ce / n, total_hcdt / n
+    return total_loss / n, total_ce / n, total_tpnl / n
 
 
 @torch.no_grad()
@@ -498,13 +561,8 @@ def eval_model(model, loader, cfg):
 def run_exp(cfg: Cfg, tag: str):
     set_seed(cfg.seed)
     cfg = _hw(cfg)
-    logger.info(f"[exp40] HCDT: {tag} | frac={cfg.frac}")
-
-    dt_pairs = DualTreePositivePairs(
-        ast_threshold=cfg.ast_threshold,
-        gene_threshold=cfg.gene_threshold,
-        gene_adj=cfg.gene_adj,
-        n_cls=cfg.n_cls
+    lifter = TreePathNegativeLifter(
+        n_cls=cfg.n_cls, gene_adj=cfg.gene_adj, alpha=cfg.tpnl_alpha,
     )
 
     if cfg.benchmark == "codet_m4":
@@ -527,12 +585,12 @@ def run_exp(cfg: Cfg, tag: str):
 
     logger.info(f"  Train: {len(tr_ds)} | Val: {len(vl_ds)} | Test: {len(ts_ds)}")
 
-    loader_cfg = dict(batch_size=cfg.bs, num_workers=2, pin_memory=True)
+    loader_cfg = dict(batch_size=cfg.bs, num_workers=4, pin_memory=True)
     tr_dl = DataLoader(tr_ds, shuffle=True, **loader_cfg)
     vl_dl = DataLoader(vl_ds, shuffle=False, **loader_cfg)
     ts_dl = DataLoader(ts_ds, shuffle=False, **loader_cfg)
 
-    model = HCDTModel(cfg.enc, cfg.n_cls, cfg.tau).to(cfg.device)
+    model = TPNLModel(cfg.enc, cfg.n_cls, cfg.tau).to(cfg.device)
 
     opt = torch.optim.AdamW([
         {"params": model.encoder.parameters(), "lr": cfg.lr_enc},
@@ -550,21 +608,18 @@ def run_exp(cfg: Cfg, tag: str):
 
     best_val, best_state = 0, None
     for epoch in range(cfg.epochs):
-        loss, loss_ce, loss_hcdt = train_epoch(model, tr_dl, opt, sch, scaler, cfg, dt_pairs)
+        loss, loss_ce, loss_tpnl = train_epoch(model, tr_dl, opt, sch, scaler, cfg, lifter)
         val_met = eval_model(model, vl_dl, cfg)
-        logger.info(f"  E{epoch+1}: loss={loss:.4f} ce={loss_ce:.4f} hcdt={loss_hcdt:.4f} | val={val_met['macro']:.4f}")
+        logger.info(f"[epoch {epoch+1}] val={val_met['macro']:.4f}")
         if val_met["macro"] > best_val:
             best_val = val_met["macro"]
             best_state = {k: v.cpu().clone() for k, v in model.state_dict().items()}
 
     model.load_state_dict(best_state)
     ts_met = eval_model(model, ts_dl, cfg)
-
-    logger.info(f"  Test: macro={ts_met['macro']:.4f} | Δ={ts_met['macro']-PAPER_BASELINE:+.4f}")
-
     result = {
         "tag": tag,
-        "method": "HCDT",
+        "method": "TPNL",
         "enc": cfg.enc,
         "bench": cfg.benchmark,
         "frac": cfg.frac,
@@ -575,29 +630,50 @@ def run_exp(cfg: Cfg, tag: str):
         "per_class_f1": ts_met["per_class"],
         "timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
     }
-
-    out_dir = os.path.join(os.path.dirname(__file__), "results")
-    os.makedirs(out_dir, exist_ok=True)
-    with open(os.path.join(out_dir, f"{tag}_results.json"), "w") as f:
-        json.dump(result, f, indent=2)
-
     return result
 
 
 def main():
-    enc = "unixcoder-base"
+    encoders = ["unixcoder-base"]
     benchmarks = [("codet_m4", "author", 6), ("aicd_t2", "t2", 12)]
     fracs = [0.01, 0.05, 0.20]
 
-    for bench, task, n_cls in benchmarks:
-        for frac in fracs:
-            cfg = Cfg(benchmark=bench, task=task, enc=enc, frac=frac, n_cls=n_cls)
-            tag = f"exp40_hcdt_{enc}_{bench}_f{frac:.2f}"
-            try:
-                r = run_exp(cfg, tag)
-                logger.info(f"  RESULT: {tag} | macro={r['macro']:.4f} Δ={r['dpaper']:+.4f}")
-            except Exception as e:
-                logger.error(f"  FAILED: {tag} | {e}")
+    results = []
+    for enc in encoders:
+        for bench, task, n_cls in benchmarks:
+            for frac in fracs:
+                cfg = Cfg(benchmark=bench, task=task, enc=enc, frac=frac, n_cls=n_cls)
+                cfg = _hw(cfg)
+                tag = f"exp40_tpnl_{enc}_{bench}_f{frac}"
+                logger.info(f"=== {tag} ===")
+                t0 = time.time()
+                try:
+                    res = run_exp(cfg, tag)
+                    elapsed = time.time() - t0
+                    res["wall"] = round(elapsed, 1)
+                    results.append(res)
+                    logger.info(f"[{tag}] MacroF1={res['macro']:.4f} ({res['macro']-PAPER_BASELINE:+.4f} vs paper) time={elapsed:.0f}s")
+                except Exception as e:
+                    logger.error(f"[{tag}] FAILED: {e}")
+                import gc; gc.collect()
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+
+    out_dir = os.path.join(os.path.dirname(os.path.realpath(__file__)), "results")
+    os.makedirs(out_dir, exist_ok=True)
+    with open(os.path.join(out_dir, "exp40_tpnl_results.json"), "w") as f:
+        json.dump(results, f, indent=2)
+
+    print("\n" + "=" * 100)
+    print(f"{'Encoder':<22} {'Benchmark':<12} {'Frac':>6} {'Macro-F1':>10} {'dPaper':>10} {'Weighted':>10} {'Wall':>8}")
+    print("-" * 100)
+    for r in results:
+        print(f"{r['enc']:<22} {r['bench']:<12} {r['frac']:>6.0%} {r['macro']:>10.4f} "
+              f"{r['dpaper']:>+10.4f} {r['weighted']:>10.4f} {r['wall']:>8.0f}s")
+    print("=" * 100)
+    if results:
+        best = max(results, key=lambda x: x["macro"])
+        print(f"\nBest Macro-F1: {best['macro']:.4f} @ {best['tag']}")
 
 
 if __name__ == "__main__":

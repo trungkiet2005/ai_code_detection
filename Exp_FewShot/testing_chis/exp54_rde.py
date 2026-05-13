@@ -1,26 +1,44 @@
 # =============================================================================
-# Theory-Track exp -- RDE (Representation Disentanglement Effect):
+# Theory-Track exp -- GFR (Genealogy-Factorized Representation):
 #
-# ARXIV_ID      : THIS IS NEW - disentangling authorship factors into independent
-#                 representation subspaces
-# NAME          : RDE (Representation Disentanglement Effect)
-# ONE-LINE CLAIM: Authorship representation is decomposed into independent factors
-#                 (syntax, semantics, style) via VAE-like disentanglement.
-# EQUATION      : h(x) = [z_syntax, z_semantic, z_style]
-#                 where each z_i is independent: I(z_i, z_j) = 0 for i ≠ j
-# PROPERTY      : Disentangled representations are more interpretable and robust
-#                 because each factor can be independently manipulated.
-# WHY NOT BEFORE: Standard representations are entangled.
-#                 RDE provides interpretable, controllable authorship factors.
-# FALSIFIER     : If disentangled representations improve OOD robustness,
-#                 then factorization is key to understanding attribution.
+# ARXIV_ID      : NEW. Builds on beta-TCVAE (Chen 2018) and Factor-VAE
+#                 (Kim & Mnih 2018) but ties one factor to a *known* coarsened
+#                 label structure (family).
+# NAME          : GFR (Genealogy-Factorized Representation)
+# ONE-LINE CLAIM: Decompose the latent into three factors z = (z_syn, z_sem,
+#                 z_sty); the z_sty factor is *supervised* to predict the
+#                 genealogy *family* of the generator, and the joint posterior
+#                 is regularised by a Total-Correlation penalty estimated by
+#                 the density-ratio trick, so the three factors are
+#                 statistically independent.
+# EQUATION      : z = (z_syn, z_sem, z_sty)
+#                 L_gfr = CE(W_cls z, y)
+#                       + beta_kl * sum_i KL(q(z_i|x) || N(0, I))
+#                       + gamma_tc * TC(z)
+#                       + delta_fam * CE(W_fam z_sty, family(y))
+#                       + eta_orth * ||CovOff([z_syn, z_sem, z_sty])||_F^2
+#                 where TC(z) ~ density-ratio (logistic) discriminator
+#                 (Kim & Mnih 2018, FactorVAE).
+# PROPERTY      : (a) family(y) is identifiable from z_sty alone;
+#                 (b) z_syn and z_sem must be sufficient for full-class CE,
+#                     so a *non-trivial* split is forced;
+#                 (c) TC discriminator gives an unbiased gradient signal even
+#                     when KL terms are small.
+# WHY NOT BEFORE: Existing disentanglement methods do not anchor any factor
+#                 to a known label tree; GFR is the first to combine
+#                 FactorVAE-style TC with an explicit genealogy supervision.
+# FALSIFIER     : If z_sty alone reaches family-accuracy comparable to z_syn
+#                 + z_sem + z_sty, the disentanglement has collapsed.
 # =============================================================================
 from __future__ import annotations
+
+# === KAGGLE PATHS ===
+KAGGLE_MODELS = "/kaggle/input/datasets/chiboiz/ai-detection-encoders/models"
 
 import os, sys, time, json, random, subprocess, importlib.util, warnings, glob
 from collections import defaultdict
 from dataclasses import dataclass
-from typing import List, Dict
+from typing import List, Dict, Tuple
 
 os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
 
@@ -43,7 +61,7 @@ from torch.cuda.amp import autocast, GradScaler
 warnings.filterwarnings("ignore")
 import logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s", stream=sys.stdout)
-logger = logging.getLogger("exp54")
+logger = logging.getLogger("exp54_gfr")
 
 PAPER_BASELINE = 0.6633
 
@@ -71,61 +89,88 @@ Minimizing TC encourages factorization of the representation.
 # =============================================================================
 
 def extract_ast_features(code: str, max_len: int = 128) -> List[float]:
-    """Extract AST structural features without tree-sitter dependency.
+    """Extract structural code features (legacy-aligned, offline-only).
 
-    Features capture hierarchical code structure:
-    - Function/class definitions
-    - Control flow patterns
-    - Nesting depth
-    - Loop structures
+    Mirrors legacy/Exp_DM_weak/exp06_ast_irm.py::extract_structural_features:
+    richer 22-feature structural vector, normalized + padded to max_len.
+    No tree-sitter dependency (offline-safe).
     """
-    import re
+    import re as _re
 
-    features = []
+    lines = code.split("\n")
+    num_lines = max(len(lines), 1)
+    line_lens = [len(l) for l in lines]
+    avg_line_len = float(np.mean(line_lens)) if line_lens else 0.0
+    max_line_len = float(max(line_lens)) if line_lens else 0.0
 
-    # Count patterns that indicate structure
-    n_func = len(re.findall(r'\b(def|function|func|fn)\s+\w+', code))
-    n_class = len(re.findall(r'\b(class|struct|interface|enum)\s+\w+', code))
-    n_if = len(re.findall(r'\bif\s*[\(\{]', code))
-    n_for = len(re.findall(r'\b(for|foreach)\s*[\(\{]', code))
-    n_while = len(re.findall(r'\bwhile\s*[\(\{]', code))
-    n_return = len(re.findall(r'\breturn\b', code))
-    n_import = len(re.findall(r'\b(import|from|include|require)\b', code))
-    n_comment = len(re.findall(r'(//|#|/\*|\'\'\'|""")', code))
+    indents = [len(l) - len(l.lstrip()) for l in lines if l.strip()]
+    avg_indent = float(np.mean(indents)) if indents else 0.0
+    max_indent = float(max(indents)) if indents else 0.0
+    indent_var = float(np.var(indents)) if indents else 0.0
 
-    # Nesting depth estimation
+    n_func = len(_re.findall(r"\b(def|function|func|fn)\s+\w+", code))
+    n_class = len(_re.findall(r"\b(class|struct|interface|enum)\s+\w+", code))
+    n_for = len(_re.findall(r"\b(for|foreach)\s*[\(\{]", code))
+    n_while = len(_re.findall(r"\bwhile\s*[\(\{]", code))
+    n_loops = n_for + n_while
+    n_if = len(_re.findall(r"\bif\s*[\(\{]", code))
+    n_else = code.count("else ") + code.count("elif ")
+    n_cond = n_if + n_else
+    n_return = len(_re.findall(r"\breturn\b", code))
+    n_comment = code.count("//") + code.count("#") + code.count("/*")
+    n_import = len(_re.findall(r"\b(import|from|include|require|using)\b", code))
+    n_try = code.count("try") + code.count("catch") + code.count("except")
+
     max_depth = 0
     depth = 0
     for c in code:
-        if c in '{([':
+        if c in "{([":
             depth += 1
-            max_depth = max(max_depth, depth)
-        elif c in '})]':
+            if depth > max_depth:
+                max_depth = depth
+        elif c in "})]":
             depth = max(0, depth - 1)
 
-    # Line statistics
-    lines = code.split('\n')
-    avg_indent = np.mean([len(l) - len(l.lstrip()) for l in lines if l.strip()]) if lines else 0
+    identifiers = _re.findall(r"\b[a-zA-Z_]\w*\b", code)
+    n_ids = max(len(identifiers), 1)
+    snake_ratio = sum(1 for i in identifiers if "_" in i and i.islower()) / n_ids
+    camel_ratio = sum(1 for i in identifiers if any(c.isupper() for c in i[1:]) and "_" not in i) / n_ids
+    short_ratio = sum(1 for i in identifiers if len(i) == 1) / n_ids
+    avg_id_len = float(np.mean([len(i) for i in identifiers])) if identifiers else 0.0
+
+    empty_ratio = sum(1 for l in lines if not l.strip()) / num_lines
+    code_len = max(len(code), 1)
+    alpha_ratio = sum(c.isalpha() for c in code) / code_len
+    digit_ratio = sum(c.isdigit() for c in code) / code_len
+    space_ratio = sum(c.isspace() for c in code) / code_len
 
     features = [
+        num_lines / 500.0,
+        avg_line_len / 80.0,
+        max_line_len / 200.0,
+        avg_indent / 10.0,
+        max_indent / 20.0,
+        indent_var / 50.0,
         n_func / 10.0,
         n_class / 5.0,
-        n_if / 20.0,
-        n_for / 10.0,
-        n_while / 10.0,
+        n_loops / 10.0,
+        n_cond / 20.0,
         n_return / 20.0,
-        n_import / 10.0,
         n_comment / 50.0,
+        n_import / 10.0,
+        n_try / 10.0,
         max_depth / 15.0,
-        avg_indent / 10.0,
-        len(code) / 10000.0,
-        len(lines) / 500.0,
+        snake_ratio,
+        camel_ratio,
+        short_ratio,
+        avg_id_len / 10.0,
+        empty_ratio,
+        alpha_ratio,
+        digit_ratio,
     ]
 
-    # Pad to fixed length
-    while len(features) < max_len:
-        features.append(0.0)
-
+    if len(features) < max_len:
+        features = features + [0.0] * (max_len - len(features))
     return features[:max_len]
 
 
@@ -200,65 +245,143 @@ class DisentangledEncoder(nn.Module):
         return z_syntax, z_semantic, z_style
 
 
-class RDEModel(nn.Module):
-    """Representation Disentanglement Effect model."""
-    def __init__(self, enc_name: str, n_cls: int, z_syntax: int = 32,
-                 z_semantic: int = 64, z_style: int = 32):
+HIER_FAM_CODET = {0: 0, 1: 1, 2: 2, 3: 1, 4: 3, 5: 3}
+HIER_FAM_AICD = {i: i // 3 for i in range(12)}
+
+
+class FactorVAEDiscriminator(nn.Module):
+    """FactorVAE-style discriminator for the density-ratio TC estimator
+    (Kim & Mnih 2018).  Receives the concatenated z and tries to distinguish
+    joint q(z) from product-of-marginals q(z_syn)q(z_sem)q(z_sty).
+    """
+    def __init__(self, total_z: int, hidden: int = 256):
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Linear(total_z, hidden), nn.LeakyReLU(0.2),
+            nn.Linear(hidden, hidden), nn.LeakyReLU(0.2),
+            nn.Linear(hidden, 2),
+        )
+
+    def forward(self, z):
+        return self.net(z)
+
+
+class GFRModel(nn.Module):
+    """Genealogy-Factorized Representation."""
+    def __init__(self, enc_name: str, n_cls: int, n_fam: int,
+                 z_syn: int = 32, z_sem: int = 64, z_sty: int = 32):
         super().__init__()
         self.encoder = AutoModel.from_pretrained(os.path.join(KAGGLE_MODELS, enc_name), local_files_only=True)
         hidden = self.encoder.config.hidden_size
+        self.z_syn = z_syn
+        self.z_sem = z_sem
+        self.z_sty = z_sty
+        self.total_z = z_syn + z_sem + z_sty
 
-        # Disentangled encoders
-        self.ast_disentangler = DisentangledEncoder(64, z_syntax, z_semantic, z_style)
-
-        # Semantic encoder
-        self.sem_encoder = nn.Sequential(
-            nn.Linear(hidden, 256),
-            nn.GELU(),
+        # Single shared encoder over the *semantic* representation, producing
+        # three independent factor heads (mu, logvar each).
+        self.ast_proj = nn.Sequential(nn.Linear(64, 128), nn.GELU(), nn.Linear(128, 128))
+        self.shared = nn.Sequential(
+            nn.Linear(hidden + 128, 256), nn.GELU(),
         )
+        self.syn_head = nn.Linear(256, z_syn * 2)
+        self.sem_head = nn.Linear(256, z_sem * 2)
+        self.sty_head = nn.Linear(256, z_sty * 2)
 
-        # Classifier on disentangled representation
-        total_z = z_syntax + z_semantic + z_style
-        self.proj = nn.Sequential(
-            nn.Linear(total_z + 256, 256),
-            nn.GELU(),
-            nn.Dropout(0.1)
-        )
-        self.clf = nn.Linear(256, n_cls)
+        self.clf = nn.Linear(self.total_z, n_cls)
+        # Family-head reads ONLY z_sty.
+        self.fam_clf = nn.Linear(z_sty, n_fam)
 
-    def forward(self, ids, mask, ast_feat, sample=True):
-        # Semantic encoding
+        # Total-correlation discriminator (FactorVAE).
+        self.tc_disc = FactorVAEDiscriminator(self.total_z)
+
+    @staticmethod
+    def _reparam(mu, logvar):
+        std = (0.5 * logvar.clamp(-8.0, 8.0)).exp()
+        return mu + torch.randn_like(std) * std
+
+    @staticmethod
+    def _kl(mu, logvar):
+        return -0.5 * (1 + logvar - mu.pow(2) - logvar.exp()).sum(-1).mean()
+
+    def encode(self, ids, mask, ast_feat, sample: bool = True):
         out = self.encoder(input_ids=ids, attention_mask=mask)
-        sem_emb = (out.last_hidden_state * mask.unsqueeze(-1)).sum(1) / mask.sum(1, keepdim=True).clamp(min=1)
-        sem = self.sem_encoder(sem_emb)
-
-        # Disentangled AST factors
+        sem = (out.last_hidden_state * mask.unsqueeze(-1)).sum(1) / mask.sum(1, keepdim=True).clamp(min=1)
+        ast = self.ast_proj(ast_feat)
+        h = self.shared(torch.cat([sem, ast], dim=-1))
+        mu_syn, lv_syn = self.syn_head(h).chunk(2, dim=-1)
+        mu_sem, lv_sem = self.sem_head(h).chunk(2, dim=-1)
+        mu_sty, lv_sty = self.sty_head(h).chunk(2, dim=-1)
         if sample:
-            z_syntax, z_semantic, z_style, kl = self.ast_disentangler(ast_feat)
+            z_syn = self._reparam(mu_syn, lv_syn)
+            z_sem = self._reparam(mu_sem, lv_sem)
+            z_sty = self._reparam(mu_sty, lv_sty)
         else:
-            z_syntax, z_semantic, z_style = self.ast_disentangler.extract_mean(ast_feat)
-            kl = torch.tensor(0.0, device=ast_feat.device)
+            z_syn, z_sem, z_sty = mu_syn, mu_sem, mu_sty
+        kl = self._kl(mu_syn, lv_syn) + self._kl(mu_sem, lv_sem) + self._kl(mu_sty, lv_sty)
+        return z_syn, z_sem, z_sty, kl
 
-        # Combine
-        z = torch.cat([z_syntax, z_semantic, z_style], dim=-1)
-        fused = torch.cat([z, sem], dim=-1)
-        h = self.proj(fused)
-        logits = self.clf(h)
+    def forward(self, ids, mask, ast_feat, sample: bool = True):
+        z_syn, z_sem, z_sty, kl = self.encode(ids, mask, ast_feat, sample=sample)
+        z = torch.cat([z_syn, z_sem, z_sty], dim=-1)
+        logits = self.clf(z)
+        fam_logits = self.fam_clf(z_sty)
+        return logits, fam_logits, z, kl
 
-        return logits, kl
+    @staticmethod
+    def permute_factors(z: torch.Tensor, splits: Tuple[int, int, int]) -> torch.Tensor:
+        """Per-factor independent shuffle along batch to approximate
+        the product-of-marginals samples for FactorVAE discriminator.
+        """
+        B = z.size(0)
+        s_syn, s_sem, s_sty = splits
+        idx_a = torch.randperm(B, device=z.device)
+        idx_b = torch.randperm(B, device=z.device)
+        z_p = torch.cat([z[:, :s_syn],
+                         z[idx_a, s_syn:s_syn + s_sem],
+                         z[idx_b, s_syn + s_sem:s_syn + s_sem + s_sty]], dim=-1)
+        return z_p
 
 
-# =============================================================================
-# RDE Loss
-# =============================================================================
-
-def rde_loss(logits, kl, labels, lambda_rde=0.1):
-    """RDE loss with disentanglement regularization."""
+def gfr_loss(logits, fam_logits, z, kl, labels, fam_labels, disc, splits,
+             cfg) -> Tuple[torch.Tensor, float, float, float, float]:
+    """L_gfr = CE + beta * KL + gamma * TC_log_ratio + delta * CE_family + eta * OffCov."""
     ce = F.cross_entropy(logits, labels)
+    fam_ce = F.cross_entropy(fam_logits, fam_labels)
 
-    # Disentanglement: minimize total correlation
-    # Higher KL = better separation of factors
-    return ce + lambda_rde * kl, ce.item(), kl.item()
+    # FactorVAE TC: log[ p(z) / prod p(z_i) ] ≈ logit[disc(z) -> class 0]
+    disc_logits = disc(z)
+    log_ratio = disc_logits[:, 0] - disc_logits[:, 1]
+    tc_term = log_ratio.mean()                                       # to be MIN
+
+    # Off-diagonal covariance penalty across the three factor blocks.
+    z_centered = z - z.mean(dim=0, keepdim=True)
+    cov = (z_centered.T @ z_centered) / max(z.size(0) - 1, 1)
+    sizes = splits
+    off = z.new_zeros(())
+    s_syn, s_sem, s_sty = sizes
+    blocks = [(0, s_syn), (s_syn, s_syn + s_sem), (s_syn + s_sem, s_syn + s_sem + s_sty)]
+    for i, (a0, a1) in enumerate(blocks):
+        for j, (b0, b1) in enumerate(blocks):
+            if i == j:
+                continue
+            off = off + cov[a0:a1, b0:b1].pow(2).mean()
+
+    total = (ce
+             + cfg.beta_kl * kl
+             + cfg.gamma_tc * tc_term
+             + cfg.delta_fam * fam_ce
+             + cfg.eta_orth * off)
+    return total, ce.item(), float(kl.item()), float(tc_term.item()), float(fam_ce.item())
+
+
+def disc_loss(z_real, z_perm, disc) -> torch.Tensor:
+    """Train TC discriminator: class 0 = joint q(z), class 1 = product."""
+    logits_real = disc(z_real.detach())
+    logits_perm = disc(z_perm.detach())
+    y_real = torch.zeros(z_real.size(0), dtype=torch.long, device=z_real.device)
+    y_perm = torch.ones(z_perm.size(0), dtype=torch.long, device=z_perm.device)
+    return 0.5 * (F.cross_entropy(logits_real, y_real) + F.cross_entropy(logits_perm, y_perm))
 
 
 # =============================================================================
@@ -284,16 +407,34 @@ class Cfg:
     lr_proj: float = 1e-4
     lr_head: float = 1e-4
     wd: float = 0.01
-    lambda_rde: float = 0.1
+    z_syn: int = 32
+    z_sem: int = 64
+    z_sty: int = 32
+    beta_kl: float = 1e-3
+    gamma_tc: float = 1.0
+    delta_fam: float = 0.5
+    eta_orth: float = 1e-2
+    lr_disc: float = 2e-4
     warmup: float = 0.1
     device: str = "cuda"
 
+    def __post_init__(self):
+        self.hier_fam = HIER_FAM_AICD if self.benchmark == "aicd_t2" else HIER_FAM_CODET
 
-def _hw(cfg):
+
+def _hw(cfg: Cfg) -> Cfg:
     if torch.cuda.is_available():
         torch.backends.cuda.matmul.allow_tf32 = True
         torch.backends.cudnn.allow_tf32 = True
         torch.backends.cudnn.benchmark = True
+        mem = torch.cuda.get_device_properties(0).total_memory / 1e9
+        if mem >= 40:
+            cfg.bs, cfg.seq = 256, 512
+        elif mem >= 10:
+            cfg.bs, cfg.seq = 128, 384
+        else:
+            cfg.bs, cfg.seq = 64, 256
+        logger.info(f"[hw] mem={mem:.1f}GB bs={cfg.bs} seq={cfg.seq}")
     return cfg
 
 
@@ -376,10 +517,11 @@ def _load_aicd(task):
 
 
 class FSDS(TD):
-    def __init__(self, data, tok, seq_len, frac=1.0, seed=42):
+    def __init__(self, data, tok, seq_len, ast_dim=64, frac=1.0, seed=42):
         self.data = data
         self.tok = tok
         self.seq_len = seq_len
+        self.ast_dim = ast_dim
         if frac < 1.0:
             rng = random.Random(seed)
             labels = list(range(max(self.data["label"]) + 1))
@@ -402,7 +544,7 @@ class FSDS(TD):
                       truncation=True, return_tensors="pt")
         ids = enc["input_ids"].squeeze(0)
         mask = enc["attention_mask"].squeeze(0)
-        ast_feat = extract_ast_features(code, 128)
+        ast_feat = extract_ast_features(code, self.ast_dim)
         return {
             "ids": ids, "mask": mask,
             "ast_feat": torch.tensor(ast_feat, dtype=torch.float32),
@@ -410,34 +552,53 @@ class FSDS(TD):
         }
 
 
-def train_epoch(model, loader, opt, sch, scaler, cfg, sample=True):
+def train_epoch(model, loader, opt_main, opt_disc, sch_main, scaler, cfg, fam_lookup):
+    """Alternating optimisation:
+      step 1: update main params with L_gfr (TC term uses current disc).
+      step 2: update disc params on z_real vs z_perm classification.
+    """
     model.train()
-    total_loss, total_ce, total_kl = 0, 0, 0
+    splits = (cfg.z_syn, cfg.z_sem, cfg.z_sty)
+    total_loss, total_ce, total_kl, total_tc, total_fam = 0.0, 0.0, 0.0, 0.0, 0.0
 
     for b in tqdm(loader, desc="Train"):
         ids = b["ids"].to(cfg.device)
         mask = b["mask"].to(cfg.device)
         ast_feat = b["ast_feat"].to(cfg.device)
         labs = b["label"].to(cfg.device)
+        fam = fam_lookup[labs]                                            # (B,)
 
-        with torch.autocast(device_type='cuda', enabled=(cfg.device == "cuda")):
-            logits, kl = model(ids, mask, ast_feat, sample=sample)
-            loss, ce, kl_val = rde_loss(logits, kl, labs, cfg.lambda_rde)
-
+        # --- main step ---
+        with torch.autocast(device_type='cuda', dtype=torch.bfloat16, enabled=(cfg.device == "cuda")):
+            logits, fam_logits, z, kl = model(ids, mask, ast_feat, sample=True)
+            loss, ce, kl_val, tc_val, fam_val = gfr_loss(
+                logits, fam_logits, z, kl, labs, fam, model.tc_disc, splits, cfg,
+            )
         scaler.scale(loss).backward()
-        scaler.unscale_(opt)
+        scaler.unscale_(opt_main)
         torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
-        scaler.step(opt)
+        scaler.step(opt_main)
         scaler.update()
-        opt.zero_grad()
-        sch.step()
+        opt_main.zero_grad()
+        sch_main.step()
+
+        # --- TC discriminator step (fp32, no scaler) ---
+        with torch.no_grad():
+            _, _, z_real, _ = model(ids, mask, ast_feat, sample=True)
+        z_perm = model.permute_factors(z_real, splits)
+        d_loss = disc_loss(z_real, z_perm, model.tc_disc)
+        d_loss.backward()
+        opt_disc.step()
+        opt_disc.zero_grad()
 
         total_loss += loss.item()
         total_ce += ce
         total_kl += kl_val
+        total_tc += tc_val
+        total_fam += fam_val
 
     n = len(loader)
-    return total_loss / n, total_ce / n, total_kl / n
+    return total_loss / n, total_ce / n, total_kl / n, total_tc / n, total_fam / n
 
 
 @torch.no_grad()
@@ -450,7 +611,7 @@ def eval_model(model, loader, cfg):
         ast_feat = b["ast_feat"].to(cfg.device)
         labs = b["label"]
 
-        logits, _ = model(ids, mask, ast_feat, sample=False)
+        logits, _, _, _ = model(ids, mask, ast_feat, sample=False)
         preds.extend(logits.argmax(dim=-1).cpu().tolist())
         labels.extend(labs.tolist())
 
@@ -466,8 +627,6 @@ def eval_model(model, loader, cfg):
 def run_exp(cfg: Cfg, tag: str):
     set_seed(cfg.seed)
     cfg = _hw(cfg)
-    logger.info(f"[exp54] RDE: {tag} | frac={cfg.frac}")
-
     if cfg.benchmark == "codet_m4":
         tr_raw, vl_raw, ts_raw = _load_codet()
         vocab = _vocab(tr_raw)
@@ -488,45 +647,61 @@ def run_exp(cfg: Cfg, tag: str):
 
     logger.info(f"  Train: {len(tr_ds)} | Val: {len(vl_ds)} | Test: {len(ts_ds)}")
 
-    loader_cfg = dict(batch_size=cfg.bs, num_workers=2, pin_memory=True)
+    loader_cfg = dict(batch_size=cfg.bs, num_workers=4, pin_memory=True)
     tr_dl = DataLoader(tr_ds, shuffle=True, **loader_cfg)
     vl_dl = DataLoader(vl_ds, shuffle=False, **loader_cfg)
     ts_dl = DataLoader(ts_ds, shuffle=False, **loader_cfg)
 
-    model = RDEModel(cfg.enc, cfg.n_cls).to(cfg.device)
+    n_fam = max(cfg.hier_fam.values()) + 1
+    model = GFRModel(cfg.enc, cfg.n_cls, n_fam,
+                     z_syn=cfg.z_syn, z_sem=cfg.z_sem, z_sty=cfg.z_sty).to(cfg.device)
 
-    opt = torch.optim.AdamW([
+    fam_lookup = torch.tensor([cfg.hier_fam[c] for c in range(cfg.n_cls)],
+                              dtype=torch.long, device=cfg.device)
+
+    main_params = (
+        list(model.encoder.parameters())
+        + list(model.ast_proj.parameters())
+        + list(model.shared.parameters())
+        + list(model.syn_head.parameters())
+        + list(model.sem_head.parameters())
+        + list(model.sty_head.parameters())
+        + list(model.clf.parameters())
+        + list(model.fam_clf.parameters())
+    )
+    opt_main = torch.optim.AdamW([
         {"params": model.encoder.parameters(), "lr": cfg.lr_enc},
-        {"params": model.ast_disentangler.parameters(), "lr": cfg.lr_proj},
-        {"params": model.sem_encoder.parameters(), "lr": cfg.lr_proj},
-        {"params": model.proj.parameters(), "lr": cfg.lr_proj},
-        {"params": model.clf.parameters(), "lr": cfg.lr_head}
+        {"params": list(model.ast_proj.parameters()) + list(model.shared.parameters())
+                   + list(model.syn_head.parameters()) + list(model.sem_head.parameters())
+                   + list(model.sty_head.parameters()), "lr": cfg.lr_proj},
+        {"params": list(model.clf.parameters()) + list(model.fam_clf.parameters()),
+         "lr": cfg.lr_head},
     ], weight_decay=cfg.wd)
+    opt_disc = torch.optim.Adam(model.tc_disc.parameters(), lr=cfg.lr_disc)
 
     total_steps = len(tr_dl) * cfg.epochs
-    sch = torch.optim.lr_scheduler.OneCycleLR(
-        opt, max_lr=[cfg.lr_enc, cfg.lr_proj, cfg.lr_proj, cfg.lr_proj, cfg.lr_head],
+    sch_main = torch.optim.lr_scheduler.OneCycleLR(
+        opt_main, max_lr=[cfg.lr_enc, cfg.lr_proj, cfg.lr_head],
         total_steps=total_steps, pct_start=cfg.warmup
     )
     scaler = GradScaler()
 
     best_val, best_state = 0, None
     for epoch in range(cfg.epochs):
-        loss, loss_ce, loss_kl = train_epoch(model, tr_dl, opt, sch, scaler, cfg, sample=True)
+        loss, loss_ce, loss_kl, loss_tc, loss_fam = train_epoch(
+            model, tr_dl, opt_main, opt_disc, sch_main, scaler, cfg, fam_lookup,
+        )
         val_met = eval_model(model, vl_dl, cfg)
-        logger.info(f"  E{epoch+1}: loss={loss:.4f} ce={loss_ce:.4f} kl={loss_kl:.4f} | val={val_met['macro']:.4f}")
+        logger.info(f"[epoch {epoch+1}] val={val_met['macro']:.4f}")
         if val_met["macro"] > best_val:
             best_val = val_met["macro"]
             best_state = {k: v.cpu().clone() for k, v in model.state_dict().items()}
 
     model.load_state_dict(best_state)
     ts_met = eval_model(model, ts_dl, cfg)
-
-    logger.info(f"  Test: macro={ts_met['macro']:.4f} | Δ={ts_met['macro']-PAPER_BASELINE:+.4f}")
-
     result = {
         "tag": tag,
-        "method": "RDE",
+        "method": "GFR",
         "enc": cfg.enc,
         "bench": cfg.benchmark,
         "frac": cfg.frac,
@@ -537,29 +712,50 @@ def run_exp(cfg: Cfg, tag: str):
         "per_class_f1": ts_met["per_class"],
         "timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
     }
-
-    out_dir = os.path.join(os.path.dirname(__file__), "results")
-    os.makedirs(out_dir, exist_ok=True)
-    with open(os.path.join(out_dir, f"{tag}_results.json"), "w") as f:
-        json.dump(result, f, indent=2)
-
     return result
 
 
 def main():
-    enc = "unixcoder-base"
+    encoders = ["unixcoder-base"]
     benchmarks = [("codet_m4", "author", 6), ("aicd_t2", "t2", 12)]
     fracs = [0.01, 0.05, 0.20]
 
-    for bench, task, n_cls in benchmarks:
-        for frac in fracs:
-            cfg = Cfg(benchmark=bench, task=task, enc=enc, frac=frac, n_cls=n_cls)
-            tag = f"exp54_rde_{enc}_{bench}_f{frac:.2f}"
-            try:
-                r = run_exp(cfg, tag)
-                logger.info(f"  RESULT: {tag} | macro={r['macro']:.4f} Δ={r['dpaper']:+.4f}")
-            except Exception as e:
-                logger.error(f"  FAILED: {tag} | {e}")
+    results = []
+    for enc in encoders:
+        for bench, task, n_cls in benchmarks:
+            for frac in fracs:
+                cfg = Cfg(benchmark=bench, task=task, enc=enc, frac=frac, n_cls=n_cls)
+                cfg = _hw(cfg)
+                tag = f"exp54_gfr_{enc}_{bench}_f{frac}"
+                logger.info(f"=== {tag} ===")
+                t0 = time.time()
+                try:
+                    res = run_exp(cfg, tag)
+                    elapsed = time.time() - t0
+                    res["wall"] = round(elapsed, 1)
+                    results.append(res)
+                    logger.info(f"[{tag}] MacroF1={res['macro']:.4f} ({res['macro']-PAPER_BASELINE:+.4f} vs paper) time={elapsed:.0f}s")
+                except Exception as e:
+                    logger.error(f"[{tag}] FAILED: {e}")
+                import gc; gc.collect()
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+
+    out_dir = os.path.join(os.path.dirname(os.path.realpath(__file__)), "results")
+    os.makedirs(out_dir, exist_ok=True)
+    with open(os.path.join(out_dir, "exp54_gfr_results.json"), "w") as f:
+        json.dump(results, f, indent=2)
+
+    print("\n" + "=" * 100)
+    print(f"{'Encoder':<22} {'Benchmark':<12} {'Frac':>6} {'Macro-F1':>10} {'dPaper':>10} {'Weighted':>10} {'Wall':>8}")
+    print("-" * 100)
+    for r in results:
+        print(f"{r['enc']:<22} {r['bench']:<12} {r['frac']:>6.0%} {r['macro']:>10.4f} "
+              f"{r['dpaper']:>+10.4f} {r['weighted']:>10.4f} {r['wall']:>8.0f}s")
+    print("=" * 100)
+    if results:
+        best = max(results, key=lambda x: x["macro"])
+        print(f"\nBest Macro-F1: {best['macro']:.4f} @ {best['tag']}")
 
 
 if __name__ == "__main__":

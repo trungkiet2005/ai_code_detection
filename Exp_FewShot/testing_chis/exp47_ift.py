@@ -1,29 +1,44 @@
 # =============================================================================
-# Theory-Track exp -- IFT (Information Flow Theory):
+# Theory-Track exp -- GIBA (Genealogy InfoNCE Bottleneck for Attribution):
 #
-# ARXIV_ID      : THIS IS NEW - measuring information bottleneck between
-#                 AST structure, semantic content, and authorship
-# NAME          : IFT (Information Flow Theory)
-# ONE-LINE CLAIM: The information bottleneck between AST and authorship
-#                 is the key invariant for OOD generalization, measurable
-#                 via mutual information estimation.
-# EQUATION      : I(AST; Y) = H(Y) - H(Y | AST)
-#                 We maximize I(AST; Y) while minimizing I(AST; S)
-#                 where S is the source/location confounder.
-# PROPERTY      : The information-theoretic decomposition reveals which
-#                 structural features carry authorship signal vs source bias.
-# WHY NOT BEFORE: Prior work doesn't quantify information flow. IFT provides
-#                 a principled information-theoretic framework for attribution.
-# FALSIFIER     : If representations maximizing I(AST; Y) - λ I(AST; S)
-#                 are more robust to source shift, then information flow
-#                 analysis is key to understanding attribution.
+# ARXIV_ID      : NEW. Combines InfoNCE-MI lower bound (van den Oord 2018,
+#                 Poole 2019) with variational IB (Tishby 1999, Alemi 2017)
+#                 and adds a genealogy-aware *family* MI objective.
+# NAME          : GIBA (Genealogy InfoNCE Bottleneck for Attribution)
+# ONE-LINE CLAIM: A tight InfoNCE lower bound on I(z; family(y)) maximised
+#                 against an explicit upper-bound surrogate on I(z; source),
+#                 with a variational KL bottleneck on the encoder posterior,
+#                 yields a representation that retains genealogy-relevant
+#                 information and discards source bias.
+# EQUATION      : L_giba = CE
+#                          - mu  * I_NCE(z; family(y))
+#                          + nu  * I_CLUB(z; source)
+#                          + beta * KL(q(z|x) || N(0, I))
+#                 where I_NCE(z; c) = E[log( exp(f(z, c+)) / sum_{c'} exp(f(z, c')) )]
+#                 with f(z, c) = z^T W e_c / tau (learned critic),
+#                 and  I_CLUB(z; s) = E[log p(s|z)] - E_{z, s indep.}[log p(s|z)]
+#                 is the CLUB upper bound on MI (Cheng 2020).
+# PROPERTY      : (a) I_NCE bound is tight to log(K) (Poole 2019 Proposition 2);
+#                 (b) Family supervision uses HIER_FAM mapping (CoDET 6->4 families,
+#                     AICD 12->4 families) so the bound is over a coarsened tree;
+#                 (c) CLUB upper bound is correct gradient direction for *minimising*
+#                     I(z; source), unlike the InfoNCE lower bound.
+# WHY NOT BEFORE: Information-bottleneck attribution methods use Gaussian-KL
+#                 only; they do not estimate I(z; family) directly. GIBA is
+#                 the first to plug a tree-coarsened InfoNCE bound and a CLUB
+#                 source-suppression bound into the same IB objective.
+# FALSIFIER     : If I_NCE(z; family) saturates without classification gain,
+#                 family-MI is not the right axis to maximise.
 # =============================================================================
 from __future__ import annotations
 
-import os, sys, time, json, random, subprocess, importlib.util, warnings, glob
+# === KAGGLE PATHS ===
+KAGGLE_MODELS = "/kaggle/input/datasets/chiboiz/ai-detection-encoders/models"
+
+import os, sys, time, json, random, subprocess, importlib.util, warnings, glob, math
 from collections import defaultdict
 from dataclasses import dataclass
-from typing import List, Dict
+from typing import List, Dict, Tuple
 
 os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
 
@@ -46,7 +61,7 @@ from torch.cuda.amp import autocast, GradScaler
 warnings.filterwarnings("ignore")
 import logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s", stream=sys.stdout)
-logger = logging.getLogger("exp47")
+logger = logging.getLogger("exp47_giba")
 
 PAPER_BASELINE = 0.6633
 
@@ -72,191 +87,208 @@ where p(y|x) is the classifier and q(y) is a marginal prior.
 # =============================================================================
 
 def extract_ast_features(code: str, max_len: int = 128) -> List[float]:
-    """Extract AST structural features without tree-sitter dependency.
+    """Extract structural code features (legacy-aligned, offline-only).
 
-    Features capture hierarchical code structure:
-    - Function/class definitions
-    - Control flow patterns
-    - Nesting depth
-    - Loop structures
+    Mirrors legacy/Exp_DM_weak/exp06_ast_irm.py::extract_structural_features:
+    richer 22-feature structural vector, normalized + padded to max_len.
+    No tree-sitter dependency (offline-safe).
     """
-    import re
+    import re as _re
 
-    features = []
+    lines = code.split("\n")
+    num_lines = max(len(lines), 1)
+    line_lens = [len(l) for l in lines]
+    avg_line_len = float(np.mean(line_lens)) if line_lens else 0.0
+    max_line_len = float(max(line_lens)) if line_lens else 0.0
 
-    # Count patterns that indicate structure
-    n_func = len(re.findall(r'\b(def|function|func|fn)\s+\w+', code))
-    n_class = len(re.findall(r'\b(class|struct|interface|enum)\s+\w+', code))
-    n_if = len(re.findall(r'\bif\s*[\(\{]', code))
-    n_for = len(re.findall(r'\b(for|foreach)\s*[\(\{]', code))
-    n_while = len(re.findall(r'\bwhile\s*[\(\{]', code))
-    n_return = len(re.findall(r'\breturn\b', code))
-    n_import = len(re.findall(r'\b(import|from|include|require)\b', code))
-    n_comment = len(re.findall(r'(//|#|/\*|\'\'\'|""")', code))
+    indents = [len(l) - len(l.lstrip()) for l in lines if l.strip()]
+    avg_indent = float(np.mean(indents)) if indents else 0.0
+    max_indent = float(max(indents)) if indents else 0.0
+    indent_var = float(np.var(indents)) if indents else 0.0
 
-    # Nesting depth estimation
+    n_func = len(_re.findall(r"\b(def|function|func|fn)\s+\w+", code))
+    n_class = len(_re.findall(r"\b(class|struct|interface|enum)\s+\w+", code))
+    n_for = len(_re.findall(r"\b(for|foreach)\s*[\(\{]", code))
+    n_while = len(_re.findall(r"\bwhile\s*[\(\{]", code))
+    n_loops = n_for + n_while
+    n_if = len(_re.findall(r"\bif\s*[\(\{]", code))
+    n_else = code.count("else ") + code.count("elif ")
+    n_cond = n_if + n_else
+    n_return = len(_re.findall(r"\breturn\b", code))
+    n_comment = code.count("//") + code.count("#") + code.count("/*")
+    n_import = len(_re.findall(r"\b(import|from|include|require|using)\b", code))
+    n_try = code.count("try") + code.count("catch") + code.count("except")
+
     max_depth = 0
     depth = 0
     for c in code:
-        if c in '{([':
+        if c in "{([":
             depth += 1
-            max_depth = max(max_depth, depth)
-        elif c in '})]':
+            if depth > max_depth:
+                max_depth = depth
+        elif c in "})]":
             depth = max(0, depth - 1)
 
-    # Line statistics
-    lines = code.split('\n')
-    avg_indent = np.mean([len(l) - len(l.lstrip()) for l in lines if l.strip()]) if lines else 0
+    identifiers = _re.findall(r"\b[a-zA-Z_]\w*\b", code)
+    n_ids = max(len(identifiers), 1)
+    snake_ratio = sum(1 for i in identifiers if "_" in i and i.islower()) / n_ids
+    camel_ratio = sum(1 for i in identifiers if any(c.isupper() for c in i[1:]) and "_" not in i) / n_ids
+    short_ratio = sum(1 for i in identifiers if len(i) == 1) / n_ids
+    avg_id_len = float(np.mean([len(i) for i in identifiers])) if identifiers else 0.0
+
+    empty_ratio = sum(1 for l in lines if not l.strip()) / num_lines
+    code_len = max(len(code), 1)
+    alpha_ratio = sum(c.isalpha() for c in code) / code_len
+    digit_ratio = sum(c.isdigit() for c in code) / code_len
+    space_ratio = sum(c.isspace() for c in code) / code_len
 
     features = [
+        num_lines / 500.0,
+        avg_line_len / 80.0,
+        max_line_len / 200.0,
+        avg_indent / 10.0,
+        max_indent / 20.0,
+        indent_var / 50.0,
         n_func / 10.0,
         n_class / 5.0,
-        n_if / 20.0,
-        n_for / 10.0,
-        n_while / 10.0,
+        n_loops / 10.0,
+        n_cond / 20.0,
         n_return / 20.0,
-        n_import / 10.0,
         n_comment / 50.0,
+        n_import / 10.0,
+        n_try / 10.0,
         max_depth / 15.0,
-        avg_indent / 10.0,
-        len(code) / 10000.0,
-        len(lines) / 500.0,
+        snake_ratio,
+        camel_ratio,
+        short_ratio,
+        avg_id_len / 10.0,
+        empty_ratio,
+        alpha_ratio,
+        digit_ratio,
     ]
 
-    # Pad to fixed length
-    while len(features) < max_len:
-        features.append(0.0)
-
+    if len(features) < max_len:
+        features = features + [0.0] * (max_len - len(features))
     return features[:max_len]
 
 
 # =============================================================================
-# IFT Model with Information Bottleneck
+# GIBA: Variational latent + InfoNCE critic + CLUB upper bound
 # =============================================================================
 
-class InfoBottleneck(nn.Module):
-    """Variational information bottleneck."""
-    def __init__(self, in_dim: int, latent_dim: int = 64, beta: float = 1.0):
+# Family mapping: HIER_FAM[class_idx] = coarsened family id.
+HIER_FAM_CODET = {0: 0, 1: 1, 2: 2, 3: 1, 4: 3, 5: 3}        # 6 classes -> 4 families
+HIER_FAM_AICD = {i: i // 3 for i in range(12)}                # 12 classes -> 4 families
+
+
+class GaussianEncoder(nn.Module):
+    """Variational encoder q(z|x) = N(mu(x), sigma^2(x))."""
+    def __init__(self, in_dim: int, latent_dim: int = 128):
         super().__init__()
-        self.encoder = nn.Sequential(
-            nn.Linear(in_dim, 128),
-            nn.GELU(),
-            nn.Linear(128, latent_dim * 2)  # mu and logvar
+        self.net = nn.Sequential(
+            nn.Linear(in_dim, 256), nn.GELU(),
+            nn.Linear(256, latent_dim * 2),
         )
-        self.beta = beta
 
-    def forward(self, x):
-        h = self.encoder(x)
+    def forward(self, x, sample: bool = True):
+        h = self.net(x)
         mu, logvar = h.chunk(2, dim=-1)
-        std = (0.5 * logvar).exp()
-        eps = torch.randn_like(std)
-        z = mu + eps * std
-
-        # Variational KL
+        logvar = logvar.clamp(min=-8.0, max=8.0)
+        if sample:
+            std = (0.5 * logvar).exp()
+            z = mu + torch.randn_like(std) * std
+        else:
+            z = mu
+        # KL(q || N(0, I))
         kl = -0.5 * (1 + logvar - mu.pow(2) - logvar.exp()).sum(-1).mean()
-
-        return z, kl
-
-    def extract(self, x):
-        """Extract mean without sampling."""
-        h = self.encoder(x)
-        mu, logvar = h.chunk(2, dim=-1)
-        return mu
+        return z, kl, mu, logvar
 
 
-class IFTModel(nn.Module):
-    """Information Flow Theory model."""
-    def __init__(self, enc_name: str, n_cls: int, n_sources: int = 50,
-                 latent_dim: int = 64, ast_dim: int = 64, beta: float = 0.1):
+class InfoNCEMICritic(nn.Module):
+    """Critic for InfoNCE lower bound on I(z; c) where c is a discrete label.
+
+    f(z, c) = z^T W e_c / tau, evaluated for all categories simultaneously.
+    """
+    def __init__(self, z_dim: int, n_categories: int, tau: float = 0.1):
+        super().__init__()
+        self.W = nn.Parameter(torch.randn(n_categories, z_dim) * 0.02)
+        self.tau = tau
+        self.n_categories = n_categories
+
+    def info_nce(self, z: torch.Tensor, cats: torch.Tensor) -> torch.Tensor:
+        """I_NCE(z; c) >= log(K) - L_xe(z, c) where L_xe is CE of critic logits."""
+        logits = (z @ self.W.T) / self.tau                      # (B, K)
+        ce_critic = F.cross_entropy(logits, cats, reduction="mean")
+        return math.log(self.n_categories) - ce_critic           # tighter when ce small
+
+
+class CLUBSourceUpperBound(nn.Module):
+    """CLUB upper bound on I(z; s) (Cheng et al. 2020).
+
+    Estimator:
+        I_CLUB = E_{p(z, s)}[log p(s|z)] - E_{p(z) p(s)}[log p(s|z)]
+    p(s|z) parametrized as a small classifier over discrete s.
+    """
+    def __init__(self, z_dim: int, n_sources: int):
+        super().__init__()
+        self.n_sources = n_sources
+        self.q = nn.Sequential(
+            nn.Linear(z_dim, 128), nn.GELU(),
+            nn.Linear(128, n_sources),
+        )
+
+    def forward(self, z: torch.Tensor, s: torch.Tensor) -> torch.Tensor:
+        log_q = F.log_softmax(self.q(z), dim=-1)                 # (B, n_sources)
+        pos = log_q.gather(1, s.view(-1, 1)).squeeze(1)          # (B,)
+        # Marginal: random pairing
+        perm = torch.randperm(z.size(0), device=z.device)
+        neg = log_q.gather(1, s[perm].view(-1, 1)).squeeze(1)    # (B,)
+        return (pos - neg).mean()                                # ≥ 0 in expectation
+
+
+class GIBAModel(nn.Module):
+    """Genealogy InfoNCE Bottleneck for Attribution."""
+    def __init__(self, enc_name: str, n_cls: int, hier_fam: Dict[int, int],
+                 n_sources: int = 50, latent_dim: int = 128,
+                 tau: float = 0.1):
         super().__init__()
         self.encoder = AutoModel.from_pretrained(os.path.join(KAGGLE_MODELS, enc_name), local_files_only=True)
         hidden = self.encoder.config.hidden_size
-
-        # AST information bottleneck
-        self.ast_ib = InfoBottleneck(64, latent_dim, beta)
-
-        # Semantic information bottleneck
-        self.sem_ib = InfoBottleneck(hidden, latent_dim, beta)
-
-        # Source encoder (for I(AST; S) estimation)
-        self.source_embed = nn.Embedding(n_sources, latent_dim)
-
-        # Combined projection
-        self.proj = nn.Sequential(
-            nn.Linear(latent_dim * 2, 256),
-            nn.GELU(),
-            nn.Dropout(0.1)
-        )
-        self.clf = nn.Linear(256, n_cls)
-
-        # Marginals for MI estimation
-        self.register_buffer("y_prior", torch.ones(n_cls) / n_cls)
         self.n_cls = n_cls
+        self.hier_fam = hier_fam
+        self.n_fam = max(hier_fam.values()) + 1
 
-    def estimate_mi(self, z, labels, source_ids):
-        """Estimate I(AST; Y) and I(AST; S)."""
-        # I(AST; Y) ≈ E[log p(y|z)] - H(Y)
-        logits = self.clf(self.proj(F.normalize(z, dim=-1)))
-        log_py_given_z = F.log_softmax(logits, dim=-1)
-        h_y_given_z = -(log_py_given_z.exp() * log_py_given_z).sum(-1).mean()
+        self.var_enc = GaussianEncoder(hidden, latent_dim)
+        self.clf = nn.Linear(latent_dim, n_cls)
 
-        # Marginal entropy H(Y)
-        label_counts = torch.bincount(labels, minlength=self.n_cls).float()
-        label_probs = label_counts / label_counts.sum()
-        h_y = -(label_probs * torch.log(label_probs + 1e-8)).sum()
+        self.family_critic = InfoNCEMICritic(latent_dim, self.n_fam, tau)
+        self.source_club  = CLUBSourceUpperBound(latent_dim, n_sources)
 
-        # I(AST; Y) ≈ H(Y) - H(Y| AST)
-        mi_y = h_y - h_y_given_z
+        # Lookup class -> family on device.
+        fam_map = torch.tensor([hier_fam[c] for c in range(n_cls)], dtype=torch.long)
+        self.register_buffer("class_to_fam", fam_map)
 
-        # I(AST; S): correlation between AST and source
-        source_emb = self.source_embed(source_ids)
-        # Simple correlation as proxy
-        corr = (z * source_emb).sum(-1).abs().mean()
-
-        return mi_y, corr
-
-    def forward(self, ids, mask, ast_feat, source_ids, return_info=False):
-        # Semantic encoding + IB
+    def forward(self, ids, mask, source_ids, labels=None, sample: bool = True):
         out = self.encoder(input_ids=ids, attention_mask=mask)
-        sem_emb = (out.last_hidden_state * mask.unsqueeze(-1)).sum(1) / mask.sum(1, keepdim=True).clamp(min=1)
-        z_sem, kl_sem = self.sem_ib(sem_emb)
-
-        # AST + IB
-        z_ast, kl_ast = self.ast_ib(ast_feat)
-
-        # Combined
-        fused = torch.cat([z_sem, z_ast], dim=-1)
-        proj = self.proj(fused)
-        logits = self.clf(proj)
-
-        if return_info:
-            mi_y, mi_s = self.estimate_mi(z_ast, source_ids, source_ids)
-            return logits, {"kl_ast": kl_ast, "kl_sem": kl_sem, "mi_y": mi_y, "mi_s": mi_s}
-        return logits
+        sem = (out.last_hidden_state * mask.unsqueeze(-1)).sum(1) / mask.sum(1, keepdim=True).clamp(min=1)
+        z, kl, mu, _ = self.var_enc(sem, sample=sample)
+        logits = self.clf(z)
+        info = {"kl": kl}
+        if labels is not None:
+            fam = self.class_to_fam[labels]                                  # (B,)
+            info["mi_fam_lb"] = self.family_critic.info_nce(z, fam)          # lower bound, MAX
+            info["mi_src_ub"] = self.source_club(z, source_ids)              # upper bound, MIN
+        return logits, info
 
 
-# =============================================================================
-# IFT Loss with Information Regularization
-# =============================================================================
-
-def ift_loss(logits, info_dict, labels, source_ids, lambda_ift=0.5):
-    """IFT loss: CE + information bottleneck regularization.
-
-    We maximize I(AST; Y) and minimize I(AST; S).
-    The KL terms in IB approximate the information bottlenecks.
-    """
+def giba_loss(logits, info, labels, cfg) -> Tuple[torch.Tensor, float, float, float]:
+    """L = CE - mu * I_NCE(z;fam) + nu * I_CLUB(z;s) + beta * KL."""
     ce = F.cross_entropy(logits, labels)
-
-    # Information regularization
-    # Higher MI(AST; Y) = lower H(Y|AST) = better authorship signal
-    # Lower MI(AST; S) = lower source correlation = better invariance
-
-    # We use KL divergence as a proxy for minimizing I(AST; S)
-    # (higher KL = more compression = less source information)
-
-    info_reg = info_dict["kl_ast"] - 0.5 * info_dict["kl_sem"]
-
-    return ce + lambda_ift * info_reg, ce.item(), info_reg.item()
+    mi_fam = info.get("mi_fam_lb", torch.zeros((), device=logits.device))
+    mi_src = info.get("mi_src_ub", torch.zeros((), device=logits.device))
+    kl = info["kl"]
+    total = ce - cfg.mu_fam * mi_fam + cfg.nu_src * mi_src + cfg.beta_kl * kl
+    return total, ce.item(), float(mi_fam.item()), float(mi_src.item())
 
 
 # =============================================================================
@@ -282,17 +314,31 @@ class Cfg:
     lr_proj: float = 1e-4
     lr_head: float = 1e-4
     wd: float = 0.01
-    lambda_ift: float = 0.5
-    beta: float = 0.1
+    mu_fam: float = 0.5      # weight on -I_NCE(z; family)
+    nu_src: float = 0.2      # weight on +I_CLUB(z; source)
+    beta_kl: float = 1e-3    # weight on KL(q(z|x) || N(0, I))
+    tau: float = 0.1
+    n_sources: int = 50
     warmup: float = 0.1
     device: str = "cuda"
 
+    def __post_init__(self):
+        self.hier_fam = HIER_FAM_AICD if self.benchmark == "aicd_t2" else HIER_FAM_CODET
 
-def _hw(cfg):
+
+def _hw(cfg: Cfg) -> Cfg:
     if torch.cuda.is_available():
         torch.backends.cuda.matmul.allow_tf32 = True
         torch.backends.cudnn.allow_tf32 = True
         torch.backends.cudnn.benchmark = True
+        mem = torch.cuda.get_device_properties(0).total_memory / 1e9
+        if mem >= 40:
+            cfg.bs, cfg.seq = 256, 512
+        elif mem >= 10:
+            cfg.bs, cfg.seq = 128, 384
+        else:
+            cfg.bs, cfg.seq = 64, 256
+        logger.info(f"[hw] mem={mem:.1f}GB bs={cfg.bs} seq={cfg.seq}")
     return cfg
 
 
@@ -379,10 +425,11 @@ def _load_aicd(task):
 
 
 class FSDS(TD):
-    def __init__(self, data, tok, seq_len, frac=1.0, seed=42):
+    def __init__(self, data, tok, seq_len, ast_dim=64, frac=1.0, seed=42):
         self.data = data
         self.tok = tok
         self.seq_len = seq_len
+        self.ast_dim = ast_dim
         if frac < 1.0:
             rng = random.Random(seed)
             labels = list(range(max(self.data["label"]) + 1))
@@ -405,7 +452,7 @@ class FSDS(TD):
                       truncation=True, return_tensors="pt")
         ids = enc["input_ids"].squeeze(0)
         mask = enc["attention_mask"].squeeze(0)
-        ast_feat = extract_ast_features(code, 128)
+        ast_feat = extract_ast_features(code, self.ast_dim)
         source_id = r.get("source_id", 0)
         return {
             "ids": ids, "mask": mask,
@@ -417,18 +464,17 @@ class FSDS(TD):
 
 def train_epoch(model, loader, opt, sch, scaler, cfg):
     model.train()
-    total_loss, total_ce, total_info = 0, 0, 0
+    total_loss, total_ce, total_mi_fam, total_mi_src = 0.0, 0.0, 0.0, 0.0
 
     for b in tqdm(loader, desc="Train"):
         ids = b["ids"].to(cfg.device)
         mask = b["mask"].to(cfg.device)
-        ast_feat = b["ast_feat"].to(cfg.device)
         labs = b["label"].to(cfg.device)
         source_ids = b["source_id"].to(cfg.device)
 
-        with torch.autocast(device_type='cuda', enabled=(cfg.device == "cuda")):
-            logits, info = model(ids, mask, ast_feat, source_ids, return_info=True)
-            loss, ce, info_reg = ift_loss(logits, info, labs, source_ids, cfg.lambda_ift)
+        with torch.autocast(device_type='cuda', dtype=torch.bfloat16, enabled=(cfg.device == "cuda")):
+            logits, info = model(ids, mask, source_ids, labels=labs, sample=True)
+            loss, ce, mi_fam, mi_src = giba_loss(logits, info, labs, cfg)
 
         scaler.scale(loss).backward()
         scaler.unscale_(opt)
@@ -440,10 +486,11 @@ def train_epoch(model, loader, opt, sch, scaler, cfg):
 
         total_loss += loss.item()
         total_ce += ce
-        total_info += info_reg
+        total_mi_fam += mi_fam
+        total_mi_src += mi_src
 
     n = len(loader)
-    return total_loss / n, total_ce / n, total_info / n
+    return total_loss / n, total_ce / n, total_mi_fam / n, total_mi_src / n
 
 
 @torch.no_grad()
@@ -453,11 +500,10 @@ def eval_model(model, loader, cfg):
     for b in tqdm(loader, desc="Eval"):
         ids = b["ids"].to(cfg.device)
         mask = b["mask"].to(cfg.device)
-        ast_feat = b["ast_feat"].to(cfg.device)
         labs = b["label"]
         source_ids = b["source_id"].to(cfg.device)
 
-        logits = model(ids, mask, ast_feat, source_ids, return_info=False)
+        logits, _ = model(ids, mask, source_ids, labels=None, sample=False)
         preds.extend(logits.argmax(dim=-1).cpu().tolist())
         labels.extend(labs.tolist())
 
@@ -473,8 +519,6 @@ def eval_model(model, loader, cfg):
 def run_exp(cfg: Cfg, tag: str):
     set_seed(cfg.seed)
     cfg = _hw(cfg)
-    logger.info(f"[exp47] IFT: {tag} | frac={cfg.frac}")
-
     if cfg.benchmark == "codet_m4":
         tr_raw, vl_raw, ts_raw = _load_codet()
         vocab = _vocab(tr_raw)
@@ -495,45 +539,45 @@ def run_exp(cfg: Cfg, tag: str):
 
     logger.info(f"  Train: {len(tr_ds)} | Val: {len(vl_ds)} | Test: {len(ts_ds)}")
 
-    loader_cfg = dict(batch_size=cfg.bs, num_workers=2, pin_memory=True)
+    loader_cfg = dict(batch_size=cfg.bs, num_workers=4, pin_memory=True)
     tr_dl = DataLoader(tr_ds, shuffle=True, **loader_cfg)
     vl_dl = DataLoader(vl_ds, shuffle=False, **loader_cfg)
     ts_dl = DataLoader(ts_ds, shuffle=False, **loader_cfg)
 
-    model = IFTModel(cfg.enc, cfg.n_cls, beta=cfg.beta).to(cfg.device)
+    model = GIBAModel(
+        enc_name=cfg.enc, n_cls=cfg.n_cls, hier_fam=cfg.hier_fam,
+        n_sources=cfg.n_sources, latent_dim=128, tau=cfg.tau,
+    ).to(cfg.device)
 
     opt = torch.optim.AdamW([
         {"params": model.encoder.parameters(), "lr": cfg.lr_enc},
-        {"params": model.ast_ib.parameters(), "lr": cfg.lr_proj},
-        {"params": model.sem_ib.parameters(), "lr": cfg.lr_proj},
-        {"params": model.proj.parameters(), "lr": cfg.lr_proj},
-        {"params": model.clf.parameters(), "lr": cfg.lr_head}
+        {"params": model.var_enc.parameters(), "lr": cfg.lr_proj},
+        {"params": model.clf.parameters(), "lr": cfg.lr_head},
+        {"params": list(model.family_critic.parameters()) + list(model.source_club.parameters()),
+         "lr": cfg.lr_proj},
     ], weight_decay=cfg.wd)
 
     total_steps = len(tr_dl) * cfg.epochs
     sch = torch.optim.lr_scheduler.OneCycleLR(
-        opt, max_lr=[cfg.lr_enc, cfg.lr_proj, cfg.lr_proj, cfg.lr_proj, cfg.lr_head],
+        opt, max_lr=[cfg.lr_enc, cfg.lr_proj, cfg.lr_head, cfg.lr_proj],
         total_steps=total_steps, pct_start=cfg.warmup
     )
     scaler = GradScaler()
 
     best_val, best_state = 0, None
     for epoch in range(cfg.epochs):
-        loss, loss_ce, loss_info = train_epoch(model, tr_dl, opt, sch, scaler, cfg)
+        loss, loss_ce, mi_fam, mi_src = train_epoch(model, tr_dl, opt, sch, scaler, cfg)
         val_met = eval_model(model, vl_dl, cfg)
-        logger.info(f"  E{epoch+1}: loss={loss:.4f} ce={loss_ce:.4f} info={loss_info:.4f} | val={val_met['macro']:.4f}")
+        logger.info(f"[epoch {epoch+1}] val={val_met['macro']:.4f}")
         if val_met["macro"] > best_val:
             best_val = val_met["macro"]
             best_state = {k: v.cpu().clone() for k, v in model.state_dict().items()}
 
     model.load_state_dict(best_state)
     ts_met = eval_model(model, ts_dl, cfg)
-
-    logger.info(f"  Test: macro={ts_met['macro']:.4f} | Δ={ts_met['macro']-PAPER_BASELINE:+.4f}")
-
     result = {
         "tag": tag,
-        "method": "IFT",
+        "method": "GIBA",
         "enc": cfg.enc,
         "bench": cfg.benchmark,
         "frac": cfg.frac,
@@ -544,29 +588,50 @@ def run_exp(cfg: Cfg, tag: str):
         "per_class_f1": ts_met["per_class"],
         "timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
     }
-
-    out_dir = os.path.join(os.path.dirname(__file__), "results")
-    os.makedirs(out_dir, exist_ok=True)
-    with open(os.path.join(out_dir, f"{tag}_results.json"), "w") as f:
-        json.dump(result, f, indent=2)
-
     return result
 
 
 def main():
-    enc = "unixcoder-base"
+    encoders = ["unixcoder-base"]
     benchmarks = [("codet_m4", "author", 6), ("aicd_t2", "t2", 12)]
     fracs = [0.01, 0.05, 0.20]
 
-    for bench, task, n_cls in benchmarks:
-        for frac in fracs:
-            cfg = Cfg(benchmark=bench, task=task, enc=enc, frac=frac, n_cls=n_cls)
-            tag = f"exp47_ift_{enc}_{bench}_f{frac:.2f}"
-            try:
-                r = run_exp(cfg, tag)
-                logger.info(f"  RESULT: {tag} | macro={r['macro']:.4f} Δ={r['dpaper']:+.4f}")
-            except Exception as e:
-                logger.error(f"  FAILED: {tag} | {e}")
+    results = []
+    for enc in encoders:
+        for bench, task, n_cls in benchmarks:
+            for frac in fracs:
+                cfg = Cfg(benchmark=bench, task=task, enc=enc, frac=frac, n_cls=n_cls)
+                cfg = _hw(cfg)
+                tag = f"exp47_giba_{enc}_{bench}_f{frac}"
+                logger.info(f"=== {tag} ===")
+                t0 = time.time()
+                try:
+                    res = run_exp(cfg, tag)
+                    elapsed = time.time() - t0
+                    res["wall"] = round(elapsed, 1)
+                    results.append(res)
+                    logger.info(f"[{tag}] MacroF1={res['macro']:.4f} ({res['macro']-PAPER_BASELINE:+.4f} vs paper) time={elapsed:.0f}s")
+                except Exception as e:
+                    logger.error(f"[{tag}] FAILED: {e}")
+                import gc; gc.collect()
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+
+    out_dir = os.path.join(os.path.dirname(os.path.realpath(__file__)), "results")
+    os.makedirs(out_dir, exist_ok=True)
+    with open(os.path.join(out_dir, "exp47_giba_results.json"), "w") as f:
+        json.dump(results, f, indent=2)
+
+    print("\n" + "=" * 100)
+    print(f"{'Encoder':<22} {'Benchmark':<12} {'Frac':>6} {'Macro-F1':>10} {'dPaper':>10} {'Weighted':>10} {'Wall':>8}")
+    print("-" * 100)
+    for r in results:
+        print(f"{r['enc']:<22} {r['bench']:<12} {r['frac']:>6.0%} {r['macro']:>10.4f} "
+              f"{r['dpaper']:>+10.4f} {r['weighted']:>10.4f} {r['wall']:>8.0f}s")
+    print("=" * 100)
+    if results:
+        best = max(results, key=lambda x: x["macro"])
+        print(f"\nBest Macro-F1: {best['macro']:.4f} @ {best['tag']}")
 
 
 if __name__ == "__main__":

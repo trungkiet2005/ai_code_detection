@@ -131,7 +131,7 @@ class Cfg:
     frac: float = 0.05
     n_cls: int = 6
     seed: int = 42
-    bs: int = 256
+    bs: int = 64
     seq: int = 512
     epochs: int = 3
     lr_enc: float = 2e-5
@@ -485,7 +485,7 @@ def run_exp(cfg: Cfg, tag: str):
     result["dpaper"] = result["macro"] - PAPER_BASELINE
     result["timestamp"] = time.strftime("%Y-%m-%d %H:%M:%S")
 
-    out_dir = os.path.join(os.path.dirname(__file__), "results")
+    out_dir = os.path.join(os.path.dirname(os.path.realpath(__file__)), "results")
     os.makedirs(out_dir, exist_ok=True)
     with open(os.path.join(out_dir, f"{tag}_results.json"), "w") as f:
         json.dump(result, f, indent=2)

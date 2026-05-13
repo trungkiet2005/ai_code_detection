@@ -31,7 +31,7 @@ CLONE_DIR = "ai_code_detection"
 def _setup_paths():
     here_candidates = []
     if "__file__" in globals():
-        here_candidates.append(os.path.abspath(os.path.dirname(__file__)))
+        here_candidates.append(os.path.abspath(os.path.dirname(os.path.realpath(__file__))))
     base_dirs = [".", os.getcwd(), "/kaggle/working", f"/kaggle/working/{CLONE_DIR}"]
     candidates = here_candidates + base_dirs + [os.path.join(b, "Exp_FewShot") for b in base_dirs]
 

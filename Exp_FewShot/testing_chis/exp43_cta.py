@@ -1,24 +1,34 @@
 # =============================================================================
-# Theory-Track exp -- CTA (Cross-Tree Attention):
+# Theory-Track exp -- BGB (Batch Genealogy Bridge):
 #
-# ARXIV_ID      : THIS IS NEW - no prior work defines attention mechanisms where
-#                 query-key compatibility is constrained by BOTH AST tree structure
-#                 AND genealogy tree structure
-# NAME          : CTA (Cross-Tree Attention)
-# ONE-LINE CLAIM: Attention scores between code tokens should be modulated by both
-#                 AST structural proximity (syntax) and genealogical proximity (authorship).
-# EQUATION      : α_{ij} = softmax((q_i · k_j) / √d · g(y_i, y_j))
-#                 where g(y_i, y_j) is genealogical compatibility multiplier
-# PROPERTY      : Tokens from sibling generators get boosted attention; tokens
-#                 from distant generators get suppressed. AST structure constrains
-#                 which tokens can attend to which.
-# WHY NOT BEFORE: Standard attention is query-key only. CTA constrains attention
-#                 by genealogical compatibility, creating structured attention that
-#                 respects both syntactic and authorship structure.
-# FALSIFIER     : If CTA improves attribution, then genealogical structure
-#                 should modulate token-level attention patterns.
+# ARXIV_ID      : NEW. Cross-sample attention has appeared sporadically
+#                 (e.g., set-transformers Lee 2019, batch attention for FSL
+#                 Snell 2017), but never modulated by a label-tree kernel.
+# NAME          : BGB (Batch Genealogy Bridge)
+# ONE-LINE CLAIM: At training time, samples in a batch exchange information
+#                 through an attention layer whose scores are *multiplicatively*
+#                 modulated by the genealogy tree kernel k_tree(y_i, y_j) =
+#                 exp(-alpha * d_tree(y_i, y_j)); the model is supervised to
+#                 produce attribution-correct logits both from the raw pooled
+#                 representation and from the bridged representation.
+# EQUATION      : alpha_ij = softmax_j( (q_i k_j^T)/sqrt(d) * k_tree(y_i,y_j) )
+#                 h~_i      = sum_j alpha_ij v_j
+#                 L = CE(W h_i, y_i) + gamma * CE(W h~_i, y_i)
+# PROPERTY      : (a) k_tree is differentiable in alpha; (b) at alpha=0 the
+#                 bridge is uniform across the batch; (c) at alpha=infinity it
+#                 reduces to attending only over same-class peers.
+# WHY NOT BEFORE: Standard self-attention is intra-sample. Set-Transformer
+#                 cross-sample attention is label-agnostic. BGB is the first
+#                 cross-sample bridge whose kernel is a closed-form function
+#                 of the label tree, and it gives a non-trivial inductive bias
+#                 only when labels carry a metric tree structure (LLM authorship).
+# FALSIFIER     : If sweeping alpha in {0, 0.5, 1, 2, 4} yields a flat curve,
+#                 the genealogy kernel does not modulate batch-level structure.
 # =============================================================================
 from __future__ import annotations
+
+# === KAGGLE PATHS ===
+KAGGLE_MODELS = "/kaggle/input/datasets/chiboiz/ai-detection-encoders/models"
 
 import os, sys, time, json, random, subprocess, importlib.util, warnings, glob
 from collections import defaultdict
@@ -46,7 +56,7 @@ from torch.cuda.amp import autocast, GradScaler
 warnings.filterwarnings("ignore")
 import logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s", stream=sys.stdout)
-logger = logging.getLogger("exp43")
+logger = logging.getLogger("exp43_bgb")
 
 PAPER_BASELINE = 0.6633
 
@@ -128,115 +138,102 @@ def build_gene_compatibility(n_cls: int, adj: Dict[int, List[int]]) -> torch.Ten
 # Cross-Tree Attention Layer
 # =============================================================================
 
-class CrossTreeAttention(nn.Module):
-    """Attention modulated by genealogical compatibility.
+def build_tree_distance_matrix(n_cls: int, adj: Dict[int, list]) -> torch.Tensor:
+    """BFS distance matrix on the genealogy adjacency graph; unreachable = 4.0."""
+    INFTY = 4.0
+    D = torch.full((n_cls, n_cls), INFTY)
+    for u in range(n_cls):
+        D[u, u] = 0.0
+        seen = {u}
+        frontier = [(u, 0)]
+        while frontier:
+            curr, d = frontier.pop(0)
+            for v in adj.get(curr, []):
+                if v in seen or v >= n_cls:
+                    continue
+                seen.add(v)
+                D[u, v] = float(d + 1)
+                frontier.append((v, d + 1))
+    return D
 
-    Standard: α_{ij} = softmax((q_i · k_j) / √d)
-    CTA: α_{ij} = softmax((q_i · k_j) / √d · g(y_i, y_j))
+
+class BatchGenealogyBridge(nn.Module):
+    """Cross-sample attention modulated by the genealogy tree kernel.
+
+    Inputs: pooled per-sample reps h ∈ R^{B×H} and labels y ∈ Z^B.
+    Output: bridged reps h̃ ∈ R^{B×H} computed as
+        α_ij = softmax_j( (q_i k_j^T)/sqrt(d) * k_tree(y_i, y_j) )
+        h̃_i = sum_j α_ij v_j
+    where k_tree(y_i, y_j) = exp(-alpha * d_tree(y_i, y_j)).
     """
-    def __init__(self, hidden_dim: int, n_heads: int, n_cls: int,
-                 gene_compat: torch.Tensor, dropout: float = 0.1):
+    def __init__(self, hidden_dim: int, n_cls: int, gene_adj: Dict[int, list],
+                 alpha: float = 1.0, dropout: float = 0.1):
         super().__init__()
-        assert hidden_dim % n_heads == 0
         self.hidden_dim = hidden_dim
-        self.n_heads = n_heads
-        self.head_dim = hidden_dim // n_heads
-        self.scale = self.head_dim ** -0.5
+        self.scale = hidden_dim ** -0.5
+        self.alpha = alpha
+        self.q = nn.Linear(hidden_dim, hidden_dim)
+        self.k = nn.Linear(hidden_dim, hidden_dim)
+        self.v = nn.Linear(hidden_dim, hidden_dim)
+        self.out = nn.Linear(hidden_dim, hidden_dim)
+        self.drop = nn.Dropout(dropout)
+        # Precomputed tree-distance matrix (n_cls, n_cls), registered as buffer.
+        self.register_buffer("tree_dist", build_tree_distance_matrix(n_cls, gene_adj))
 
-        self.q_proj = nn.Linear(hidden_dim, hidden_dim)
-        self.k_proj = nn.Linear(hidden_dim, hidden_dim)
-        self.v_proj = nn.Linear(hidden_dim, hidden_dim)
-        self.out_proj = nn.Linear(hidden_dim, hidden_dim)
+    def forward(self, h: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
+        """h: (B, H), labels: (B,) -> bridged (B, H)."""
+        B = h.size(0)
+        q = self.q(h)                                    # (B, H)
+        k = self.k(h)
+        v = self.v(h)
 
-        self.gene_compat = nn.Parameter(gene_compat, requires_grad=False)
-        self.dropout = nn.Dropout(dropout)
+        # Attention logits: (B, B)
+        logits = (q @ k.T) * self.scale
 
-    def forward(self, x: torch.Tensor, labels: torch.Tensor,
-               mask: Optional[torch.Tensor] = None) -> torch.Tensor:
-        """
-        Args:
-            x: (B, L, H) hidden states
-            labels: (B,) generator labels for each sample in batch
-            mask: (B, L, L) attention mask
-        Returns:
-            (B, L, H) output
-        """
-        B, L, _ = x.shape
+        # k_tree(y_i, y_j) = exp(-alpha * d_tree[y_i, y_j])
+        d_b = self.tree_dist[labels][:, labels]          # (B, B), no grad
+        k_tree = torch.exp(-self.alpha * d_b)            # (B, B)
 
-        # Project to Q, K, V
-        q = self.q_proj(x).view(B, L, self.n_heads, self.head_dim).transpose(1, 2)
-        k = self.k_proj(x).view(B, L, self.n_heads, self.head_dim).transpose(1, 2)
-        v = self.v_proj(x).view(B, L, self.n_heads, self.head_dim).transpose(1, 2)
-
-        # Compute attention scores
-        attn = torch.matmul(q, k.transpose(-2, -1)) * self.scale
-
-        # Modulate by genealogical compatibility
-        # For each sample in batch, get compatibility based on true labels
-        compat_scores = torch.zeros(B, B, device=x.device)
-        for i in range(B):
-            for j in range(B):
-                li, lj = labels[i].item(), labels[j].item()
-                compat_scores[i, j] = self.gene_compat[li, lj]
-
-        # Apply compatibility: samples with compatible labels get boosted attention
-        # Shape: (B, 1, 1, B) for broadcasting
-        compat_mod = compat_scores.view(B, 1, 1, B)
-        attn = attn * compat_mod
-
-        # Apply mask
-        if mask is not None:
-            attn = attn.masked_fill(mask.unsqueeze(1).unsqueeze(2) == 0, float('-inf'))
-
-        # Softmax
-        attn = F.softmax(attn, dim=-1)
-        attn = self.dropout(attn)
-
-        # Apply to values
-        out = torch.matmul(attn, v)
-        out = out.transpose(1, 2).contiguous().view(B, L, self.hidden_dim)
-        out = self.out_proj(out)
-
-        return out
+        # Multiplicative modulation, then softmax over the batch axis.
+        logits = logits * k_tree
+        attn = F.softmax(logits, dim=-1)
+        attn = self.drop(attn)
+        bridged = attn @ v                                # (B, H)
+        return self.out(bridged)
 
 
-# =============================================================================
-# Model with CTA
-# =============================================================================
+class BGBModel(nn.Module):
+    """Encoder + Batch Genealogy Bridge.
 
-class CTAModel(nn.Module):
-    """Cross-Tree Attention model."""
-    def __init__(self, enc_name: str, n_cls: int, n_heads: int = 4,
-                 gene_compat: torch.Tensor = None):
+    forward(ids, mask, labels=None):
+      - returns (logits_raw, logits_bridged_or_None)
+      - bridged path only active when labels is provided (training).
+    """
+    def __init__(self, enc_name: str, n_cls: int, gene_adj: Dict[int, list],
+                 alpha: float = 1.0):
         super().__init__()
         self.encoder = AutoModel.from_pretrained(os.path.join(KAGGLE_MODELS, enc_name), local_files_only=True)
         hidden = self.encoder.config.hidden_size
-
-        # CTA layer
-        if gene_compat is None:
-            gene_compat = torch.ones(n_cls, n_cls)
-        self.cta = CrossTreeAttention(hidden, n_heads, n_cls, gene_compat)
-
-        # Classifier
+        self.bridge = BatchGenealogyBridge(hidden, n_cls, gene_adj, alpha=alpha)
         self.clf = nn.Sequential(
             nn.Linear(hidden, 256),
             nn.GELU(),
             nn.Dropout(0.1),
-            nn.Linear(256, n_cls)
+            nn.Linear(256, n_cls),
         )
 
-    def forward(self, ids, mask, labels):
+    def _pool(self, last_hidden, mask):
+        return (last_hidden * mask.unsqueeze(-1)).sum(1) / mask.sum(1, keepdim=True).clamp(min=1)
+
+    def forward(self, ids, mask, labels=None):
         out = self.encoder(input_ids=ids, attention_mask=mask)
-        hidden = out.last_hidden_state
-
-        # Apply CTA
-        hidden = self.cta(hidden, labels, mask)
-
-        # Pool and classify
-        pooled = (hidden * mask.unsqueeze(-1)).sum(1) / mask.sum(1, keepdim=True).clamp(min=1)
-        logits = self.clf(pooled)
-
-        return logits
+        h = self._pool(out.last_hidden_state, mask)      # (B, H)
+        logits_raw = self.clf(h)
+        if labels is None:
+            return logits_raw, None
+        h_bridged = h + self.bridge(h, labels)           # residual bridge
+        logits_bridged = self.clf(h_bridged)
+        return logits_raw, logits_bridged
 
 
 # =============================================================================
@@ -244,61 +241,88 @@ class CTAModel(nn.Module):
 # =============================================================================
 
 def extract_ast_features(code: str, max_len: int = 128) -> List[float]:
-    """Extract AST structural features without tree-sitter dependency.
+    """Extract structural code features (legacy-aligned, offline-only).
 
-    Features capture hierarchical code structure:
-    - Function/class definitions
-    - Control flow patterns
-    - Nesting depth
-    - Loop structures
+    Mirrors legacy/Exp_DM_weak/exp06_ast_irm.py::extract_structural_features:
+    richer 22-feature structural vector, normalized + padded to max_len.
+    No tree-sitter dependency (offline-safe).
     """
-    import re
+    import re as _re
 
-    features = []
+    lines = code.split("\n")
+    num_lines = max(len(lines), 1)
+    line_lens = [len(l) for l in lines]
+    avg_line_len = float(np.mean(line_lens)) if line_lens else 0.0
+    max_line_len = float(max(line_lens)) if line_lens else 0.0
 
-    # Count patterns that indicate structure
-    n_func = len(re.findall(r'\b(def|function|func|fn)\s+\w+', code))
-    n_class = len(re.findall(r'\b(class|struct|interface|enum)\s+\w+', code))
-    n_if = len(re.findall(r'\bif\s*[\(\{]', code))
-    n_for = len(re.findall(r'\b(for|foreach)\s*[\(\{]', code))
-    n_while = len(re.findall(r'\bwhile\s*[\(\{]', code))
-    n_return = len(re.findall(r'\breturn\b', code))
-    n_import = len(re.findall(r'\b(import|from|include|require)\b', code))
-    n_comment = len(re.findall(r'(//|#|/\*|\'\'\'|""")', code))
+    indents = [len(l) - len(l.lstrip()) for l in lines if l.strip()]
+    avg_indent = float(np.mean(indents)) if indents else 0.0
+    max_indent = float(max(indents)) if indents else 0.0
+    indent_var = float(np.var(indents)) if indents else 0.0
 
-    # Nesting depth estimation
+    n_func = len(_re.findall(r"\b(def|function|func|fn)\s+\w+", code))
+    n_class = len(_re.findall(r"\b(class|struct|interface|enum)\s+\w+", code))
+    n_for = len(_re.findall(r"\b(for|foreach)\s*[\(\{]", code))
+    n_while = len(_re.findall(r"\bwhile\s*[\(\{]", code))
+    n_loops = n_for + n_while
+    n_if = len(_re.findall(r"\bif\s*[\(\{]", code))
+    n_else = code.count("else ") + code.count("elif ")
+    n_cond = n_if + n_else
+    n_return = len(_re.findall(r"\breturn\b", code))
+    n_comment = code.count("//") + code.count("#") + code.count("/*")
+    n_import = len(_re.findall(r"\b(import|from|include|require|using)\b", code))
+    n_try = code.count("try") + code.count("catch") + code.count("except")
+
     max_depth = 0
     depth = 0
     for c in code:
-        if c in '{([':
+        if c in "{([":
             depth += 1
-            max_depth = max(max_depth, depth)
-        elif c in '})]':
+            if depth > max_depth:
+                max_depth = depth
+        elif c in "})]":
             depth = max(0, depth - 1)
 
-    # Line statistics
-    lines = code.split('\n')
-    avg_indent = np.mean([len(l) - len(l.lstrip()) for l in lines if l.strip()]) if lines else 0
+    identifiers = _re.findall(r"\b[a-zA-Z_]\w*\b", code)
+    n_ids = max(len(identifiers), 1)
+    snake_ratio = sum(1 for i in identifiers if "_" in i and i.islower()) / n_ids
+    camel_ratio = sum(1 for i in identifiers if any(c.isupper() for c in i[1:]) and "_" not in i) / n_ids
+    short_ratio = sum(1 for i in identifiers if len(i) == 1) / n_ids
+    avg_id_len = float(np.mean([len(i) for i in identifiers])) if identifiers else 0.0
+
+    empty_ratio = sum(1 for l in lines if not l.strip()) / num_lines
+    code_len = max(len(code), 1)
+    alpha_ratio = sum(c.isalpha() for c in code) / code_len
+    digit_ratio = sum(c.isdigit() for c in code) / code_len
+    space_ratio = sum(c.isspace() for c in code) / code_len
 
     features = [
+        num_lines / 500.0,
+        avg_line_len / 80.0,
+        max_line_len / 200.0,
+        avg_indent / 10.0,
+        max_indent / 20.0,
+        indent_var / 50.0,
         n_func / 10.0,
         n_class / 5.0,
-        n_if / 20.0,
-        n_for / 10.0,
-        n_while / 10.0,
+        n_loops / 10.0,
+        n_cond / 20.0,
         n_return / 20.0,
-        n_import / 10.0,
         n_comment / 50.0,
+        n_import / 10.0,
+        n_try / 10.0,
         max_depth / 15.0,
-        avg_indent / 10.0,
-        len(code) / 10000.0,
-        len(lines) / 500.0,
+        snake_ratio,
+        camel_ratio,
+        short_ratio,
+        avg_id_len / 10.0,
+        empty_ratio,
+        alpha_ratio,
+        digit_ratio,
     ]
 
-    # Pad to fixed length
-    while len(features) < max_len:
-        features.append(0.0)
-
+    if len(features) < max_len:
+        features = features + [0.0] * (max_len - len(features))
     return features[:max_len]
 
 
@@ -325,7 +349,8 @@ class Cfg:
     lr_cta: float = 1e-4
     lr_head: float = 1e-4
     wd: float = 0.01
-    n_heads: int = 4
+    lambda_brg: float = 0.5
+    bgb_alpha: float = 1.0
     warmup: float = 0.1
     device: str = "cuda"
 
@@ -336,11 +361,19 @@ class Cfg:
             self.gene_adj = GENE_ADJ_AICD
 
 
-def _hw(cfg):
+def _hw(cfg: Cfg) -> Cfg:
     if torch.cuda.is_available():
         torch.backends.cuda.matmul.allow_tf32 = True
         torch.backends.cudnn.allow_tf32 = True
         torch.backends.cudnn.benchmark = True
+        mem = torch.cuda.get_device_properties(0).total_memory / 1e9
+        if mem >= 40:
+            cfg.bs, cfg.seq = 256, 512
+        elif mem >= 10:
+            cfg.bs, cfg.seq = 128, 384
+        else:
+            cfg.bs, cfg.seq = 64, 256
+        logger.info(f"[hw] mem={mem:.1f}GB bs={cfg.bs} seq={cfg.seq}")
     return cfg
 
 
@@ -423,10 +456,13 @@ def _load_aicd(task):
 
 
 class FSDS(TD):
-    def __init__(self, data, tok, seq_len, frac=1.0, seed=42):
+    """Dataset with AST structural features."""
+    def __init__(self, data, tok, seq_len, ast_dim=64, frac=1.0, seed=42):
         self.data = data
         self.tok = tok
         self.seq_len = seq_len
+        self.ast_dim = ast_dim
+
         if frac < 1.0:
             rng = random.Random(seed)
             labels = list(range(max(self.data["label"]) + 1))
@@ -449,21 +485,24 @@ class FSDS(TD):
                       truncation=True, return_tensors="pt")
         ids = enc["input_ids"].squeeze(0)
         mask = enc["attention_mask"].squeeze(0)
-        return {"ids": ids, "mask": mask, "label": r["label"]}
+        ast_feat = extract_ast_features(code, self.ast_dim)
+        return {"ids": ids, "mask": mask, "ast_feat": torch.tensor(ast_feat, dtype=torch.float32), "label": r["label"]}
 
 
 def train_epoch(model, loader, opt, sch, scaler, cfg):
     model.train()
-    total_loss = 0
+    total_loss, total_raw, total_brg = 0.0, 0.0, 0.0
 
     for b in tqdm(loader, desc="Train"):
         ids = b["ids"].to(cfg.device)
         mask = b["mask"].to(cfg.device)
         labs = b["label"].to(cfg.device)
 
-        with torch.autocast(device_type='cuda', enabled=(cfg.device == "cuda")):
-            logits = model(ids, mask, labs)
-            loss = F.cross_entropy(logits, labs)
+        with torch.autocast(device_type='cuda', dtype=torch.bfloat16, enabled=(cfg.device == "cuda")):
+            logits_raw, logits_brg = model(ids, mask, labs)
+            loss_raw = F.cross_entropy(logits_raw, labs)
+            loss_brg = F.cross_entropy(logits_brg, labs)
+            loss = loss_raw + cfg.lambda_brg * loss_brg
 
         scaler.scale(loss).backward()
         scaler.unscale_(opt)
@@ -474,12 +513,16 @@ def train_epoch(model, loader, opt, sch, scaler, cfg):
         sch.step()
 
         total_loss += loss.item()
+        total_raw += loss_raw.item()
+        total_brg += loss_brg.item()
 
-    return total_loss / len(loader)
+    n = len(loader)
+    return total_loss / n, total_raw / n, total_brg / n
 
 
 @torch.no_grad()
 def eval_model(model, loader, cfg):
+    """Eval uses the raw (label-free) classifier head only; BGB is train-time."""
     model.eval()
     preds, labels = [], []
     for b in tqdm(loader, desc="Eval"):
@@ -487,7 +530,7 @@ def eval_model(model, loader, cfg):
         mask = b["mask"].to(cfg.device)
         labs = b["label"]
 
-        logits = model(ids, mask, labs)
+        logits, _ = model(ids, mask, labels=None)
         preds.extend(logits.argmax(dim=-1).cpu().tolist())
         labels.extend(labs.tolist())
 
@@ -503,10 +546,7 @@ def eval_model(model, loader, cfg):
 def run_exp(cfg: Cfg, tag: str):
     set_seed(cfg.seed)
     cfg = _hw(cfg)
-    logger.info(f"[exp43] CTA: {tag} | frac={cfg.frac}")
-
-    # Build genealogical compatibility
-    gene_compat = build_gene_compatibility(cfg.n_cls, cfg.gene_adj).to(cfg.device)
+    # No precomputed gene_compat for BGB: tree-distance buffer lives inside the bridge module.
 
     if cfg.benchmark == "codet_m4":
         tr_raw, vl_raw, ts_raw = _load_codet()
@@ -528,17 +568,17 @@ def run_exp(cfg: Cfg, tag: str):
 
     logger.info(f"  Train: {len(tr_ds)} | Val: {len(vl_ds)} | Test: {len(ts_ds)}")
 
-    loader_cfg = dict(batch_size=cfg.bs, num_workers=2, pin_memory=True)
+    loader_cfg = dict(batch_size=cfg.bs, num_workers=4, pin_memory=True)
     tr_dl = DataLoader(tr_ds, shuffle=True, **loader_cfg)
     vl_dl = DataLoader(vl_ds, shuffle=False, **loader_cfg)
     ts_dl = DataLoader(ts_ds, shuffle=False, **loader_cfg)
 
-    model = CTAModel(cfg.enc, cfg.n_cls, cfg.n_heads, gene_compat).to(cfg.device)
+    model = BGBModel(cfg.enc, cfg.n_cls, cfg.gene_adj, alpha=cfg.bgb_alpha).to(cfg.device)
 
     opt = torch.optim.AdamW([
         {"params": model.encoder.parameters(), "lr": cfg.lr_enc},
-        {"params": model.cta.parameters(), "lr": cfg.lr_cta},
-        {"params": model.clf.parameters(), "lr": cfg.lr_head}
+        {"params": model.bridge.parameters(), "lr": cfg.lr_cta},
+        {"params": model.clf.parameters(), "lr": cfg.lr_head},
     ], weight_decay=cfg.wd)
 
     total_steps = len(tr_dl) * cfg.epochs
@@ -550,21 +590,18 @@ def run_exp(cfg: Cfg, tag: str):
 
     best_val, best_state = 0, None
     for epoch in range(cfg.epochs):
-        loss = train_epoch(model, tr_dl, opt, sch, scaler, cfg)
+        loss, _, _ = train_epoch(model, tr_dl, opt, sch, scaler, cfg)
         val_met = eval_model(model, vl_dl, cfg)
-        logger.info(f"  E{epoch+1}: loss={loss:.4f} | val={val_met['macro']:.4f}")
+        logger.info(f"[epoch {epoch+1}] val={val_met['macro']:.4f}")
         if val_met["macro"] > best_val:
             best_val = val_met["macro"]
             best_state = {k: v.cpu().clone() for k, v in model.state_dict().items()}
 
     model.load_state_dict(best_state)
     ts_met = eval_model(model, ts_dl, cfg)
-
-    logger.info(f"  Test: macro={ts_met['macro']:.4f} | Δ={ts_met['macro']-PAPER_BASELINE:+.4f}")
-
     result = {
         "tag": tag,
-        "method": "CTA",
+        "method": "BGB",
         "enc": cfg.enc,
         "bench": cfg.benchmark,
         "frac": cfg.frac,
@@ -575,29 +612,50 @@ def run_exp(cfg: Cfg, tag: str):
         "per_class_f1": ts_met["per_class"],
         "timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
     }
-
-    out_dir = os.path.join(os.path.dirname(__file__), "results")
-    os.makedirs(out_dir, exist_ok=True)
-    with open(os.path.join(out_dir, f"{tag}_results.json"), "w") as f:
-        json.dump(result, f, indent=2)
-
     return result
 
 
 def main():
-    enc = "unixcoder-base"
+    encoders = ["unixcoder-base"]
     benchmarks = [("codet_m4", "author", 6), ("aicd_t2", "t2", 12)]
     fracs = [0.01, 0.05, 0.20]
 
-    for bench, task, n_cls in benchmarks:
-        for frac in fracs:
-            cfg = Cfg(benchmark=bench, task=task, enc=enc, frac=frac, n_cls=n_cls)
-            tag = f"exp43_cta_{enc}_{bench}_f{frac:.2f}"
-            try:
-                r = run_exp(cfg, tag)
-                logger.info(f"  RESULT: {tag} | macro={r['macro']:.4f} Δ={r['dpaper']:+.4f}")
-            except Exception as e:
-                logger.error(f"  FAILED: {tag} | {e}")
+    results = []
+    for enc in encoders:
+        for bench, task, n_cls in benchmarks:
+            for frac in fracs:
+                cfg = Cfg(benchmark=bench, task=task, enc=enc, frac=frac, n_cls=n_cls)
+                cfg = _hw(cfg)
+                tag = f"exp43_bgb_{enc}_{bench}_f{frac}"
+                logger.info(f"=== {tag} ===")
+                t0 = time.time()
+                try:
+                    res = run_exp(cfg, tag)
+                    elapsed = time.time() - t0
+                    res["wall"] = round(elapsed, 1)
+                    results.append(res)
+                    logger.info(f"[{tag}] MacroF1={res['macro']:.4f} ({res['macro']-PAPER_BASELINE:+.4f} vs paper) time={elapsed:.0f}s")
+                except Exception as e:
+                    logger.error(f"[{tag}] FAILED: {e}")
+                import gc; gc.collect()
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+
+    out_dir = os.path.join(os.path.dirname(os.path.realpath(__file__)), "results")
+    os.makedirs(out_dir, exist_ok=True)
+    with open(os.path.join(out_dir, "exp43_bgb_results.json"), "w") as f:
+        json.dump(results, f, indent=2)
+
+    print("\n" + "=" * 100)
+    print(f"{'Encoder':<22} {'Benchmark':<12} {'Frac':>6} {'Macro-F1':>10} {'dPaper':>10} {'Weighted':>10} {'Wall':>8}")
+    print("-" * 100)
+    for r in results:
+        print(f"{r['enc']:<22} {r['bench']:<12} {r['frac']:>6.0%} {r['macro']:>10.4f} "
+              f"{r['dpaper']:>+10.4f} {r['weighted']:>10.4f} {r['wall']:>8.0f}s")
+    print("=" * 100)
+    if results:
+        best = max(results, key=lambda x: x["macro"])
+        print(f"\nBest Macro-F1: {best['macro']:.4f} @ {best['tag']}")
 
 
 if __name__ == "__main__":
