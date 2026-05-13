@@ -214,61 +214,57 @@ class FunctionalEncoder(nn.Module):
 
 
 class FRCModel(nn.Module):
-    """Functional Representation Consistency model."""
+    """Functional Representation Consistency model.
+
+    Both author_emb (from semantic backbone) and func_emb (from structural
+    functional features) are projected into a SHARED 128-dim consistency
+    space where their MSE distance is the FRC term. The original 256-dim
+    author_emb is retained for the classifier head.
+    """
     def __init__(self, enc_name: str, n_cls: int, func_dim: int = 32,
                  ast_dim: int = 64):
         super().__init__()
         self.encoder = AutoModel.from_pretrained(os.path.join(KAGGLE_MODELS, enc_name), local_files_only=True)
         hidden = self.encoder.config.hidden_size
 
-        # Authorship encoder
+        # Authorship encoder (256-dim, used by classifier)
         self.author_encoder = nn.Sequential(
             nn.Linear(hidden, 256),
             nn.GELU(),
         )
 
-        # Functional encoder
+        # Functional encoder (256-dim)
         self.func_encoder = FunctionalEncoder(func_dim, 256)
 
-        # Projector: maps functional to authorship space
-        self.projector = nn.Sequential(
-            nn.Linear(256, 128),
-            nn.GELU(),
-        )
+        # Shared 128-dim consistency space
+        self.author_proj = nn.Sequential(nn.Linear(256, 128), nn.GELU())
+        self.func_proj   = nn.Sequential(nn.Linear(256, 128), nn.GELU())
 
-        # Combined
+        # Combined for classification
         self.proj = nn.Sequential(
             nn.Linear(256 + 128, 256),
             nn.GELU(),
-            nn.Dropout(0.1)
+            nn.Dropout(0.1),
         )
         self.clf = nn.Linear(256, n_cls)
-
-        # Functional representation
         self.func_dim = func_dim
 
     def forward(self, ids, mask, ast_feat, func_feat):
-        # Semantic encoding
         out = self.encoder(input_ids=ids, attention_mask=mask)
         sem_emb = (out.last_hidden_state * mask.unsqueeze(-1)).sum(1) / mask.sum(1, keepdim=True).clamp(min=1)
 
-        # Authorship representation
-        author_emb = self.author_encoder(sem_emb)
+        author_emb = self.author_encoder(sem_emb)        # (B, 256)
+        func_emb   = self.func_encoder(func_feat)        # (B, 256)
 
-        # Functional representation
-        func_emb = self.func_encoder(func_feat)
+        # FRC consistency in shared 128-dim space.
+        a128 = self.author_proj(author_emb)               # (B, 128)
+        f128 = self.func_proj(func_emb)                   # (B, 128)
+        consistency = F.mse_loss(a128, f128)
 
-        # Project functional to authorship space
-        func_proj = self.projector(func_emb)
-
-        # FRC consistency loss term
-        consistency = F.mse_loss(author_emb, func_proj)
-
-        # Combined
-        fused = torch.cat([author_emb, func_proj], dim=-1)
+        # Combined for classification: (B, 256 + 128).
+        fused = torch.cat([author_emb, f128], dim=-1)
         h = self.proj(fused)
         logits = self.clf(h)
-
         return logits, consistency
 
 
@@ -532,16 +528,17 @@ def run_exp(cfg: Cfg, tag: str):
 
     opt = torch.optim.AdamW([
         {"params": model.encoder.parameters(), "lr": cfg.lr_enc},
-        {"params": model.author_encoder.parameters(), "lr": cfg.lr_proj},
-        {"params": model.func_encoder.parameters(), "lr": cfg.lr_proj},
-        {"params": model.projector.parameters(), "lr": cfg.lr_proj},
-        {"params": model.proj.parameters(), "lr": cfg.lr_proj},
-        {"params": model.clf.parameters(), "lr": cfg.lr_head}
+        {"params": list(model.author_encoder.parameters())
+                   + list(model.func_encoder.parameters())
+                   + list(model.author_proj.parameters())
+                   + list(model.func_proj.parameters())
+                   + list(model.proj.parameters()), "lr": cfg.lr_proj},
+        {"params": model.clf.parameters(), "lr": cfg.lr_head},
     ], weight_decay=cfg.wd)
 
     total_steps = len(tr_dl) * cfg.epochs
     sch = torch.optim.lr_scheduler.OneCycleLR(
-        opt, max_lr=[cfg.lr_enc, cfg.lr_proj, cfg.lr_proj, cfg.lr_proj, cfg.lr_proj, cfg.lr_head],
+        opt, max_lr=[cfg.lr_enc, cfg.lr_proj, cfg.lr_head],
         total_steps=total_steps, pct_start=cfg.warmup
     )
     scaler = GradScaler()
@@ -599,7 +596,11 @@ def main():
                 if torch.cuda.is_available():
                     torch.cuda.empty_cache()
 
-    out_dir = os.path.join(os.path.dirname(os.path.realpath(__file__)), "results")
+    try:
+        _here = os.path.dirname(os.path.realpath(__file__))
+    except NameError:
+        _here = os.getcwd()
+    out_dir = os.path.join(_here, "results")
     os.makedirs(out_dir, exist_ok=True)
     with open(os.path.join(out_dir, "exp51_frc_results.json"), "w") as f:
         json.dump(results, f, indent=2)

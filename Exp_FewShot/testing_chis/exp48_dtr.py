@@ -571,7 +571,11 @@ def main():
                 if torch.cuda.is_available():
                     torch.cuda.empty_cache()
 
-    out_dir = os.path.join(os.path.dirname(os.path.realpath(__file__)), "results")
+    try:
+        _here = os.path.dirname(os.path.realpath(__file__))
+    except NameError:
+        _here = os.getcwd()
+    out_dir = os.path.join(_here, "results")
     os.makedirs(out_dir, exist_ok=True)
     with open(os.path.join(out_dir, "exp48_hete_results.json"), "w") as f:
         json.dump(results, f, indent=2)
