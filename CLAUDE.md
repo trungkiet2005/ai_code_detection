@@ -43,40 +43,86 @@ explicit user approval.
 > instead of T2 12-class. **Quote AICD results only from exp18+.** CoDET-M4
 > results from those experiments are still reliable.
 
-### 0.2 The contribution slate (open, not locked)
+### 0.2 Paper strategy — Single-method hero, diverse baselines (Option 1)
 
-We are aiming at an **oral-tier paper** with a **portfolio of genealogy-aware
-contributions**, evidenced by:
+> **Submission shape (decided 2026-05-14):** **EMNLP single-method paper**.
+> One hero method in §3 Method, a diverse pool of competing methods in §4 as
+> baselines + §5 ablation. NOT a multi-method portfolio / survey / benchmark
+> paper.
+>
+> Why: EMNLP/ACL/NAACL convention is one clean contribution per paper. Oral
+> papers at these venues are almost always single-method. Multi-method
+> portfolio shapes belong to NeurIPS Datasets & Benchmarks, not main NLP.
+
+### 0.2.1 Diversity = discovery tool, NOT contribution
+
+The diversity matrix in §2.5 and the future expNN slate exist to **find** the
+hero method, **validate** it against family-diverse alternatives, and **rule
+out** that the gain comes from a single equation surface. Diversity is
+*means*, not *end*:
+
+| Role in paper | What goes there |
+|:--|:--|
+| §3 Method (hero) | ONE method, picked after exp65_abl + exp66-73 round |
+| §4 Experiments table | Hero + 5–8 family-diverse competitors as baselines |
+| §5 Ablation | exp65_abl + component decomposition of the hero |
+| §6 Analysis | sibling/cross-family confusion, per-language, per-source |
+| Appendix | Full diversity portfolio table (20 methods like legacy) |
+
+### 0.2.2 No hero is locked yet — keep searching
+
+> **DO NOT commit to a headline method until the user says "chốt".**
+> Current standing (multiple methods tied at ~0.7186 on CoDET-M4 20%) is NOT
+> a stable signal. We need:
+>
+>   1. **exp65_abl results** to decompose which component carries gain.
+>   2. **exp66+ runs** (retrieval, MoE, hypernet, KAN, SSM, energy, distill,
+>      IB) to populate the family-diverse alternatives and stress-test the
+>      saturation hypothesis.
+>   3. **Falsifier checks** (sibling_confusion_rate, learned hyperparams) for
+>      every method in the pool.
+>   4. **User decision.** The user says "chốt" → we then pick the hero based
+>      on the lattice of (test macro-F1, ablation contribution, falsifier
+>      passage, mechanism cleanliness). Until that moment, treat the headline
+>      as an OPEN question.
+
+### 0.2.3 What contribution claims the paper will make (still open form)
+
+These are the contribution SLOTS that will be filled once a hero is picked.
+They are NOT pre-decided claims:
 
 - **A theoretical claim** — genealogy structure on the LABEL space defines new
   mathematical objects (target kernels, hierarchical losses, learnable distance
-  weights, heat diffusion on label graphs) that are undefined for flat-simplex
-  classification. Any of these can carry the headline if it wins empirically
-  AND survives ablation.
+  weights, heat diffusion on label graphs, family-conditional temperatures,
+  residual constraints, retrieval-stratified banks, MoE family routers,
+  hypernet-generated weights, family-anchored energies). Any of these can
+  carry the headline if it wins empirically AND survives ablation.
 - **An empirical claim** — those objects beat the published full-data encoder
   baselines (UniXcoder 0.6633 on CoDET-M4) with a small fraction of training
   data. **Current 20% SOTA: 0.7186 (+0.0553 vs paper)**, achieved by multiple
-  methods (SSL-RAS, GSCE, RASL, GFTS) that converge to the same band — see
-  tracker §0 "schedule was the dominant bottleneck".
-- **A regime claim** — performance is dominated by encoder pretraining at small
-  n and by the genealogy prior at large n; PTR (`exp61`) tests this directly.
-- **A falsifier line** — every new exp must commit to a falsifier metric we
-  log automatically (`sibling_confusion_rate`, learned hyperparam, etc.) so a
-  reviewer can verify the mechanism, not just the bottom-line number.
+  methods that converge to the same band — see tracker §0 "schedule was the
+  dominant bottleneck". The hero must beat this band, not just match it.
+- **A regime claim** — performance is dominated by encoder pretraining at
+  small n and by the genealogy prior at large n; PTR (`exp61`) tests this
+  directly. The phase transition is itself a contribution candidate.
+- **A falsifier line** — every method in the pool commits to a falsifier
+  metric (sibling_confusion_rate, learned hyperparam, etc.) logged in JSON.
+  The hero must pass its falsifier; competing methods that pass their own
+  falsifiers strengthen the family-diversity story.
 - **A diagnostic ablation** — `exp65_abl` toggles components (CE / SSL / HTKA
-  / GSCE / SCR / combinations) on the same backbone+schedule to isolate which
-  loss object owns which fraction of the gain.
-- **Method diversity** — the proposal pool must span **≥ 10 method families**
-  (loss reshape, kernel alignment, contrastive, temperature, residual, causal,
-  OT, spectral, hyperbolic, retrieval, MoE, hypernet, KAN, SSM, energy,
-  distillation, IB, Bayesian). See §2.5 for the full diversity matrix.
-  Legacy `Exp_CodeDet` had 20 methods spanning 7+ families with a real 1.7-pt
-  spread; current RAS-track has 4 methods in 1 family with a 0.001-pt tie.
-  The paper that ships must look like a portfolio, not a hyperparameter sweep.
+  / GSCE / SCR / combinations) on the same backbone+schedule to isolate
+  which loss object owns which fraction of the gain. THIS is what tells us
+  which hero to pick.
+- **A family-diverse baseline table** — competing methods from §2.5 cover at
+  least 6 of the 20 families, so the hero is positioned against retrieval,
+  MoE, hypernet, KAN, distill, IB alternatives — not just sibling-CE variants.
+  Diversity makes the paper read as a portfolio, but only one method gets
+  the §3 spotlight.
 
-> The headline name is NOT pre-decided. It will be whichever method dominates
-> the ablation while passing its falsifier — drawn from a **diverse** pool, not
-> a sweep of one equation surface.
+> **Working stance until "chốt":** Keep generating diverse, novel experiments
+> (`exp66+`). Keep logging falsifiers. Keep filling the §2.5 family matrix.
+> Resist any prose that promotes one method above the others. The hero is the
+> last decision, not the first.
 
 ### 0.3 Current leaderboard snapshot (CoDET-M4 Author 20%, Macro-F1)
 
@@ -132,13 +178,20 @@ None of these has a definition when labels are unstructured. This is the
 existing row. Reviewers cannot reduce any row to "X applied to Y" because
 the X is undefined without the tree.
 
-### 2.1 Headline object — kept as a candidate, not a commitment
+### 2.1 Headline object — undecided, search ongoing
 
 The repository was originally framed around HTKA. After RAS-schedule rollout
 and the exp56-59 results, the empirical SOTA is shared across SSL-RAS, GSCE,
 RASL, GFTS within 0.001 Macro-F1 on CoDET-M4 20%. We DO NOT commit to a
-single headline; the headline is decided by `exp65_abl` and the falsifier
-metrics, not by the order in which we implemented the methods.
+single headline; the headline is decided by `exp65_abl`, by `exp66+`
+runs (still pending — retrieval / MoE / hypernet / KAN / SSM / energy /
+distill / IB families per §2.5), and by the falsifier metrics — not by the
+order in which we implemented the methods.
+
+**Hero-locking gate:** the hero is selected only when the user explicitly
+says "chốt". Until then, treat HTKA / SSL-RAS / GSCE / RASL / GFTS as
+co-equal candidates. New experiments should expand the candidate pool, not
+narrow it.
 
 ### 2.2 Theory-grounded novelty bar — NOVELTY-FIRST PRINCIPLE
 
@@ -263,11 +316,17 @@ metrics, not by the order in which we implemented the methods.
 
 See detailed statements in §2.4 of the original CLAUDE.md version (theorems 1–3 on kernel alignment bound, phase transition, sibling confusion bound). These are self-derived and represent the Oral-tier contribution.
 
-### 2.5 Method-Diversity Matrix — DIVERSITY MANDATE (added 2026-05-14)
+### 2.5 Method-Diversity Matrix — DISCOVERY-PHASE MANDATE (added 2026-05-14)
 
+> **Purpose of diversity:** to FIND the hero method that will sit in §3 of the
+> paper, and to populate §4's baseline table with family-diverse alternatives.
+> Diversity is a search tool and a baseline source, **NOT a contribution by
+> itself**. The paper is single-method (§0.2). The DISCOVERY phase, however,
+> must be diverse.
+>
 > **Lesson from tracker analysis 2026-05-14:** legacy `Exp_CodeDet` had **20 methods spanning 7+ families**, with author-F1 spread of **1.7 points** (top: DeTeCtive 71.53 → bottom: CosineProto 67.80). Current `testing_chis` RAS-track (exp56-59) has **4 methods all in ONE family** (sibling-weighted CE variants on the same backbone) → spread of **0.001 points** — TIED to the point that loss choice doesn't matter.
 >
-> **A paper that submits 4 tied methods reads as one method.** The portfolio must look like legacy's: many families, real ranking, real ablation story. Diversify the proposal space, not just the equation surface.
+> If the spread stays tied across ALL families, the legitimate paper story is "schedule + any genealogy prior saturates"; if a non-loss family (retrieval / MoE / hypernet / KAN / SSM / energy / distill / IB) breaks the tie, that family's representative becomes the hero candidate. Either way, we need the diverse pool BEFORE we can defend any single-method claim.
 
 **Family map of what we have / lack:**
 
@@ -565,6 +624,16 @@ Results → `results/expXX_YYY_results.json`.
 - **Always** report val-test gap alongside test metrics.
 - **Always** use fraction sampling, not fixed sample count.
 - **Always** match the legacy-aligned `extract_ast_features` schema (22 features, padded) — do not regress to the 12-feature stub.
+- **Never** declare a "headline method" or "hero method" in prose, commit
+  messages, or section headers until the user has explicitly said **"chốt"**.
+  Before that: every method is a candidate. Use neutral language ("current
+  top performer", "leading candidate") rather than "our method" / "the method".
+- **Never** narrow the candidate pool unprompted. If `exp65_abl` or a new
+  exp produces a winner, log it but keep the others as live candidates until
+  user instruction.
+- **Always** keep proposing experiments from ❌ / 🟡 families in §2.5
+  (retrieval, MoE, hypernet, KAN, SSM, energy, distill, IB) when the user
+  asks for "more exps" — these are the gaps in the discovery portfolio.
 
 ## 15. Exp_FewShot/testing_chis rules (active suite, 2026-05-13)
 
