@@ -23,7 +23,7 @@ Self-contained experiments for Hier-NTK ablation + published baselines.
 ## Our Methods (Ours)
 
 | File | Method | Components | Runs |
-|:--|:--|:--|:--|
+|:-----|:-------|:-----------|:-----|
 | `exp_n13_hier_tree.py` | HierTree only | Hierarchical family prior | 12 |
 | `exp_n14_ntk_align.py` | NTK only | NTK target-kernel alignment | 12 |
 | `exp_n15_hier_ntk.py` | **Hier-NTK** | HierTree + NTK combined | 12 |
@@ -34,7 +34,7 @@ Self-contained experiments for Hier-NTK ablation + published baselines.
 ## Published Baselines
 
 | File | Method | Paper | Status |
-|:--|:--|:--|:--|
+|:-----|:-------|:------|:-------|
 | `baseline_01_codet5.py` | CodeT5-Authorship | AISec 2025 / arXiv 2506.17323 | ✅ Active |
 | `baseline_02_detective.py` | DeTeCtive | arXiv 2410.20964 | ✅ Active |
 | `baseline_03_faid.py` | FAID | EACL 2026 | ✅ Active |
@@ -45,7 +45,7 @@ Self-contained experiments for Hier-NTK ablation + published baselines.
 ## Novel Methods (arxiv-grounded theory)
 
 | File | Method | ArXiv | Status |
-|:--|:--|:--|:--|
+|:-----|:-------|:------|:-------|
 | `exp_n06_attn_pool.py` | HAP | Lee 2017 | ✅ Active |
 | `exp_n07_mixup_align.py` | MGA | Arjovsky 2019 | ✅ Active |
 | `exp_n08_ortho_clf.py` | Ortho-CLF | Papyan 2020 | ✅ Active |
@@ -65,17 +65,83 @@ Self-contained experiments for Hier-NTK ablation + published baselines.
 > Each file: 2 encoders × 2 benchmarks = 4 runs.
 
 | File | Method | Theory | Status |
-|:--|:--|:--|:--|
+|:-----|:-------|:-------|:-------|
 | `exp17_cao.py` | CAO | Class-Aware Ordering | ⚠️ NaN loss, collapsed |
 | `exp19_wda.py` | WDA | Wasserstein Domain Align | ❌ Collapsed |
 | `exp20_proto.py` | Proto | Prototypical Networks | ⚠️ Partial collapse |
 | `exp22_mi.py` | MI | Mutual Information | ⚠️ Partial (best: 0.1663) |
 | `exp23_ot.py` | OT | Optimal Transport | ❌ Collapsed |
-| `exp25_drl.py` | DRL/IRM | Invariant Risk Min. | ⚠️ IRM penalty=0 always |
+| `exp25_drl.py` | DRL/IRM | Invariant Risk Min. | ⚠️ IRM penalty=0 always (fixed-72) |
+| `exp55_irm.py` | IRM | Invariant Risk Min. (frac-based) | ✅ Active (fraction protocol) |
+| `exp54_gfr.py` | GFR | Genealogy-Factorized Representation | ❌ Collapsed (β_kl too strong) |
+| `exp53_rce.py` | RCE | Representation Causal Effect | ❌ Collapsed (intervention ruins signal) |
+| `exp52_cpo.py` | CPO | Counterfactual Permutation Objective | ❌ OOM (2x forward passes/batch) |
+| `exp50_sie.py` | SIE | Structural Invariance Equation | ❌ Collapsed (sign-flip destroys authorship signal) |
+| `exp49_paca.py` | PAC-A | PAC-Bayes Authorship bound | ❌ Collapsed (stochastic weights add too much noise) |
+| `exp48_hete.py` | HETE | Heterogeneous Treatment Effects | ✅ Active (beats paper at 20% CoDET-M4: +0.0059) |
+| `exp47_giba.py` | GIBA | Genealogy InfoNCE Bottleneck | ⚠️ Partial (best at 5%, degrades at 20%) |
+| `exp45_gra.py` | GRA | Genealogical Residual Analysis | ✅ Active (beats paper at 20% CoDET-M4: +0.0152) |
+| `exp44_tke.py` | TKE | Tree-Kernel Embedding | ❌ Collapsed (alpha bug, no test results) |
+| `exp43_bgb.py` | BGB | Batch Genealogy Bridge | ✅ Active (beats paper at 20% CoDET-M4: +0.0040) |
+| `exp42_ssl.py` | SSL | Sibling Structure Loss | ✅ Active (**BEST: 0.6796 at 20% CoDET-M4: +0.0163**) |
+| `exp40_tpnl.py` | TPNL | Tree-Path Negative Lifting | ❌ Collapsed (InfoNCE too strong, crushed CE signal) |
+| `exp39_sto.py` | STO | Structural Transfer Operator | ⚠️ Marginal (barely beats paper at 20% CoDET-M4: +0.0018) |
+| `exp38_gaka.py` | GAKA | Genealogical-AST Kernel Alignment | ⚠️ Marginal (barely beats paper at 20% CoDET-M4: +0.0021) |
 | `exp26_gna.py` | GNA | Graph Neural Attribution | ⚠️ Partial collapse |
 | `exp30_bua.py` | BUA | Bayesian Uncertainty | ⚠️ Partial collapse |
 
-## Usage
+---
+
+## 🚀 Regime-Adaptive Schedule Track (exp56–exp59, 2026-05-14)
+
+> **Motivation:** Diagnosis from comparing legacy `Exp_CodeDet` (bs=64 × 3ep × 100K, ~4,687 steps → 0.7055 Author F1)
+> against `testing_chis` fraction protocol (bs=256 × 3ep × ~80K, ~937 steps → 0.6796). Same encoder family,
+> 5× fewer gradient updates → undertrained. Fix: epochs/lr/warmup keyed on `cfg.frac`.
+>
+> **Schedule:** 1% → 10ep / lr_enc=3e-5 / warmup=0.20 ;  5% → 6ep / 3e-5 / 0.15 ;  20% → 6ep / 4e-5 / 0.10.
+> Cosine schedule + linear sqrt-scaled LR. Same loss objects as exp42 / exp45 / exp42-LS / NEW per file.
+
+| File | Method | Object | Status |
+|:-----|:-------|:-------|:-------|
+| `exp56_sslras.py` | SSL-RAS | SSL (exp42 loss) + regime-adaptive schedule | ✅ Active (**0.7186 @ 20% CoDET-M4, +0.0553 vs paper**) |
+| `exp57_gsce.py` | GSCE | Genealogy-Smoothed CE: `q_c = (1-eps)*1[c=y] + eps*exp(-α·d_tree)/Z` | ✅ Active (**0.4851 best @ 20% AICD-T2**) |
+| `exp58_rasl.py` | RASL | Residual-Aware Sibling Loss: `CE + λ·Σ_sib ‖R_i-R_j‖²` (EMA family means) | ✅ Active (**0.7181 @ 20% CoDET-M4, +0.0548**) |
+| `exp59_gfts.py` | GFTS | Family-temp: `τ_c = exp(log τ₀ + β·s_c)`, β learned | ✅ Active (**0.4049 best @ 5% AICD-T2**) |
+
+### CoDET-M4 Author IID — Macro-F1 (regime-adaptive runs, unixcoder-base)
+
+| Rank | Method | Encoder | 1% | 5% | 20% | val-test gap @ 20% | Δ vs paper @ 20% |
+|:----:|:-------|:--------|---:|---:|----:|:---:|:---:|
+| 🥇 | **SSL-RAS** (exp56) | unixcoder | 0.5513 | 0.6539 | **0.7186** | +0.0053 | **+0.0553** |
+| 🥈 | **GSCE**    (exp57) | unixcoder | 0.5502 | 0.6530 | 0.7185 | +0.0033 | +0.0552 |
+| 🥉 | **RASL**    (exp58) | unixcoder | 0.5509 | 0.6527 | 0.7181 | +0.0068 | +0.0548 |
+| 4  | **GFTS**    (exp59) | unixcoder | 0.5585 | 0.6562 | 0.7177 | +0.0061 | +0.0544 |
+| ref | SSL (exp42, old sched) | unixcoder | — | — | 0.6796 | — | +0.0163 |
+| ref | UniXcoder (paper full) | unixcoder | — | — | 0.6633 | — | 0.0000 |
+
+> **Schedule lifted SSL from 0.6796 → 0.7186 (+0.039 absolute, +5.7% relative).**
+> All four methods converge to ~0.718 at 20% — schedule, not the specific loss object, is the dominant factor at this regime.
+
+### AICD-T2 Model-Family Attribution — Macro-F1 (regime-adaptive runs, unixcoder-base)
+
+| Rank | Method | 1% | 5% | 20% | val-test gap @ 20% |
+|:----:|:-------|:--:|:--:|:---:|:---:|
+| 🥇 @ 20% | **GSCE**    (exp57) | 0.2941 | 0.3923 | **0.4851** | −0.0134 |
+| 🥈 @ 20% | **GFTS**    (exp59) | 0.3009 | **0.4049** | 0.4833 | −0.0077 |
+| 🥉 @ 20% | **RASL**    (exp58) | 0.2919 | 0.3959 | 0.4814 | −0.0101 |
+| 4  @ 20% | **SSL-RAS** (exp56) | **0.3025** | 0.3964 | 0.4771 | −0.0090 |
+| ref | LabelSmooth (old sched) | 0.191 | 0.333 | 0.445 | — |
+
+> **AICD-T2 1% lifted from ~0.20 to ~0.30** (+0.10 absolute) across all four methods.
+> GFTS at 5% AICD-T2 is best (0.4049), GSCE at 20% (0.4851) — soft-label objects (GSCE / GFTS) edge ahead on imbalanced 12-class.
+
+### Falsifier readout
+
+- **SSL-RAS / GSCE / RASL / GFTS all hit ~0.718 @ 20% CoDET-M4** → confirms diagnosis: schedule (not loss object) was the bottleneck at 20%. The four loss objects barely separate (range 0.7177-0.7186).
+- **GFTS β trained negative (−0.55 to −0.89) on all runs** → topology-driven temperature DOES get exploited when there is heterogeneity in sibling density. On CoDET-M4 (β = −0.595) classes 1, 3 (GPT/CodeLlama siblings) end up with τ ≈ 0.21 vs τ ≈ 0.38 for isolated classes. On AICD-T2 every class has identical sibling-density (= 2/2 = 1.0), so τ becomes class-uniform → GFTS reduces to global temperature scaling, partially falsifying the topology link for the 4 × 3 setup.
+- **Val-test gap stays small** (|gap| ≤ 0.014 across all 24 rows) — no overfitting from longer schedule.
+
+
 
 ```bash
 # CE baseline first
@@ -119,7 +185,11 @@ Output: `results/Novel/exp*_results.json`
 
 | Rank | Method | Encoder | Macro-F1 | Δ vs Paper |
 |:----:|:-------|:--------|---------:|-----------:|
-| 🥇 | **ETF-Simplex** | unixcoder | **0.4405** | -0.223 |
+| 🥇 | **GFTS** (exp59, RAS sched) | unixcoder | **0.5585** | -0.105 |
+| 🥈 | SSL-RAS (exp56) | unixcoder | 0.5513 | -0.112 |
+| 🥉 | RASL (exp58) | unixcoder | 0.5509 | -0.112 |
+| 4 | GSCE (exp57) | unixcoder | 0.5502 | -0.113 |
+| 5 | ETF-Simplex (old sched) | unixcoder | 0.4405 | -0.223 |
 | 🥈 | **CodeT5-Authorship** | ModernBERT | 0.4361 | -0.227 |
 | 🥉 | **HAP** | unixcoder | 0.4319 | -0.231 |
 | 4 | CodeT5-Authorship | unixcoder | 0.4156 | -0.248 |
@@ -132,12 +202,19 @@ Output: `results/Novel/exp*_results.json`
 | 11 | Mixup-CE | ModernBERT | 0.3461 | -0.317 |
 | 12 | LabelSmooth | ModernBERT | 0.3192 | -0.344 |
 | 13 | Style-Repr | n/a | 0.3329 | -0.330 |
+| 14 | IRM | unixcoder | 0.1132 | -0.550 |
+| 15 | GFR | unixcoder | 0.1132 | -0.550 |
+| 16 | RCE | unixcoder | 0.1139 | -0.549 |
 
 #### 5% Few-Shot
 
 | Rank | Method | Encoder | Macro-F1 | Δ vs Paper |
 |:----:|:-------|:--------|---------:|-----------:|
-| 🥇 | **CodeT5-Authorship** | ModernBERT | **0.6030** | -0.060 |
+| 🥇 | **GFTS** (exp59, RAS sched) | unixcoder | **0.6562** | -0.007 |
+| 🥈 | SSL-RAS (exp56) | unixcoder | 0.6539 | -0.009 |
+| 🥉 | GSCE (exp57) | unixcoder | 0.6530 | -0.010 |
+| 4 | RASL (exp58) | unixcoder | 0.6527 | -0.011 |
+| 5 | CodeT5-Authorship (old sched) | ModernBERT | 0.6030 | -0.060 |
 | 🥈 | **DeTeCtive** | ModernBERT | 0.5855 | -0.078 |
 | 🥉 | **NTK only** | ModernBERT | 0.5852 | -0.078 |
 | 4 | Hier-NTK (ours) | ModernBERT | 0.5842 | -0.079 |
@@ -148,12 +225,19 @@ Output: `results/Novel/exp*_results.json`
 | 9 | ETF-Simplex | ModernBERT | 0.5979 | -0.065 |
 | 10 | LabelSmooth | ModernBERT | 0.5683 | -0.095 |
 | 11 | Style-Repr | n/a | 0.3365 | -0.327 |
+| 12 | IRM | unixcoder | 0.4771 | -0.186 |
+| 13 | GFR | unixcoder | 0.2823 | -0.381 |
+| 14 | RCE | unixcoder | 0.1663 | -0.497 |
 
 #### 20% Few-Shot
 
 | Rank | Method | Encoder | Macro-F1 | Δ vs Paper |
 |:----:|:-------|:--------|---------:|-----------:|
-| 🥇 | **CodeT5-Authorship** | ModernBERT | **0.6880** | +0.025 |
+| 🥇 | **SSL-RAS** (exp56, RAS sched) | unixcoder | **0.7186** | **+0.0553** |
+| 🥈 | GSCE (exp57, RAS sched) | unixcoder | 0.7185 | +0.0552 |
+| 🥉 | RASL (exp58, RAS sched) | unixcoder | 0.7181 | +0.0548 |
+| 4 | GFTS (exp59, RAS sched) | unixcoder | 0.7177 | +0.0544 |
+| 5 | CodeT5-Authorship (old sched) | ModernBERT | 0.6880 | +0.025 |
 | 🥈 | **ETF-Simplex** | ModernBERT | 0.6826 | +0.019 |
 | 🥉 | **LabelSmooth** | ModernBERT | 0.6796 | +0.016 |
 | 4 | CE baseline (ours) | ModernBERT | 0.6795 | +0.016 |
@@ -163,6 +247,9 @@ Output: `results/Novel/exp*_results.json`
 | 8 | DeTeCtive | ModernBERT | 0.6775 | +0.014 |
 | 9 | HierTree only | ModernBERT | 0.6757 | +0.012 |
 | 10 | Style-Repr | n/a | 0.3327 | -0.331 |
+| 11 | IRM | unixcoder | 0.6521 | -0.011 |
+| 12 | GFR | unixcoder | 0.3923 | -0.271 |
+| 13 | RCE | unixcoder | 0.1132 | -0.550 |
 
 ---
 
@@ -217,9 +304,23 @@ Output: `results/Novel/exp*_results.json`
 | **Novel** | Focal-CE | 0.191 | 0.306 | 0.392 | |
 | **Published** | CodeT5-Authorship | 0.199 | 0.316 | 0.404 | |
 | **Baseline** | CE baseline | ~0.22 | **0.322** | ~0.41 | |
+| **Theory** | GFR | 0.069 | 0.142 | 0.156 | ❌ VAE KL dominates, collapses |
+| **Theory** | RCE | 0.134 | 0.069 | 0.069 | ❌ Causal intervention destroys signal |
+| **Theory** | SIE | 0.133 | 0.238 | 0.384 | ❌ Sign-flip invariance destroys authorship |
+| **Theory** | PAC-A | 0.031 | 0.031 | 0.031 | ❌ Stochastic weights add too much variance |
+| **Theory** | HETE | 0.182 | 0.337 | 0.444 | ⚠️ Reasonable at 20%, matches LabelSmooth |
+| **Theory** | GIBA | 0.135 | 0.271 | 0.420 | ⚠️ Best at 5%, degrades at 20% (KL bottleneck hurts) |
+| **Theory** | GRA | 0.189 | 0.314 | 0.437 | ✅ Best theory method on AICD-T2 at 20% |
+| **Theory** | BGB | 0.179 | 0.330 | 0.444 | ✅ Tied best theory on AICD-T2 at 20% |
+| **RAS-track** | **GSCE** (exp57) | 0.2941 | 0.3923 | **0.4851** | 🥇 NEW best at 20% AICD-T2 |
+| **RAS-track** | **GFTS** (exp59) | 0.3009 | **0.4049** | 0.4833 | 🥇 NEW best at 5% AICD-T2 |
+| **RAS-track** | **RASL** (exp58) | 0.2919 | 0.3959 | 0.4814 | ✅ +0.036 vs LabelSmooth @ 20% |
+| **RAS-track** | **SSL-RAS** (exp56) | **0.3025** | 0.3964 | 0.4771 | 🥇 NEW best at 1% AICD-T2 |
 
 > 📊 **Key insight:** LabelSmooth achieves best AICD-T2 results at 5%/20% (+0.01 over baseline).
 > All methods struggle at 1% few-shot (~0.19-0.21) due to 12-class problem.
+> **GFR (Genealogy-Factorized Representation):** VAE-based disentanglement collapses - KL loss dominates and prevents learning meaningful representations.
+> **RCE (Representation Causal Effect):** Causal intervention mechanism destroys discriminative signal - learned effects add arbitrary noise instead of meaningful causal shifts.
 
 ### AICD-T1 (binary: human vs AI) — Macro-F1 [INVALID - historical]
 
@@ -285,6 +386,14 @@ Output: `results/Novel/exp*_results.json`
 
 ## Key Insights
 
+### 🚀 2026-05-14 Update: Regime-Adaptive Schedule (exp56–exp59)
+
+0. **Schedule was the dominant bottleneck at 20%, not the loss object.**
+   - Old (bs=256, 3ep): SSL @ 20% CoDET-M4 = 0.6796 (+0.0163 vs paper)
+   - New (RAS sched): SSL-RAS / GSCE / RASL / GFTS all hit **0.7177–0.7186 (+0.054 vs paper)**, +0.039 over old SSL.
+   - AICD-T2 also lifts: 1% from ~0.20 → ~0.30, 20% from 0.445 → **0.4851**.
+   - Diagnosis: `bs=256 × 3ep × 80K ≈ 937 updates` was 5× fewer than legacy `bs=64 × 3ep × 100K ≈ 4687 updates` that reached 0.7055. Fix: 6 epochs + sqrt-scaled LR + cosine schedule, keyed on `cfg.frac`.
+
 ### 🔍 Consolidated Analysis (All 22 Methods)
 
 1. **CodeT5-Authorship wins on CoDET-M4**: +3.05 pts vs CE baseline @ 5%, strongest across all fractions
@@ -322,14 +431,25 @@ Output: `results/Novel/exp*_results.json`
 | **WDA/OT dominated by 1 class** | High | All preds → class 3; OT loss diverges |
 | **IRM penalty never fires** | High | penalty_anneal=500 > total steps at 72 samples |
 | **BUA worst on AICD-T2** | Medium | MC Dropout + tiny data = 0.031 macro-F1 |
+| **GFR VAE KL dominates** | Critical | β_kl=1e-3 too strong; collapses at all fractions |
+| **RCE intervention ruins signal** | Critical | Learned causal effects add arbitrary noise; collapses to class majority |
+| **CPO OOM** | Critical | Forward pass x2 per batch (original + counterfactual) causes OOM |
+| **SIE sign-flip destroys signal** | Critical | Z_2 sign-flip group action destroys authorship-specific features |
+| **PAC-A stochastic weights too noisy** | Critical | Gaussian posterior sampling adds too much variance; model collapses regardless of data fraction |
 
-### 🎯 When Each Method Wins
+### 🎯 When Each Method Wins (updated 2026-05-14)
 
-| Scenario | Best Method | Score |
-|:---------|:------------|------:|
-| CoDET-M4 @ 1% | ETF-Simplex | 0.4405 |
-| CoDET-M4 @ 5% | CodeT5-Authorship | 0.6030 |
-| CoDET-M4 @ 20% | CodeT5-Authorship | 0.6880 |
+| Scenario | Best Method | Score | Δ vs paper |
+|:---------|:------------|------:|:----------:|
+| CoDET-M4 @ 1% | **GFTS (exp59, RAS sched)** | **0.5585** | -0.105 |
+| CoDET-M4 @ 5% | **GFTS (exp59, RAS sched)** | **0.6562** | -0.007 |
+| CoDET-M4 @ 20% | **SSL-RAS (exp56, RAS sched)** | **0.7186** | **+0.0553** |
+| AICD-T2 @ 1% | **SSL-RAS (exp56)** | **0.3025** | — |
+| AICD-T2 @ 5% | **GFTS (exp59)** | **0.4049** | — |
+| AICD-T2 @ 20% | **GSCE (exp57)** | **0.4851** | — |
+| (legacy, frozen) CoDET-M4 @ 1% | ETF-Simplex | 0.4405 | -0.223 |
+| (legacy, frozen) CoDET-M4 @ 5% | CodeT5-Authorship (ModernBERT) | 0.6030 | -0.060 |
+| (legacy, frozen) CoDET-M4 @ 20% | CodeT5-Authorship (ModernBERT) | 0.6880 | +0.025 |
 
 ---
 
@@ -356,6 +476,11 @@ Common failure modes:
 - **IRM anneal too high**: `penalty_anneal=500` steps but only 1 step per epoch × 3 epochs = 3 steps total
 - **Graph collapse (GNA)**: With 72 nodes, inter-node edges are trivial; network defaults to simple linear
 - **MC Dropout (BUA)**: `high_uncertainty_ratio=0.0` — all predictions confident despite being wrong
+- **GFR VAE KL dominates**: β_kl=1e-3 forces posterior to prior, destroying discriminative signal
+- **RCE intervention ruins signal**: CausalGate learns meaningless effects that add noise; val=0.1133 (class majority) across most runs
+- **CPO OOM**: Forward pass x2 per batch (original + counterfactual) - GPU memory exceeded; needs gradient checkpointing or single-pass design
+- **SIE sign-flip destroys signal**: Z_2 sign-flip group action during training destroys authorship-specific features; model collapses to majority class at 1%/5%, only reaches 0.6511 at 20% (vs paper 0.6633)
+- **PAC-A stochastic weights**: Gaussian posterior sampling adds too much variance; val=0.1298 constant across all CoDET-M4 fractions, 0.0317 constant across all AICD-T2 fractions
 
 **Recommendation**: Theory-track methods need hyperparameter scaling to the data regime (72 samples).
 Consider: smaller auxiliary loss weights (`wda_weight < 0.01`), lower `penalty_anneal` (e.g. 1), or prototype initialization from pretrained clusters.
