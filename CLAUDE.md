@@ -211,6 +211,15 @@ narrow it.
 > F3 kernel alignment has 2 — enough). Pick a family marked ❌ or 🟡, or a
 > family not yet on the matrix. A paper with 20 methods in 7 families ranks
 > better than a paper with 4 methods in 1 family, even at identical SOTA.
+>
+> **Problem-specificity rule (added 2026-05-14):** every proposal MUST cite ≥ 1
+> of the S1–S10 structural facts in §2.5.0 (dual-tree, decoding fingerprint,
+> provenance, prompt sharing, AST motifs, multi-LM likelihood, temperature
+> nuisance, source confounding, few-shot regime, intra-human substructure).
+> Methods that work the same way for ImageNet+label-tree as for code
+> attribution are REJECTED at the novelty gate. The acceptance test: the
+> proposed equation contains ≥ 1 of `{AST_i, prompt_embed, log p_LM,
+> source domain, decoding parameter}`.
 
 **Anti-patterns (DO NOT propose):**
 - SupCon, ArcFace, R-Drop, LoRA, SimCSE, Center Loss — anyone can think of these
@@ -316,17 +325,44 @@ narrow it.
 
 See detailed statements in §2.4 of the original CLAUDE.md version (theorems 1–3 on kernel alignment bound, phase transition, sibling confusion bound). These are self-derived and represent the Oral-tier contribution.
 
-### 2.5 Method-Diversity Matrix — DISCOVERY-PHASE MANDATE (added 2026-05-14)
+### 2.5 Method-Diversity Matrix — PROBLEM-SPECIFIC DISCOVERY MANDATE (rewritten 2026-05-14)
 
 > **Purpose of diversity:** to FIND the hero method that will sit in §3 of the
 > paper, and to populate §4's baseline table with family-diverse alternatives.
 > Diversity is a search tool and a baseline source, **NOT a contribution by
 > itself**. The paper is single-method (§0.2). The DISCOVERY phase, however,
-> must be diverse.
+> must be diverse — AND every entry in the discovery pool must be ANCHORED
+> in the structure of AI-code attribution, not generic ML applied to code.
 >
-> **Lesson from tracker analysis 2026-05-14:** legacy `Exp_CodeDet` had **20 methods spanning 7+ families**, with author-F1 spread of **1.7 points** (top: DeTeCtive 71.53 → bottom: CosineProto 67.80). Current `testing_chis` RAS-track (exp56-59) has **4 methods all in ONE family** (sibling-weighted CE variants on the same backbone) → spread of **0.001 points** — TIED to the point that loss choice doesn't matter.
+> **Lesson from tracker analysis 2026-05-14:** legacy `Exp_CodeDet` had **20 methods spanning 7+ families**, with author-F1 spread of **1.7 points** (top: DeTeCtive 71.53 → bottom: CosineProto 67.80). Current `testing_chis` RAS-track (exp56-59) has **4 methods all in ONE family** (sibling-weighted CE variants on the same backbone) → spread of **0.001 points** — TIED.
 >
-> If the spread stays tied across ALL families, the legitimate paper story is "schedule + any genealogy prior saturates"; if a non-loss family (retrieval / MoE / hypernet / KAN / SSM / energy / distill / IB) breaks the tie, that family's representative becomes the hero candidate. Either way, we need the diverse pool BEFORE we can defend any single-method claim.
+> If the spread stays tied across ALL families, the legitimate paper story is "schedule + any genealogy prior saturates"; if a non-loss family breaks the tie, that family's representative becomes the hero candidate. Either way we need the diverse pool BEFORE we can defend any single-method claim.
+
+### 2.5.0 What is structurally unique about AI-code attribution
+
+These are the structural facts that make this problem NOT just "text
+classification with a tree label space". Every method proposal must exploit
+at least one of them; methods that ignore them are reduced to "X applied to Y"
+and fail the §2.2 novelty bar.
+
+| # | Structural fact about AI-code attribution | What new objects it enables |
+|:-:|:--|:--|
+| **S1** | **Two trees co-exist.** Each sample carries an AST (syntax tree). Each label carries a genealogy tree (model family). Cross-domain rare | Dual-tree kernels, AST × genealogy joint geometry, AST-conditional family priors |
+| **S2** | **Generators have known decoding fingerprints.** Temperature, top-p, repetition penalty, max-tokens are model-specific and leak into output | Decoding-artifact probes, temperature regression heads, repetition pattern features |
+| **S3** | **Generators trained on overlapping but distinct corpora** (Stack, BigCode, code books, GitHub). Pretraining provenance leaks into generations | Provenance-trace heads, corpus-style classifiers, cross-corpus invariants |
+| **S4** | **Prompts are shared across generators in standard benchmarks** (CodeT-M4, AICD generate from the SAME problem statements). Prompt content is a shared confound | Prompt-invariant attribution, prompt-residual encoding, problem-conditional style |
+| **S5** | **Code under same author has CHARACTERISTIC AST motifs** (specific loop styles, naming conventions, error-handling idioms) | AST subtree mining, motif retrieval banks, family-specific syntactic priors |
+| **S6** | **The detector can re-encode the input** under each candidate LM and obtain a likelihood vector. This is unique to generative-content attribution | Multi-LM likelihood features, cross-decoder consistency, perplexity signatures |
+| **S7** | **Same prompt + different temperatures from same model produce different outputs.** Author identity is invariant; temperature is a nuisance | Temperature-augmented training, invariance to decoding hyperparam |
+| **S8** | **Source domain (cf / lc / gh) is observed and confounding.** GitHub code is more diverse, LeetCode is templated, Codeforces is competitive | Source-stratified backdoor adjustment, source-conditional family priors, OOD-source held-out evaluation |
+| **S9** | **Few-shot regime is the operating point.** Production detectors must adapt to NEW generators added monthly | Few-shot meta-attribution, prototype generators, retrieval-as-attribution |
+| **S10** | **Human code is a class, not just "not AI".** Human ≠ flat distribution; humans cluster by skill / language / source | Human-cluster prototypes, intra-human substructure as auxiliary signal |
+
+> **The novelty bar (§2.2) translated through this matrix:** A proposed method
+> is acceptable only if its NEW MATHEMATICAL OBJECT requires ≥ 1 of S1–S10 to
+> even be definable. If you can write the same equation for image
+> classification with a label tree, the method is rejected at the novelty
+> gate.
 
 **Family map of what we have / lack:**
 
@@ -355,20 +391,55 @@ See detailed statements in §2.4 of the original CLAUDE.md version (theorems 1�
 
 **Diversity target before EMNLP submission:** **≥ 10 families with active runs**. Currently we have 12 families covered but 5 of them are LEGACY-only (architecture-driven gains that we never ported under the RAS schedule). The 7 ❌MISSING and 1 🟡PARTIAL families are the priority slots.
 
-**Future expNN slate (do NOT reuse IDs; suggestions, not commitments):**
+**Future expNN slate (do NOT reuse IDs; PROBLEM-SPECIFIC, not generic ML):**
 
-| ExpID | Method (proposed) | Family | New object only valid under genealogy | One-line claim |
-|:--|:--|:-:|:--|:--|
-| `exp66_retag` | **RetAG** Retrieval-Augmented Genealogy | F13 | Retrieval bank stratified by gene cluster; nearest-family + nearest-author two-step retrieval. | Few-shot attribution improves when the retrieval pool is GENEALOGY-STRATIFIED instead of flat. |
-| `exp67_gmoe`  | **GeneMoE** Genealogy Mixture-of-Experts | F14 | One expert per family; gating logits = `softmax(W · gene_embed(family_id))`. | Family routing converts a 6-way head into a 2-stage (family → author) decision. |
-| `exp68_hyper` | **GenHyper** Genealogy Hypernet | F15 | Classifier head weights `W_y = h(family_emb(y))` generated by a hypernet from family ID. | Weights are explicitly indexed by genealogy, not just sample features. |
-| `exp69_kang`  | **KanGene** KAN-Head with Family Splines | F16 | Per-family learnable spline activations in classifier head. | Non-linear separability between SIBLINGS, linear elsewhere. |
-| `exp70_smamba`| **SMamba-Gene** State-Space + Family Conditioning | F17 | Mamba SSM with family-conditioned initial state `h₀ = E_fam(y_anchor)`. | Sequence-level state initialised from genealogy, not zero. |
-| `exp71_genergy` | **GenEnergy** Energy-Based with Family Anchors | F18 | `E(x, y) = ‖z(x) − μ_y‖² + λ·‖μ_y − μ_fam(y)‖²` | Author energy includes family-coherence penalty (anchor regularisation). |
-| `exp72_gdistill` | **GeneDistill** Self-Distillation Across Granularity | F19 | Teacher (family head) → student (author head); soft labels = `softmax(family_logits)` indexed at family-of-author. | Family knowledge regularises author-level training. |
-| `exp73_gib_full` | **GIB-α** Genealogy-Conditioned Bottleneck (full) | F20 | `min I(Z; X) − β·I(Z; Y) + γ·I(Z; family|author)` | Strip family info from Z; keep author info only. |
+Each proposal below cites at least one S1–S10 structural fact it exploits.
+If a proposal cannot cite ≥ 1, it does not belong in this slate.
 
-**Rule of thumb:** Each new exp should plant a flag in a FAMILY not in the SAME equation surface. If a reviewer can write "this is family F1 variant N+1", do not propose it — pick a family with ❌ or 🟡 instead.
+| ExpID | Method (proposed) | Exploits | New object — UNDEFINED for flat classification |
+|:--|:--|:-:|:--|
+| `exp66_dtke` | **DTKE** Dual-Tree Kernel Embedding | S1 | `K_dual(x_i, x_j) = K_ast(AST_i, AST_j) · K_gene(y_i, y_j)`. Joint kernel over per-sample AST tree AND per-label genealogy tree. Both trees are required to define K_dual. Aligns ZZᵀ to K_dual. |
+| `exp67_provtr` | **PROVTR** Provenance-Trace Head | S3 | Auxiliary head predicts pretraining-corpus signature (Stack / TheStack / BigCode / human-GitHub) from AST + token n-grams. Loss = CE on attribution + γ · CE on corpus probe. Family identity is read OFF the provenance signature. |
+| `exp68_decofp` | **DECOFP** Decoding-Fingerprint Regressor | S2 | Regression head predicts (estimated_temperature, estimated_top_p, repetition_entropy) from the code. These quantities differ per generator family by design. Attribution head conditioned on the predicted decoding triple. |
+| `exp69_promptinv` | **PROMPTINV** Prompt-Invariant Attribution | S4 | Residual `z_attr(x) = z(x) − z_prompt_anchor(family_of(y))`. The prompt embedding is the shared confound; subtracting a family-anchored prompt prototype isolates author-specific style. |
+| `exp70_astmotif` | **ASTMOTIF** AST Subtree Motif Retrieval | S5 | Mine top-K AST subtree motifs per family (frequent in family `f`, rare elsewhere). Test-time: hash query AST → sparse vote over family motifs + dense logit fusion. Fully discrete + dense hybrid. |
+| `exp71_multilm` | **MULTILM** Multi-LM Likelihood Signature | S6 | Feature vector = `[ℓog p_GPT(x), log p_CodeLlama(x), log p_Qwen(x), log p_Nxcode(x), log p_Human-LM(x)]`. The detector classifies on this likelihood SIGNATURE, not on raw embeddings. |
+| `exp72_tempaug` | **TEMPAUG** Temperature-Invariant Training | S7 | Train with paired (x, x_alt) where x_alt is the same author re-sampled at higher T. Add invariance loss `‖z(x) − z(x_alt)‖²`. Author identity is the invariant; T is the nuisance. |
+| `exp73_srcbdoor` | **SRCBDOOR** Source-Stratified Backdoor Adjustment | S8 | `P(Y \| do(X)) = Σ_s P(Y \| X, S=s) · P(S=s)`. Train one classifier head per source domain; aggregate via observed source marginal. Targets the cross-source confound directly. |
+| `exp74_protogen` | **PROTOGEN** Prototype-Generator Few-Shot Meta | S9 | Each generator gets a prototype embedding learned via episodic meta-attribution. Test-time attribution = nearest prototype. Designed for the "new generator added monthly" production regime. |
+| `exp75_humclust` | **HUMCLUST** Intra-Human Substructure | S10 | Cluster the human class into K subclusters (by skill / source / language signal). Train (K+5)-way head; collapse to original 6-way at inference. Human-class richness as auxiliary signal. |
+
+These cover families F13–F20 from the abstract diversity matrix but each row
+is now a CODE-ATTRIBUTION-SPECIFIC mechanism, not "MoE applied to code". A
+reviewer cannot say "this is X applied to Y" for any of them because the X is
+undefined without the matching S-structural fact.
+
+> **Picking the next exp from this slate (when user says "tạo thêm exp"):**
+>   1. Open `tracker.md` and list which S-facts are currently UNEXPLOITED.
+>   2. Pick a proposal from the slate above that exploits the most-unexploited
+>      S-fact.
+>   3. Confirm the new object is UNDEFINED under flat-simplex classification.
+>      If you can write the same equation for ImageNet with a label tree, the
+>      proposal fails — pick a different S-fact.
+>   4. Write the file with the same self-contained structure as `exp60_htka.py`
+>      (Kaggle paths, STRICT `_load_aicd`, AMP bf16, RAS schedule, full
+>      `eval_pack`).
+>
+> **Anti-patterns at the proposal stage:**
+> - "Apply Mamba/MoE/KAN to code" — generic; reject unless tied to a specific
+>   S-fact and the architectural change is REQUIRED by that fact.
+> - "Hypernet generates classifier weights from family ID" — possible but
+>   weak: family ID is a categorical, hypernet adds capacity not structural
+>   bias. Reject unless tied to a deeper S-fact.
+> - "Add genealogy-aware regularisation to MoE" — feature stacking, not new
+>   object.
+> - "Use a graph neural network on the genealogy tree" — generic spectral
+>   trick, already covered by SGE / DGK.
+>
+> **Acceptance pattern:** the proposed object's equation contains ≥ 1 of
+> { AST_i, prompt_embed, log p_LM, source domain, decoding parameter }. These
+> are the IRREDUCIBLE tokens of AI-code attribution — they cannot be defined
+> away.
 
 ---
 
