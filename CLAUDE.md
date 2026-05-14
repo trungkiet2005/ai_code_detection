@@ -10,54 +10,82 @@ alwaysApply: true
 
 ---
 
-## 0. Current submission target — UPDATED 2026-05-13
+## 0. Current submission target — UPDATED 2026-05-14
 
-> **Venue:** EMNLP 2026 Main (long paper, 8 pages). **Reach for Oral.**
+> **Venue:** EMNLP 2026 Main (long paper, 8 pages). **Aim: Oral.**
 > **Deadline:** ~2026-05-26.
-> **Status (2026-05-13):** Fraction-based few-shot protocol locked; `unixcoder-base` only;
-> `_load_aicd` STRICT (no fallback); **6 weak Dual-Tree exps refactored into new oral-tier
-> objects (TPNL, BGB, TKE, GIBA, HETE, GFR)**; AST extraction upgraded to legacy-aligned
-> 22-feature structural vector (offline, no tree-sitter dep); GPU pipeline tuned for
-> RTX Pro 6000 (bs=256, seq=512, num_workers=4, **AMP=bfloat16**, TF32 on, cudnn.benchmark).
+> **Mode:** Open portfolio. We are NOT locked to a single named method. We run
+> many genealogy-aware objects (kernels, residuals, contrastive variants,
+> temperatures, factorizations, alignments), let the leaderboard pick the
+> empirical winners, and let the **ablation experiment (`exp65_abl`)** decide
+> which **theoretical components** carry the gain. The paper writes itself
+> around the survivors.
 
-**Few-Shot Protocol (FINAL as of 2026-05-12):**
-- **Fractions:** `0.01` (1%), `0.05` (5%), `0.20` (20%) of the training split per class
-- **Encoder:** `unixcoder-base` ONLY (ModernBERT dropped — unixcoder consistently best or equal, reduces compute)
-- **Benchmarks:** `codet_m4` (headline), `aicd_t2` (stress test — 12-class model-family attribution)
-- **Droid T3/T4:** SKIPPED (per 2026-05-10 directive)
-- **Batch:** 256, seq=512
-- **Total per experiment file:** 6 runs (1 encoder × 2 benchmarks × 3 fractions)
+### 0.1 Frozen operational protocol (these are NOT design space)
+
+These are settings every new experiment file must obey — they ensure runs are
+comparable. They are NOT contributions and are NOT subject to change without
+explicit user approval.
+
+- **Encoder:** `unixcoder-base` only, `local_files_only=True` (ModernBERT dropped 2026-05-13).
+- **Benchmarks:** `codet_m4` (Author 6-class, **Macro-F1**) and `aicd_t2` (model-family 12-class, **Macro-F1**). Droid T3/T4 skipped per 2026-05-10 directive.
+- **Fractions:** `[0.01, 0.05, 0.20]` of the train split per class.
+- **`_load_aicd` STRICT:** `FileNotFoundError` if T2 dir missing. No HF fallback.
+- **AMP:** `torch.autocast(device_type='cuda', dtype=torch.bfloat16)`.
+- **HW knobs:** `bs=256`, `seq=512`, `num_workers=4`, `pin_memory=True`. `_hw(cfg)` auto-downscales for <40GB VRAM.
+- **AST features:** legacy-aligned 22-feature `extract_ast_features` (no tree-sitter dependency).
+- **Schedule:** Regime-adaptive (`adaptive_schedule(cfg)`): 1%→10ep, 5%→6ep, 20%→6ep; LR sqrt-scaled for bs=256; cosine + warmup. This is the **engineering fix** isolated in exp56, not a contribution.
+- **Always report `val_macro`, `test_macro`, `val_test_gap`.** Per repo-rules hook.
+- **Output schema:** every new exp dumps a single combined `{expNN_method}_results.json` with full `eval_pack` (per-class P/R/F1, per-language F1, per-source F1, confusion matrix, sibling_confusion_rate, cross_family_confusion_rate, val_history).
 
 > ⚠️ **DATA BUG (exp1–exp17 / baseline_01–04 / exp_n05–n16 original runs):**
-> Due to a `_load_aicd()` path bug, all AICD results from those experiments were
-> **trained on T1 (binary 2-class)** instead of T2 (12-class model-family).
-> **AICD "results" from those runs are INVALID and must not be quoted.**
-> Only CoDET-M4 results from those runs are reliable.
-> **Fix applied 2026-05-12:** `_load_aicd()` is now STRICT — raises `FileNotFoundError`
-> immediately if target task dir is missing; NO fallback to other tasks or HuggingFace.
+> `_load_aicd()` path bug → AICD results from those experiments were T1 binary
+> instead of T2 12-class. **Quote AICD results only from exp18+.** CoDET-M4
+> results from those experiments are still reliable.
 
-**Single sentence:**
+### 0.2 The contribution slate (open, not locked)
 
-> We are not just improving an AI-code detector. We are using CoDET-M4 authorship and AICD model-family attribution as public testbeds for one theory contribution: **model genealogy can be written as a target kernel, and aligning few-shot representations to that kernel gives a scale-aware inductive bias for LLM attribution.**
+We are aiming at an **oral-tier paper** with a **portfolio of genealogy-aware
+contributions**, evidenced by:
 
-The benchmark numbers are evidence. The contribution is the attribution principle.
+- **A theoretical claim** — genealogy structure on the LABEL space defines new
+  mathematical objects (target kernels, hierarchical losses, learnable distance
+  weights, heat diffusion on label graphs) that are undefined for flat-simplex
+  classification. Any of these can carry the headline if it wins empirically
+  AND survives ablation.
+- **An empirical claim** — those objects beat the published full-data encoder
+  baselines (UniXcoder 0.6633 on CoDET-M4) with a small fraction of training
+  data. **Current 20% SOTA: 0.7186 (+0.0553 vs paper)**, achieved by multiple
+  methods (SSL-RAS, GSCE, RASL, GFTS) that converge to the same band — see
+  tracker §0 "schedule was the dominant bottleneck".
+- **A regime claim** — performance is dominated by encoder pretraining at small
+  n and by the genealogy prior at large n; PTR (`exp61`) tests this directly.
+- **A falsifier line** — every new exp must commit to a falsifier metric we
+  log automatically (`sibling_confusion_rate`, learned hyperparam, etc.) so a
+  reviewer can verify the mechanism, not just the bottom-line number.
+- **A diagnostic ablation** — `exp65_abl` toggles components (CE / SSL / HTKA
+  / GSCE / SCR / combinations) on the same backbone+schedule to isolate which
+  loss object owns which fraction of the gain.
 
-**4 contributions (updated):**
-- **C1 (theory headline)** — **Hierarchical Target-Kernel Alignment (HTKA / Hier-NTK)**: define a genealogy-aware target kernel over attribution labels and align the encoder representation Gram matrix to it.
-- **C2 (empirical headline)** — With **5% of training data** on unixcoder-base, Hier-NTK reaches **0.6709 CoDET-M4 6-class Author Macro-F1**, exceeding paper UniXcoder's full-data 0.6633 by **+0.0076 with 1/20 the budget**.
-- **C3 (regime law)** — Below ~5K samples, encoder pretraining dominates; above ~5K samples, the genealogy target-kernel prior dominates. This phase transition is a claim to explain, not just a table entry.
-- **C4 (scope validation)** — AICD T2 model-family attribution is the secondary authorship-like stress test.
+> The headline name is NOT pre-decided. It will be whichever method dominates
+> the ablation while passing its falsifier.
 
-**Locked headline numbers (CoDET-M4 6-class Author IID Macro-F1, unixcoder-base):**
+### 0.3 Current leaderboard snapshot (CoDET-M4 Author 20%, Macro-F1)
 
-| Bench / Setup | Method | Score | Δ vs paper UniXcoder full (0.6633) |
-|:--|:--|:-:|:-:|
-| 5% training data | **🥇 FS-Hier-NTK** | **0.6709** | **+0.0076** |
-| 5% training data | 🥈 FS-HierTree | 0.6682 | +0.0049 |
-| 5% training data | 🥉 FS-NTKAlign | 0.6652 | +0.0019 |
-| 5% training data | 4 FS-ETF-Simplex | 0.6616 | −0.0017 |
-| 5% training data | 5 FS-CE-Baseline | 0.5725 | −0.0908 |
-| 1% training data | 🥇 FS-Baseline (unixcoder) | 0.5744 | (encoder-pretrain regime) |
+| Rank | Method | Score | Δ vs paper UniXcoder 0.6633 | Source |
+|:-:|:--|:-:|:-:|:--|
+| 🥇 | SSL-RAS    (exp56) | 0.7186 | +0.0553 | tracker 2026-05-14 |
+| 🥈 | GSCE       (exp57) | 0.7185 | +0.0552 | tracker 2026-05-14 |
+| 🥉 | RASL       (exp58) | 0.7181 | +0.0548 | tracker 2026-05-14 |
+| 4 | GFTS       (exp59) | 0.7177 | +0.0544 | tracker 2026-05-14 |
+| ref | SSL (exp42, old sched) | 0.6796 | +0.0163 | pre-RAS schedule |
+| ref | UniXcoder full | 0.6633 | 0.0000 | paper baseline |
+
+**The takeaway in the tracker:** all 4 methods land within 0.001 of each other
+at 20% CoDET-M4. This is a signal that the schedule + the genealogy prior in
+*aggregate* drives the gain, not any single loss object. The next round of
+experiments (exp60–65) is designed to isolate WHICH genealogy prior, with
+ablation `exp65_abl` providing the decomposition.
 
 ---
 
@@ -74,23 +102,35 @@ The repository was originally built targeting NeurIPS 2026 Oral. We reframed to 
 
 > **How should a few-shot attribution model use the known genealogy of LLM generators instead of treating every author label as unrelated?**
 
-## 2. Thesis (one sentence)
+## 2. Thesis — open formulation (2026-05-14 update)
 
-> **Few-shot AI-code attribution fails when it learns a flat simplex over generator labels; it improves when representation geometry is aligned to a genealogy-derived target kernel over authors/model families.**
+The flat-simplex baseline is wrong on a label space that has metric structure.
+Once we admit genealogy structure on labels, several new mathematical objects
+become available, none of which are reducible to standard losses:
 
-### 2.1 The new object
+| Object | Surface | New under genealogy |
+|:--|:--|:--|
+| **Target kernel `T_ij = κ(y_i, y_j)`** | Representation Gram | `L = 1 − cos(vec(ZZᵀ), vec(T))`  (HTKA / DGK) |
+| **Tree-tempered soft label** | Output distribution | `q_c = (1−ε)·1[c=y] + ε·exp(−α·d_tree)/Z` (GSCE) |
+| **Sibling-weighted per-sample CE** | Logit error | `L = E[w_d · CE]`  (SSL, TKL learns w) |
+| **Family-conditional temperature** | Softmax | `τ_c = exp(log τ₀ + β·s_c)` (GFTS) |
+| **Genealogy residual constraint** | AST embedding | `R = AST − μ_gene[y]` (GRA, RASL) |
+| **Heat-diffusion kernel** | Graph of labels | `K = exp(−tL)` (DGK) |
+| **Sibling confusion regularizer** | Soft predictions | `L = E[Σ_sib softmax]` (SCR) |
+| **Phase-transition curriculum** | Loss weight | `λ(n) = σ((n − n_c)/scale)` (PTR) |
 
-For a batch of examples with labels $y_i$, define a target genealogy kernel:
+None of these has a definition when labels are unstructured. This is the
+**novelty floor**: every new experiment must add to this table or sharpen an
+existing row. Reviewers cannot reduce any row to "X applied to Y" because
+the X is undefined without the tree.
 
-```
-T_ij = k_tree(y_i, y_j)
-```
+### 2.1 Headline object — kept as a candidate, not a commitment
 
-where `k_tree` is high for the same author, intermediate for related model families, and low for unrelated human/model branches. Given normalized embeddings `z_i`, the method aligns the representation Gram matrix to this target:
-
-```
-L_htka = 1 - cos(vec(ZZ^T), vec(T))
-```
+The repository was originally framed around HTKA. After RAS-schedule rollout
+and the exp56-59 results, the empirical SOTA is shared across SSL-RAS, GSCE,
+RASL, GFTS within 0.001 Macro-F1 on CoDET-M4 20%. We DO NOT commit to a
+single headline; the headline is decided by `exp65_abl` and the falsifier
+metrics, not by the order in which we implemented the methods.
 
 ### 2.2 Theory-grounded novelty bar — NOVELTY-FIRST PRINCIPLE
 
@@ -98,6 +138,11 @@ L_htka = 1 - cos(vec(ZZ^T), vec(T))
 > Every experiment must introduce something that **ONLY makes sense** in the context of
 > AI-code attribution with genealogy structure. If a reviewer can say "this is just X applied to Y",
 > the experiment is NOT novel enough.
+>
+> **Engineering knobs (schedule, LR, batch, AMP) are NOT contributions.** They
+> live in §0.1 (frozen protocol). If a method's gain disappears under matched
+> schedule, that method does not survive ablation. This is enforced by
+> `exp65_abl` running all toggles under the SAME RAS schedule.
 
 **Anti-patterns (DO NOT propose):**
 - SupCon, ArcFace, R-Drop, LoRA, SimCSE, Center Loss — anyone can think of these
