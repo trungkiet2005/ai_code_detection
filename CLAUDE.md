@@ -66,9 +66,17 @@ contributions**, evidenced by:
 - **A diagnostic ablation** — `exp65_abl` toggles components (CE / SSL / HTKA
   / GSCE / SCR / combinations) on the same backbone+schedule to isolate which
   loss object owns which fraction of the gain.
+- **Method diversity** — the proposal pool must span **≥ 10 method families**
+  (loss reshape, kernel alignment, contrastive, temperature, residual, causal,
+  OT, spectral, hyperbolic, retrieval, MoE, hypernet, KAN, SSM, energy,
+  distillation, IB, Bayesian). See §2.5 for the full diversity matrix.
+  Legacy `Exp_CodeDet` had 20 methods spanning 7+ families with a real 1.7-pt
+  spread; current RAS-track has 4 methods in 1 family with a 0.001-pt tie.
+  The paper that ships must look like a portfolio, not a hyperparameter sweep.
 
 > The headline name is NOT pre-decided. It will be whichever method dominates
-> the ablation while passing its falsifier.
+> the ablation while passing its falsifier — drawn from a **diverse** pool, not
+> a sweep of one equation surface.
 
 ### 0.3 Current leaderboard snapshot (CoDET-M4 Author 20%, Macro-F1)
 
@@ -143,6 +151,13 @@ metrics, not by the order in which we implemented the methods.
 > live in §0.1 (frozen protocol). If a method's gain disappears under matched
 > schedule, that method does not survive ablation. This is enforced by
 > `exp65_abl` running all toggles under the SAME RAS schedule.
+>
+> **Family-diversity rule (added 2026-05-14):** when proposing the next exp,
+> first check §2.5 family map. **Do NOT propose another variant of an
+> already-saturated family** (F1 loss-reshape has 3 active variants — enough;
+> F3 kernel alignment has 2 — enough). Pick a family marked ❌ or 🟡, or a
+> family not yet on the matrix. A paper with 20 methods in 7 families ranks
+> better than a paper with 4 methods in 1 family, even at identical SOTA.
 
 **Anti-patterns (DO NOT propose):**
 - SupCon, ArcFace, R-Drop, LoRA, SimCSE, Center Loss — anyone can think of these
@@ -247,6 +262,54 @@ metrics, not by the order in which we implemented the methods.
 ### 2.4 Novel Theorems (self-derived for EMNLP Oral)
 
 See detailed statements in §2.4 of the original CLAUDE.md version (theorems 1–3 on kernel alignment bound, phase transition, sibling confusion bound). These are self-derived and represent the Oral-tier contribution.
+
+### 2.5 Method-Diversity Matrix — DIVERSITY MANDATE (added 2026-05-14)
+
+> **Lesson from tracker analysis 2026-05-14:** legacy `Exp_CodeDet` had **20 methods spanning 7+ families**, with author-F1 spread of **1.7 points** (top: DeTeCtive 71.53 → bottom: CosineProto 67.80). Current `testing_chis` RAS-track (exp56-59) has **4 methods all in ONE family** (sibling-weighted CE variants on the same backbone) → spread of **0.001 points** — TIED to the point that loss choice doesn't matter.
+>
+> **A paper that submits 4 tied methods reads as one method.** The portfolio must look like legacy's: many families, real ranking, real ablation story. Diversify the proposal space, not just the equation surface.
+
+**Family map of what we have / lack:**
+
+| # | Family | Mechanism | Existing (active) | Status | Gap-fill target |
+|:-:|:--|:--|:--|:-:|:--|
+| F1 | Loss reshape — sibling-weighted CE | per-sample CE × `w_d(y, ŷ)` | SSL, TKL, SCR | ✅ saturated | — (already 3 variants) |
+| F2 | Loss reshape — soft labels | KL with tree-tempered target | GSCE | ✅ |  |
+| F3 | Kernel / Gram alignment | `cos(ZZᵀ, T)` or `‖ZZᵀ − T‖²` | HTKA, DGK | ✅ |  |
+| F4 | Contrastive / InfoNCE | tree-weighted positives/negatives | TPNL, GIBA, BGB | ✅ |  |
+| F5 | Temperature / output scaling | per-class `τ_c` from topology | GFTS | ✅ |  |
+| F6 | Residual / disentangle | AST − E[AST \| gene] | GRA, RASL, GFR | ✅ |  |
+| F7 | Curriculum / phase-transition | `λ(n) = σ((n−n_c)/scale)` | PTR, KAC | ✅ |  |
+| F8 | Causal / backdoor adjustment | `P(Y\|do(X)) = Σ_s P(Y\|X,S)P(S)` | CFT, CIE, HETE, RCE | ✅ |  |
+| F9 | Optimal transport | Wasserstein on label-tree ground cost | GOT, MMDG | ✅ |  |
+| F10 | Spectral / Laplacian | label-graph eigenvectors | SGE, DGK | ✅ |  |
+| F11 | Hyperbolic / non-Euclidean | Poincaré prototypes | HPA | ✅ |  |
+| F12 | Bayesian / uncertainty | PAC-Bayes, MC dropout | PAC-A, BUA | ✅ |  |
+| **F13** | **Retrieval-augmented** | RAG bank keyed by gene clusters | **(none active)** | ❌ MISSING | **exp66_retag** |
+| **F14** | **Mixture-of-Experts** | one expert / family, gene-gated | (legacy MoECode only) | ❌ MISSING | **exp67_gmoe** |
+| **F15** | **Hypernetwork** | weights generated from family ID | (legacy HyperCode only) | ❌ MISSING | **exp68_hyper** |
+| **F16** | **KAN / non-linear heads** | learnable per-feature splines | (legacy KANCode only) | ❌ MISSING | **exp69_kang** |
+| **F17** | **State-space backbones** | Mamba / S4 over code tokens | (legacy MambaCode only) | ❌ MISSING | **exp70_smamba** |
+| **F18** | **Energy / score-based** | `E(x) = ‖z − μ_y‖² + family term` | (legacy EnergyCode only) | ❌ MISSING | **exp71_genergy** |
+| **F19** | **Self-distillation** | family-teacher → author-student | (legacy SelfDistill only) | ❌ MISSING | **exp72_gdistill** |
+| **F20** | **Information bottleneck** | I(Z; Y) − β·I(Z; X) with genealogy-conditioned prior | GIBA partial; legacy IBCode | 🟡 | exp73_gib_full |
+
+**Diversity target before EMNLP submission:** **≥ 10 families with active runs**. Currently we have 12 families covered but 5 of them are LEGACY-only (architecture-driven gains that we never ported under the RAS schedule). The 7 ❌MISSING and 1 🟡PARTIAL families are the priority slots.
+
+**Future expNN slate (do NOT reuse IDs; suggestions, not commitments):**
+
+| ExpID | Method (proposed) | Family | New object only valid under genealogy | One-line claim |
+|:--|:--|:-:|:--|:--|
+| `exp66_retag` | **RetAG** Retrieval-Augmented Genealogy | F13 | Retrieval bank stratified by gene cluster; nearest-family + nearest-author two-step retrieval. | Few-shot attribution improves when the retrieval pool is GENEALOGY-STRATIFIED instead of flat. |
+| `exp67_gmoe`  | **GeneMoE** Genealogy Mixture-of-Experts | F14 | One expert per family; gating logits = `softmax(W · gene_embed(family_id))`. | Family routing converts a 6-way head into a 2-stage (family → author) decision. |
+| `exp68_hyper` | **GenHyper** Genealogy Hypernet | F15 | Classifier head weights `W_y = h(family_emb(y))` generated by a hypernet from family ID. | Weights are explicitly indexed by genealogy, not just sample features. |
+| `exp69_kang`  | **KanGene** KAN-Head with Family Splines | F16 | Per-family learnable spline activations in classifier head. | Non-linear separability between SIBLINGS, linear elsewhere. |
+| `exp70_smamba`| **SMamba-Gene** State-Space + Family Conditioning | F17 | Mamba SSM with family-conditioned initial state `h₀ = E_fam(y_anchor)`. | Sequence-level state initialised from genealogy, not zero. |
+| `exp71_genergy` | **GenEnergy** Energy-Based with Family Anchors | F18 | `E(x, y) = ‖z(x) − μ_y‖² + λ·‖μ_y − μ_fam(y)‖²` | Author energy includes family-coherence penalty (anchor regularisation). |
+| `exp72_gdistill` | **GeneDistill** Self-Distillation Across Granularity | F19 | Teacher (family head) → student (author head); soft labels = `softmax(family_logits)` indexed at family-of-author. | Family knowledge regularises author-level training. |
+| `exp73_gib_full` | **GIB-α** Genealogy-Conditioned Bottleneck (full) | F20 | `min I(Z; X) − β·I(Z; Y) + γ·I(Z; family|author)` | Strip family info from Z; keep author info only. |
+
+**Rule of thumb:** Each new exp should plant a flag in a FAMILY not in the SAME equation surface. If a reviewer can write "this is family F1 variant N+1", do not propose it — pick a family with ❌ or 🟡 instead.
 
 ---
 
