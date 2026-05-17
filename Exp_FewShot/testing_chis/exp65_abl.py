@@ -1,3 +1,4 @@
+# exp65_abl — Component Ablation under unified loss
 # =============================================================================
 # Theory-Track exp -- ABL (Component Ablation under unified loss)
 #

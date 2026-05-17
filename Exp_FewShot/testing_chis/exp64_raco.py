@@ -1,43 +1,49 @@
+# exp64_raco — Regime-Adaptive Contrastive (RACO)
 # =============================================================================
-# Theory-Track exp -- SRCBDOOR (Source-Stratified Backdoor Adjustment)
+# Theory-Track exp -- RACO (Regime-Adaptive Contrastive)
 #
-# EXPLOITS       : S8 (source domain cf/lc/gh is observed AND confounding).
-#                  CoDET-M4 ships source labels but standard detectors marginalise
-#                  them away.  Legacy Exp18 documents a catastrophic OOD-gh gap
-#                  (Macro-F1 28.34 vs 79.63 on IID -- a 51-pt collapse on the
-#                  GitHub split).  Source is a textbook confound for code style.
-# NAME           : SRCBDOOR  (Source-Stratified Backdoor Adjustment)
-# ONE-LINE CLAIM : Conditioning on source domain S and marginalising via the
-#                  empirical P(S) yields a causal estimate P(Y | do(X)),
-#                  decoupling author attribution from platform style.
-# EQUATION       : Standard CE classifier:  P(Y | X)
-#                  Backdoor adjusted:        P(Y | do(X)) = sum_s P(Y | X, S=s) * P(S=s)
-#                  Implementation:           ONE shared trunk; THREE source-specific
-#                                            classifier heads (cf, lc, gh).
-#                                            Train: use ground-truth S to pick head.
-#                                            Eval:  average head logits with weights
-#                                                   = empirical P(S=s) in training.
-# WHY S8-SPECIFIC: Source labels are an OBSERVED context variable for CoDET-M4
-#                  ({codeforces, leetcode, github}).  Backdoor adjustment is
-#                  defined only when the confounder is observed.  This object
-#                  is impossible for AICD-T2 (no source field) -- the model
-#                  degenerates gracefully to a single shared head there, and
-#                  we log that as part of the falsifier.
-# WHY HIGH-IMPACT: Cross-source gap is the largest documented source of error
-#                  in legacy Exp18 (Macro-F1 79.63 IID -> 28.34 OOD-gh).
-#                  Even a modest IID improvement is plausible if the backdoor
-#                  adjustment regularises out platform-style confounding.
-# FALSIFIER      : If per-source IID macro-F1 collapses to the marginal (i.e.,
-#                  the three heads predict identically), the model has not
-#                  used the source signal.  We log per_source.macro_f1 in
-#                  eval_pack and the test-time average of head divergence.
-# REPORTS        : Full eval pack; per_source breakdown is the key reading.
+# ROLE           : TKL (exp63) showed sibling_weight collapses to ~0 at 20% data
+#                  → genealogy prior value decays as n grows.  PTR (exp61) showed
+#                  the schedule lambda(n) = sigmoid((n - n_c)/scale) helps low-n.
+#                  RACO combines BOTH into a single learnable gate over a
+#                  tree-weighted contrastive head: low-n  --> contrastive
+#                  dominates (structure helps);  high-n --> CE dominates (encoder
+#                  pretraining sufficient).  The phase transition is LEARNED.
+# NAME           : RACO  (Regime-Adaptive Contrastive)
+# ARXIV_ID       : differs from LASCL (arXiv:2402.00232) by phase-transition gate;
+#                  differs from PTR (exp61) by contrastive (not loss-reshape).
+# ONE-LINE CLAIM : Few-shot LLM attribution benefits from a tree-weighted
+#                  contrastive head whose mixing weight against CE is itself
+#                  learned, exposing the regime-dependence of genealogy structure.
+# EQUATION       : lambda = sigmoid(lambda_logit), alpha = softplus(alpha_logit)
+#                  L_supcon_tree(z_i) = -log [ sum_{j: y_j=y_i, j!=i} exp(s_ij/tau)
+#                                                * w_pos(d_tree(y_i, y_j))
+#                                             /
+#                                              sum_{k!=i} exp(s_ik/tau)
+#                                                * w_neg(d_tree(y_i, y_k)) ]
+#                  w_pos(d) = exp(-alpha * d)  (sibling weighted higher)
+#                  w_neg(d) = 1 + beta * exp(-alpha * d)  (sibling negatives boosted)
+#                  Total: L = (1 - lambda) * CE  +  lambda * L_supcon_tree
+# PROPERTY       : When lambda --> 0, recovers pure CE.  When alpha --> 0,
+#                  recovers vanilla SupCon (LASCL boundary).  Both extremes are
+#                  reachable, so the model can falsify the contribution of each.
+# WHY NOT BEFORE : Existing tree-aware contrastive (LASCL, HCAL) fix the loss
+#                  mixing weight; existing PTR fixes its own lambda schedule by
+#                  hand.  RACO exposes both as free parameters; the learned
+#                  value AT EACH FRACTION is the empirical signature of phase
+#                  transition on label structure.
+# FALSIFIER      : If learned lambda is monotone-decreasing in n AND alpha is
+#                  monotone-increasing in n, this is direct evidence for
+#                  phase-transitioned genealogy prior.  If lambda saturates at
+#                  0 or 1 across all fractions, RACO is not adding anything
+#                  over CE / SupCon.
+# REPORTS        : Full eval pack + learned (lambda, alpha) in JSON.
 # =============================================================================
 from __future__ import annotations
 
 KAGGLE_MODELS = "/kaggle/input/datasets/chiboiz/ai-detection-encoders/models"
 
-import os, sys, time, json, random, subprocess, importlib.util, warnings, glob
+import os, sys, time, json, random, subprocess, importlib.util, warnings, glob, math
 from dataclasses import dataclass, field
 from typing import List, Dict
 
@@ -64,17 +70,10 @@ from torch.cuda.amp import GradScaler
 warnings.filterwarnings("ignore")
 import logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s", stream=sys.stdout)
-logger = logging.getLogger("exp73_srcbdoor")
+logger = logging.getLogger("exp64_raco")
 
 PAPER_BASELINE = 0.6633
 
-# Source vocab for CoDET-M4
-SRC_VOCAB = {"cf": 0, "lc": 1, "gh": 2}
-SRC_UNK = 0  # fallback to cf if unknown
-
-# =============================================================================
-# Genealogy
-# =============================================================================
 GENE_ADJ_CODET = {0: [], 1: [3], 2: [], 3: [1], 4: [], 5: []}
 GENE_ADJ_AICD = {i: [(i // 3) * 3 + j for j in range(3) if (i // 3) * 3 + j != i] for i in range(12)}
 
@@ -163,57 +162,87 @@ def extract_ast_features(code: str, max_len: int = 64) -> List[float]:
 
 
 # =============================================================================
-# Backdoor-adjusted model
+# Model with learnable lambda (regime gate) + alpha (tree-weight sharpness)
 # =============================================================================
 
-class SrcBdoorModel(nn.Module):
-    """Shared trunk + per-source classifier heads.
+def _inv_softplus(y):
+    return math.log(math.expm1(y))
 
-    Forward modes:
-      train:  use the SAMPLE'S source S to route to head h_S
-      eval:   average over heads weighted by empirical P(S=s) -- the backdoor
-              adjustment P(Y | do(X)).
-    """
-    def __init__(self, enc_name, n_cls, n_sources, ast_dim=64):
+def _inv_sigmoid(p):
+    return math.log(p / (1.0 - p))
+
+
+class RACOModel(nn.Module):
+    def __init__(self, enc_name, n_cls, ast_dim=64, proj_dim=128):
         super().__init__()
         self.encoder = AutoModel.from_pretrained(
             os.path.join(KAGGLE_MODELS, enc_name), local_files_only=True
         )
         hidden = self.encoder.config.hidden_size
-        self.n_sources = n_sources
         self.ast_encoder = nn.Sequential(
             nn.Linear(64, 128), nn.GELU(), nn.Linear(128, ast_dim)
         )
-        self.trunk = nn.Sequential(
+        self.proj = nn.Sequential(
             nn.Linear(hidden + ast_dim, 256), nn.GELU(), nn.Dropout(0.1)
         )
-        # one classifier head per source
-        self.heads = nn.ModuleList([nn.Linear(256, n_cls) for _ in range(n_sources)])
-        # empirical P(S=s) -- set after data load
-        self.register_buffer("source_marginal", torch.ones(n_sources) / n_sources)
+        self.clf = nn.Linear(256, n_cls)
+        # Contrastive head: maps fused 256 -> proj_dim, L2-normalised
+        self.contrast_head = nn.Sequential(
+            nn.Linear(256, 256), nn.GELU(), nn.Linear(256, proj_dim)
+        )
 
-    def trunk_feat(self, ids, mask, ast_feat):
+        # Learnable regime gate lambda in (0, 1); init at 0.5 -> equal mix
+        self.lambda_logit = nn.Parameter(torch.tensor(_inv_sigmoid(0.5)))
+        # Learnable tree-weight sharpness alpha > 0; init at 1.0
+        self.alpha_logit = nn.Parameter(torch.tensor(_inv_softplus(1.0)))
+        # Fixed contrastive temperature
+        self.tau = 0.1
+
+    def get_gates(self):
+        return torch.sigmoid(self.lambda_logit), F.softplus(self.alpha_logit)
+
+    def forward(self, ids, mask, ast_feat):
         out = self.encoder(input_ids=ids, attention_mask=mask)
-        sem = (out.last_hidden_state * mask.unsqueeze(-1)).sum(1) / mask.sum(1, keepdim=True).clamp(min=1)
+        sem_emb = (out.last_hidden_state * mask.unsqueeze(-1)).sum(1) / mask.sum(1, keepdim=True).clamp(min=1)
         ast_emb = self.ast_encoder(ast_feat)
-        return self.trunk(torch.cat([sem, ast_emb], dim=-1))
+        fused = torch.cat([sem_emb, ast_emb], dim=-1)
+        h = self.proj(fused)
+        z = F.normalize(self.contrast_head(h), dim=-1)
+        return self.clf(h), z
 
-    def forward(self, ids, mask, ast_feat, source_id=None):
-        feat = self.trunk_feat(ids, mask, ast_feat)
-        if source_id is None:
-            # Backdoor-adjusted: sum_s P(S=s) * softmax(head_s(feat))
-            logits_all = torch.stack([h(feat) for h in self.heads], dim=1)  # (B, n_src, n_cls)
-            probs = F.softmax(logits_all, dim=-1)
-            w = self.source_marginal.view(1, -1, 1)
-            mix = (w * probs).sum(dim=1).clamp_min(1e-8)                    # (B, n_cls)
-            # Return log to allow argmax / KL downstream consistently
-            return torch.log(mix), feat
-        else:
-            # Training-time: gather the head for each sample
-            logits_all = torch.stack([h(feat) for h in self.heads], dim=1)  # (B, n_src, n_cls)
-            idx = source_id.view(-1, 1, 1).expand(-1, 1, logits_all.size(-1))
-            logits = logits_all.gather(1, idx).squeeze(1)                   # (B, n_cls)
-            return logits, feat
+
+def supcon_tree_loss(z, labels, dist_mat, alpha, tau):
+    """Tree-weighted SupCon.
+
+    For anchor i, positives are samples with same label; the contribution
+    of each (i, j) pair (positive OR negative) is weighted by exp(-alpha *
+    d_tree(y_i, y_j)) so siblings are pulled closer than cross-family.
+
+    L_i = -log( sum_{j: y_j = y_i, j != i} w_ij * exp(s_ij/tau)  /
+                sum_{k != i}             w_ik * exp(s_ik/tau) )
+    """
+    B = z.size(0)
+    if B < 2:
+        return z.sum() * 0.0  # grad-preserving zero
+    sim = (z @ z.t()) / tau                                     # (B, B)
+    # numerical stability
+    sim = sim - sim.max(dim=-1, keepdim=True).values.detach()
+    # tree weight per pair: weight by d_tree(y_i, y_j); diagonal masked out
+    dij = dist_mat[labels][:, labels]                           # (B, B), distances
+    w = torch.exp(-alpha * dij)                                 # (B, B)
+    eye = torch.eye(B, device=z.device, dtype=torch.bool)
+    w = w.masked_fill(eye, 0.0)
+    exp_sim = torch.exp(sim) * w                                # (B, B)
+    denom = exp_sim.sum(dim=-1).clamp(min=1e-12)                # (B,)
+    pos_mask = (labels.unsqueeze(0) == labels.unsqueeze(1)).float()
+    pos_mask = pos_mask.masked_fill(eye, 0.0)
+    num = (exp_sim * pos_mask).sum(dim=-1).clamp(min=1e-12)     # (B,)
+    # only anchors with at least one positive contribute
+    n_pos = pos_mask.sum(dim=-1)
+    has_pos = (n_pos > 0).float()
+    li = -(torch.log(num) - torch.log(denom)) * has_pos
+    n = has_pos.sum().clamp(min=1.0)
+    return li.sum() / n
 
 
 # =============================================================================
@@ -231,7 +260,6 @@ class Cfg:
     enc: str = "unixcoder-base"
     frac: float = 0.20
     n_cls: int = 6
-    n_sources: int = 3
     seed: int = 42
     bs: int = 256
     seq: int = 512
@@ -239,6 +267,7 @@ class Cfg:
     lr_enc: float = 2e-5
     lr_proj: float = 1e-4
     lr_head: float = 1e-4
+    lr_gates: float = 1e-2
     warmup: float = 0.1
     wd: float = 0.01
     device: str = "cuda"
@@ -282,11 +311,6 @@ def _vocab(train):
     names = {str(r.get("model", "") or "").strip() for r in train
              if not _is_human(r.get("target", "")) and r.get("model", "")}
     return {n: i + 1 for i, n in enumerate(sorted(names))}
-
-
-def _src_to_id(s):
-    s = str(s or "").strip().lower()
-    return SRC_VOCAB.get(s, SRC_UNK)
 
 
 def _conv_codet(split, task, vocab):
@@ -373,7 +397,8 @@ class FSDS(TD):
             self.data = self.data.select(keep_idx)
             logger.info(f"[FSDS] Sampled {len(self.data)} samples ({frac*100:.0f}%)")
 
-    def __len__(self): return len(self.data)
+    def __len__(self):
+        return len(self.data)
 
     def __getitem__(self, i):
         r = self.data[i]
@@ -387,24 +412,18 @@ class FSDS(TD):
             "label": r["label"],
             "language": r.get("language", "") or "",
             "source": r.get("source", "") or "",
-            "source_id": _src_to_id(r.get("source", "")),
         }
 
 
-# =============================================================================
-# Eval pack
-# =============================================================================
-
 @torch.no_grad()
 def eval_pack(model, loader, cfg, sib_mask_np):
-    """Eval-time predictions use backdoor-adjusted mixture (source_id=None)."""
     model.eval()
     preds, labels, langs, sources = [], [], [], []
     for b in tqdm(loader, desc="Eval"):
         ids = b["ids"].to(cfg.device); mask = b["mask"].to(cfg.device)
         ast_feat = b["ast_feat"].to(cfg.device); labs = b["label"]
-        log_probs, _ = model(ids, mask, ast_feat, source_id=None)
-        preds.extend(log_probs.argmax(dim=-1).cpu().tolist())
+        logits, _ = model(ids, mask, ast_feat)
+        preds.extend(logits.argmax(dim=-1).cpu().tolist())
         labels.extend(labs.tolist() if torch.is_tensor(labs) else list(labs))
         lang_batch = b.get("language", [""] * len(labs))
         src_batch = b.get("source", [""] * len(labs))
@@ -434,7 +453,7 @@ def eval_pack(model, loader, cfg, sib_mask_np):
     cross_fam = int(sum(cm[i, j] for i in range(n_cls) for j in range(n_cls)
                         if i != j and D[i, j] >= 3.0))
     cross_rate = cross_fam / max(off_diag_total, 1)
-    per_lang, per_src = {}, {}
+    per_lang = {}
     if any(l for l in langs):
         langs_arr = np.array(langs)
         for L in sorted(set(langs)):
@@ -447,6 +466,7 @@ def eval_pack(model, loader, cfg, sib_mask_np):
                 "weighted_f1": float(f1_score(labels[sel], preds[sel], average="weighted", zero_division=0)),
                 "accuracy": float(accuracy_score(labels[sel], preds[sel])),
             }
+    per_src = {}
     if any(s for s in sources):
         src_arr = np.array(sources)
         for S in sorted(set(sources)):
@@ -469,40 +489,33 @@ def eval_pack(model, loader, cfg, sib_mask_np):
     }
 
 
-def train_epoch(model, loader, opt, sch, scaler, cfg):
+def train_epoch(model, loader, opt, sch, scaler, cfg, dist_mat):
     model.train()
-    tot = 0.0
+    tot, ce_sum, sc_sum = 0.0, 0.0, 0.0
     for b in tqdm(loader, desc="Train"):
         ids = b["ids"].to(cfg.device); mask = b["mask"].to(cfg.device)
         ast_feat = b["ast_feat"].to(cfg.device); labs = b["label"].to(cfg.device)
-        src_id = b["source_id"].to(cfg.device) if torch.is_tensor(b["source_id"]) \
-                 else torch.tensor(b["source_id"], dtype=torch.long, device=cfg.device)
         with torch.autocast(device_type="cuda", dtype=torch.bfloat16,
                             enabled=(cfg.device == "cuda")):
-            logits, _ = model(ids, mask, ast_feat, source_id=src_id)
-            loss = F.cross_entropy(logits, labs)
+            logits, z = model(ids, mask, ast_feat)
+            lam, alpha = model.get_gates()
+            loss_ce = F.cross_entropy(logits, labs)
+            loss_sc = supcon_tree_loss(z, labs, dist_mat, alpha, model.tau)
+            loss = (1.0 - lam) * loss_ce + lam * loss_sc
         scaler.scale(loss).backward()
         scaler.unscale_(opt)
         torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
         scaler.step(opt); scaler.update(); opt.zero_grad(); sch.step()
-        tot += loss.item()
-    return tot / len(loader)
-
-
-def estimate_source_marginal(data, n_sources=3):
-    """Empirical P(S=s) from training set."""
-    counts = np.zeros(n_sources, dtype=np.float64)
-    for s in data["source"]:
-        counts[_src_to_id(s)] += 1.0
-    if counts.sum() == 0:
-        return np.ones(n_sources) / n_sources
-    return counts / counts.sum()
+        tot += loss.item(); ce_sum += loss_ce.item(); sc_sum += loss_sc.item()
+    n = len(loader)
+    return tot / n, ce_sum / n, sc_sum / n
 
 
 def run_exp(cfg, tag):
     set_seed(cfg.seed)
     cfg = _hw(cfg); cfg = adaptive_schedule(cfg)
     cfg.gene_adj = GENE_ADJ_CODET if cfg.benchmark == "codet_m4" else GENE_ADJ_AICD
+    dist_mat = build_distance_matrix(cfg.n_cls, cfg.gene_adj).to(cfg.device)
     sib_mask_np = build_sibling_mask(cfg.n_cls, cfg.gene_adj).numpy()
 
     if cfg.benchmark == "codet_m4":
@@ -522,15 +535,11 @@ def run_exp(cfg, tag):
     vl_ds = FSDS(vl_data, tok, cfg.seq, frac=1.0, seed=cfg.seed + 1)
     ts_ds = FSDS(ts_data, tok, cfg.seq, frac=1.0, seed=cfg.seed + 2)
 
-    # Empirical P(S) from training set (after subsampling)
-    src_marginal = estimate_source_marginal(tr_ds.data, cfg.n_sources)
-    logger.info(f"[src] empirical P(S) = {src_marginal.tolist()}")
-
     n_steps_per_ep = max(1, len(tr_ds) // cfg.bs)
     total_steps = n_steps_per_ep * cfg.epochs
     logger.info(
         f"[sched] frac={cfg.frac} epochs={cfg.epochs} lr_enc={cfg.lr_enc} "
-        f"warmup={cfg.warmup} n_sources={cfg.n_sources} total_steps={total_steps}"
+        f"warmup={cfg.warmup} total_steps={total_steps}"
     )
 
     loader_cfg = dict(batch_size=cfg.bs, num_workers=4, pin_memory=True)
@@ -538,29 +547,29 @@ def run_exp(cfg, tag):
     vl_dl = DataLoader(vl_ds, shuffle=False, **loader_cfg)
     ts_dl = DataLoader(ts_ds, shuffle=False, **loader_cfg)
 
-    model = SrcBdoorModel(cfg.enc, cfg.n_cls, cfg.n_sources).to(cfg.device)
-    model.source_marginal = torch.tensor(src_marginal, dtype=torch.float32, device=cfg.device)
+    model = RACOModel(cfg.enc, cfg.n_cls).to(cfg.device)
+    gate_names = {"lambda_logit", "alpha_logit"}
+    enc_param_ids = {id(p) for p in model.encoder.parameters()}
+    gate_params = [p for n, p in model.named_parameters() if n in gate_names]
+    head_params = [p for n, p in model.named_parameters()
+                   if n not in gate_names and id(p) not in enc_param_ids]
     opt = torch.optim.AdamW([
-        {"params": model.encoder.parameters(), "lr": cfg.lr_enc},
-        {"params": model.ast_encoder.parameters(), "lr": cfg.lr_proj},
-        {"params": model.trunk.parameters(), "lr": cfg.lr_proj},
-        {"params": model.heads.parameters(), "lr": cfg.lr_head},
+        {"params": list(model.encoder.parameters()), "lr": cfg.lr_enc},
+        {"params": head_params, "lr": cfg.lr_head},
+        {"params": gate_params, "lr": cfg.lr_gates, "weight_decay": 0.0},
     ], weight_decay=cfg.wd)
     sch = get_cosine_schedule_with_warmup(opt, max(1, int(total_steps * cfg.warmup)), total_steps)
     scaler = GradScaler()
 
     best_val, best_state, val_hist = 0.0, None, []
     for epoch in range(cfg.epochs):
-        loss = train_epoch(model, tr_dl, opt, sch, scaler, cfg)
+        loss, ce, sc = train_epoch(model, tr_dl, opt, sch, scaler, cfg, dist_mat)
         val_met = eval_pack(model, vl_dl, cfg, sib_mask_np)
         v = val_met["overall"]["macro_f1"]; val_hist.append(v)
-        per_src_str = " ".join(
-            f"{s}={d['macro_f1']:.3f}(n={d['n']})"
-            for s, d in val_met["per_source"].items()
-        )
+        lam_now, alpha_now = model.get_gates()
         logger.info(
-            f"[epoch {epoch+1}] loss={loss:.4f} val={v:.4f} "
-            f"per_src=[{per_src_str}] sib_conf={val_met['sibling_confusion_rate']:.4f}"
+            f"[epoch {epoch+1}] loss={loss:.4f} ce={ce:.4f} sc={sc:.4f} "
+            f"val={v:.4f} lambda={lam_now.item():.3f} alpha={alpha_now.item():.3f}"
         )
         if v > best_val:
             best_val = v
@@ -570,14 +579,17 @@ def run_exp(cfg, tag):
     ts_met = eval_pack(model, ts_dl, cfg, sib_mask_np)
     test_macro = ts_met["overall"]["macro_f1"]
     val_test_gap = best_val - test_macro
+    lam_f, alpha_f = model.get_gates()
+    lam_f, alpha_f = float(lam_f.item()), float(alpha_f.item())
     logger.info(
         f"[final] val={best_val:.4f} test={test_macro:.4f} gap={val_test_gap:+.4f} "
-        f"sib_conf={ts_met['sibling_confusion_rate']:.4f}"
+        f"lambda={lam_f:.3f} alpha={alpha_f:.3f}"
     )
     return {
-        "tag": tag, "method": "SRCBDOOR", "enc": cfg.enc, "bench": cfg.benchmark,
+        "tag": tag, "method": "RACO", "enc": cfg.enc, "bench": cfg.benchmark,
         "frac": cfg.frac, "epochs": cfg.epochs, "lr_enc": cfg.lr_enc,
-        "n_sources": cfg.n_sources, "source_marginal": src_marginal.tolist(),
+        "n_train": len(tr_ds),
+        "learned_gates": {"lambda": lam_f, "alpha": alpha_f, "tau": model.tau},
         "val_macro": best_val, "macro": test_macro,
         "weighted": ts_met["overall"]["weighted_f1"], "acc": ts_met["overall"]["accuracy"],
         "val_test_gap": val_test_gap, "dpaper": test_macro - PAPER_BASELINE,
@@ -595,17 +607,18 @@ def main():
         for bench, task, n_cls in benchmarks:
             for frac in fracs:
                 cfg = Cfg(benchmark=bench, task=task, enc=enc, frac=frac, n_cls=n_cls)
-                tag = f"exp73_srcbdoor_{enc}_{bench}_f{frac}"
+                tag = f"exp64_raco_{enc}_{bench}_f{frac}"
                 logger.info(f"=== {tag} ===")
                 t0 = time.time()
                 try:
                     res = run_exp(cfg, tag)
                     res["wall"] = round(time.time() - t0, 1)
                     results.append(res)
+                    lg = res["learned_gates"]
                     logger.info(
                         f"[{tag}] test={res['macro']:.4f} ({res['dpaper']:+.4f}) "
                         f"gap={res['val_test_gap']:+.4f} "
-                        f"sib_conf={res['test_metrics']['sibling_confusion_rate']:.4f} "
+                        f"lambda={lg['lambda']:.3f} alpha={lg['alpha']:.3f} "
                         f"time={res['wall']:.0f}s"
                     )
                 except Exception as e:
@@ -619,22 +632,21 @@ def main():
         _here = os.getcwd()
     out_dir = os.path.join(_here, "results")
     os.makedirs(out_dir, exist_ok=True)
-    with open(os.path.join(out_dir, "exp73_srcbdoor_results.json"), "w") as f:
+    with open(os.path.join(out_dir, "exp64_raco_results.json"), "w") as f:
         json.dump(results, f, indent=2)
 
     print("\n" + "=" * 140)
     print(f"{'Encoder':<22} {'Benchmark':<12} {'Frac':>6} {'Ep':>4} "
           f"{'Val-F1':>8} {'Test-F1':>8} {'Gap':>8} {'dPaper':>9} "
-          f"{'PSrc(cf,lc,gh)':>22} {'Wall':>8}")
+          f"{'lambda':>7} {'alpha':>7} {'Wall':>8}")
     print("-" * 140)
     for r in results:
-        ps = r.get("source_marginal", [0, 0, 0])
+        lg = r["learned_gates"]
         print(
             f"{r['enc']:<22} {r['bench']:<12} {r['frac']:>6.0%} {r['epochs']:>4d} "
             f"{r['val_macro']:>8.4f} {r['macro']:>8.4f} {r['val_test_gap']:>+8.4f} "
             f"{r['dpaper']:>+9.4f} "
-            f"({ps[0]:.2f},{ps[1]:.2f},{ps[2]:.2f})".rjust(22)
-            + f" {r['wall']:>8.0f}s"
+            f"{lg['lambda']:>7.3f} {lg['alpha']:>7.3f} {r['wall']:>8.0f}s"
         )
     print("=" * 140)
 

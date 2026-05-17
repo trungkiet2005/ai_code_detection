@@ -1,3 +1,4 @@
+# exp66_dtke — Dual-Tree Kernel Embedding (AST × Genealogy)
 # =============================================================================
 # Theory-Track exp -- DTKE (Dual-Tree Kernel Embedding)
 #
