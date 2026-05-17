@@ -154,8 +154,11 @@ Diversity finds the hero and populates §4 baselines. Paper is single-method (§
 | `exp70_decofp` | **DECOFP** Decoding-fingerprint regressor + conditional attribution | S2 | new |
 | `exp71_geneprint` | **GENEPRINT** ⭐ HERO: tri-channel disentangled `z=[z_T;z_D;z_M]` w/ HSIC orthogonality; channel-specific losses (topology / decoding / motif) | S1+S2+S5 | synthesises all Round-2 insights |
 | `exp72_tieh` | **TIEH** Tree-Isometric Hyperbolic Embedding in Poincare ball; learnable prototypes constrained `d_H(p_i,p_j) ≈ d_tree(i,j)` | S1 (geometric) | extends Nickel & Kiela 2017 |
+| `exp73_tapa` | **TAPA** Tree-Anchored Prototypical Attribution: EMA prototypes + multi-layer pooling + tree-iso constraint | S1+S9 | Snell 2017 + LIGHT arXiv:2503.00958 |
+| `exp74_setfit_tw` | **SETFIT-TW** SetFit two-stage: SupCon w/ tree-weighted negatives → frozen-encoder linear head | S1+S9 | SetFit arXiv:2209.11055 |
+| `exp75_racl` | **RACL** Retrieval-Augmented Code Logit: learned mix `β · param + (1−β) · kNN`, kNN with tree-aware weighting | S1+S9 | RAFC arXiv:2406.11148 + kNN-LM |
 
-**Killed (chưa run, generic ML):** `exp64_dgk` (kernel-alignment trùng HTKA), `exp73_srcbdoor` (trùng CIE/CFT/HETE), `exp75_humclust` (chỉ K-means trên human).
+**Killed (chưa run, generic ML):** `exp64_dgk` (kernel-alignment trùng HTKA), `exp73_srcbdoor` (trùng CIE/CFT/HETE), `exp75_humclust` (chỉ K-means trên human). **GENEPRINT exp71 / TIEH exp72: falsifier failed (run completed), kept as analysis evidence in §5.**
 
 **Hero-locking gate:** chỉ chốt khi user nói **"chốt"**. Trước đó: mọi method = candidate.
 
