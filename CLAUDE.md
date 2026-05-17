@@ -152,6 +152,8 @@ Diversity finds the hero and populates §4 baselines. Paper is single-method (§
 | `exp68_stylo` | **STYLO** Stylometry feature fusion (30+ features) ⊕ unixcoder | S5 | arXiv:2506.17323 |
 | `exp69_perpsig` | **PERPSIG** Multi-LM likelihood signature classifier | S6 | new |
 | `exp70_decofp` | **DECOFP** Decoding-fingerprint regressor + conditional attribution | S2 | new |
+| `exp71_geneprint` | **GENEPRINT** ⭐ HERO: tri-channel disentangled `z=[z_T;z_D;z_M]` w/ HSIC orthogonality; channel-specific losses (topology / decoding / motif) | S1+S2+S5 | synthesises all Round-2 insights |
+| `exp72_tieh` | **TIEH** Tree-Isometric Hyperbolic Embedding in Poincare ball; learnable prototypes constrained `d_H(p_i,p_j) ≈ d_tree(i,j)` | S1 (geometric) | extends Nickel & Kiela 2017 |
 
 **Killed (chưa run, generic ML):** `exp64_dgk` (kernel-alignment trùng HTKA), `exp73_srcbdoor` (trùng CIE/CFT/HETE), `exp75_humclust` (chỉ K-means trên human).
 

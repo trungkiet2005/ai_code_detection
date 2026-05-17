@@ -141,6 +141,83 @@ Self-contained experiments for Hier-NTK ablation + published baselines.
 - **GFTS β trained negative (−0.55 to −0.89) on all runs** → topology-driven temperature DOES get exploited when there is heterogeneity in sibling density. On CoDET-M4 (β = −0.595) classes 1, 3 (GPT/CodeLlama siblings) end up with τ ≈ 0.21 vs τ ≈ 0.38 for isolated classes. On AICD-T2 every class has identical sibling-density (= 2/2 = 1.0), so τ becomes class-uniform → GFTS reduces to global temperature scaling, partially falsifying the topology link for the 4 × 3 setup.
 - **Val-test gap stays small** (|gap| ≤ 0.014 across all 24 rows) — no overfitting from longer schedule.
 
+---
+
+## 🚀 Round 2 — New mathematical objects, family expansion (exp60–exp70, 2026-05-17)
+
+> **Motivation:** Round 1 RAS-schedule saturated at ~0.718 CoDET-M4 @20% across 4 loss objects of the same family
+> (sibling-weighted CE / soft-label). Round 2 introduces (a) NEW mathematical objects from DIFFERENT families
+> (kernel-alignment, pair-margin, stylometry-fusion, virtual-LM, decoding-fingerprint, contrastive) exploiting
+> different S-facts, and (b) lit-search-grounded baselines from arXiv 2025–2026, to break the saturation band
+> and attack the harder AICD-T2 benchmark. Same few-shot protocol (1% / 5% / 20% per-class) throughout.
+
+| File | Method | Object | S-fact | Reference |
+|:--|:--|:--|:--|:--|
+| `exp60_htka.py` | HTKA | Hier-Tree Kernel Alignment | S1 | self |
+| `exp61_ptr.py` | PTR | Phase-Transition Regularised loss | S9 | self |
+| `exp62_scr.py` | SCR | Sibling-Contrastive Regulariser | S1 | self |
+| `exp63_tkl.py` | TKL | learnable distance-bucket weights | S1+S9 | LASCL (arXiv:2402.00232) |
+| `exp64_raco.py` | RACO | learned λ-gate × tree-weighted SupCon | S9+structure | LASCL/HCAL |
+| `exp66_dtke.py` | DTKE | Dual-Tree Kernel `K_ast × K_gene` | S1 | new |
+| `exp67_tourn.py` | TOURN | Tree-weighted pair-margin (tournament) | S9 | arXiv:2501.08165 |
+| `exp68_stylo.py` | STYLO | 50-dim stylometry ⊕ unixcoder | S5 | arXiv:2506.17323 |
+| `exp69_perpsig.py` | PERPSIG | K virtual-LM heads + diversity reg | S6 | new |
+| `exp70_decofp.py` | DECOFP | decoding-fingerprint regressor (rep_ent, TTR, burst) | S2 | new |
+| `exp65_abl.py` | ABL | component decomposition under RAS | — | diagnostic ⏳ pending |
+
+### CoDET-M4 Author IID — Macro-F1 (Round 2, unixcoder-base)
+
+| Rank | Method | 1% | 5% | 20% | val-test gap @ 20% | Δ vs paper @ 20% |
+|:-:|:--|:-:|:-:|:-:|:-:|:-:|
+| 🥇 | **TKL** (exp63) | 0.5524 | **0.6549** | **0.7198** | +0.0042 | **+0.0565** |
+| 🥇 | **TOURN** (exp67) | 0.5465 | 0.6525 | **0.7198** | +0.0044 | **+0.0565** |
+| 🥈 | DECOFP (exp70) | 0.5483 | 0.6420 | 0.7158 | +0.0045 | +0.0525 |
+| 🥉 | DTKE (exp66) | 0.5501 | 0.6439 | 0.7114 | +0.0073 | +0.0481 |
+| 4 | HTKA (exp60) | 0.5444 | 0.6363 | 0.7092 | +0.0087 | +0.0459 |
+| 5 | PTR (exp61) | 0.5574 | 0.6399 | 0.7091 | +0.0096 | +0.0458 |
+| 6 | SCR (exp62) | **0.5585** | 0.6532 | 0.7185 | +0.0071 | +0.0552 |
+| 7 | STYLO (exp68) | 0.5359 | 0.6437 | 0.7094 | +0.0022 | +0.0461 |
+| 8 | PERPSIG (exp69) | 0.5408 | 0.6321 | 0.7076 | +0.0063 | +0.0443 |
+| 9 | **RACO** (exp64) ⚠️ | **0.5627** | 0.6539 | 0.6943 | +0.0089 | +0.0310 |
+
+### AICD-T2 Model-Family — Macro-F1 (Round 2, unixcoder-base)
+
+| Rank | Method | 1% | 5% | 20% | val-test gap @ 20% |
+|:-:|:--|:-:|:-:|:-:|:-:|
+| 🥇 @20% | **DTKE** (exp66) | 0.2948 | 0.3980 | **0.4882** | −0.0132 |
+| 🥈 @20% | HTKA (exp60) | 0.2913 | 0.3988 | 0.4843 | −0.0114 |
+| 🥉 @20% | TOURN (exp67) | 0.2972 | 0.3929 | 0.4835 | −0.0126 |
+| 4 @20% | PTR (exp61) | 0.2942 | 0.4014 | 0.4824 | −0.0131 |
+| 5 @20% | PERPSIG (exp69) | 0.2865 | 0.3742 | 0.4813 | −0.0131 |
+| 6 @20% | DECOFP (exp70) | 0.2958 | **0.4108** | 0.4806 | −0.0099 |
+| 7 @20% | STYLO (exp68) | 0.2916 | 0.3971 | 0.4801 | −0.0115 |
+| 8 @20% | SCR (exp62) | 0.3019 | 0.3949 | 0.4776 | −0.0098 |
+| 9 @20% | TKL (exp63) | **0.3038** | 0.3940 | 0.4776 | −0.0066 |
+| 10 @20% | RACO (exp64) ⚠️ | 0.2922 | 0.3520 | 0.3970 | −0.0028 |
+
+> **DTKE breaks AICD-T2 saturation:** prior band 0.4771–0.4851 → **0.4882** new SOTA. Dual-tree (S1) is the object that
+> CoDET-M4 already saturates on (only 2 sibling pairs in genealogy) but AICD-T2 (4 families × 3 siblings) rewards.
+
+### Round 2 Falsifier readouts
+
+| Method | Falsifier metric | Result | Verdict |
+|:--|:--|:--|:--|
+| **TKL** | learned `sibling_weight @20%` | 0.016 (CoDET), 0.016 (AICD) | ✅ structure prior **decays** with n |
+| **RACO** | learned `λ` per fraction | CoDET: 0.64 → 0.82 → 0.97 ; AICD: 0.78 → 0.96 → 1.00 | ❌ OPPOSITE of TKL — contrastive prior **grows** with n |
+| **TOURN** | `sibling_confusion_rate` test @20% | 0.099 CoDET / 0.165 AICD | 🟡 tied with non-tree-aware baselines |
+| **STYLO** | macro vs unixcoder-CE | +0.05 vs paper, ≈ band | ⚠️ stylo features not adding once unixcoder is fine-tuned |
+| **PERPSIG** | head pairwise \|cos\| | **0.000** (perfect orthogonality) | ✅ K virtual decoders truly distinct |
+| **DECOFP** | per-class fingerprint spread | (in JSON `fingerprint_per_class`) | TBD |
+| **DTKE** | break AICD saturation | **+0.0031 over prior best** | ✅ S1 is the right object for AICD |
+
+### Round 2 key insight: TKL vs RACO contradiction
+
+- **TKL** says: optimal sibling weight **decays** with n.
+- **RACO** says: optimal contrastive mixing weight **grows** with n.
+- Same data; opposite directions. Reason: TKL re-shapes CE (loss-level); RACO re-shapes representation (rep-level).
+  More data improves in-batch positive/negative coverage for contrastive (helps), but makes flat CE already adequate (per-class loss reshape no longer needed).
+- **Reportable as finding §5:** structure-aware methods are not uniformly regime-dependent — direction of dependence is loss-family-specific.
+
 
 
 ```bash
