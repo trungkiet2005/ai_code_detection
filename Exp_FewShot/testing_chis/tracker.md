@@ -218,6 +218,104 @@ Self-contained experiments for Hier-NTK ablation + published baselines.
   More data improves in-batch positive/negative coverage for contrastive (helps), but makes flat CE already adequate (per-class loss reshape no longer needed).
 - **Reportable as finding §5:** structure-aware methods are not uniformly regime-dependent — direction of dependence is loss-family-specific.
 
+---
+
+## 🚀 Round 3 — Synthesis attempts + ablation diagnostic (exp65, exp71–exp72, 2026-05-18)
+
+> **Goal:** synthesise insights from Round 1+2 into ONE hero method. Two synthesis attempts (GENEPRINT, TIEH)
+> + diagnostic ablation (exp65).
+
+### 🚨 exp65_abl @20% — CE alone matches all structure-aware methods
+
+Run 16: ablation at fraction=0.20 only, both benchmarks, 8 component toggles
+{ce / ssl / htka / gsce / scr / ssl+htka / ssl+htka+scr / all} on top of RAS schedule.
+
+**CoDET-M4 @20% Macro-F1:**
+
+| Component | Test | val-test gap | Δ vs CE |
+|:--|:-:|:-:|:-:|
+| **CE only** | **0.7118** | +0.0099 | baseline |
+| SSL | 0.7133 | +0.0069 | +0.0015 |
+| SSL+HTKA | 0.7133 | +0.0058 | +0.0015 |
+| SCR | 0.7124 | +0.0081 | +0.0006 |
+| HTKA | 0.7099 | +0.0091 | −0.0019 |
+| GSCE | 0.7079 | +0.0099 | −0.0039 |
+| ALL | 0.7065 | +0.0128 | −0.0053 |
+| SSL+HTKA+SCR | 0.7040 | +0.0151 | **−0.0078** |
+
+**AICD-T2 @20% Macro-F1:**
+
+| Component | Test | val-test gap | Δ vs CE |
+|:--|:-:|:-:|:-:|
+| **CE only** | **0.4881** | −0.0143 | baseline |
+| GSCE | 0.4876 | −0.0132 | −0.0005 |
+| SSL+HTKA | 0.4853 | −0.0146 | −0.0028 |
+| SSL | 0.4849 | −0.0111 | −0.0032 |
+| SSL+HTKA+SCR | 0.4833 | −0.0139 | −0.0048 |
+| SCR | 0.4819 | −0.0112 | −0.0062 |
+| ALL | 0.4810 | −0.0107 | −0.0071 |
+| HTKA | 0.4788 | −0.0078 | −0.0093 |
+
+> **CRITICAL:** CE-only @20% matches the band ceiling on both benchmarks.
+> DTKE @20% AICD-T2 = 0.4882 ≈ CE-only 0.4881 (Δ = +0.0001) → saturation band is set by **encoder + RAS
+> schedule + AMP + sqrt-LR + cosine warmup**, not by method.  Combining structure-aware terms HURTS
+> (SSL+HTKA+SCR drops 0.008 on CoDET).
+>
+> **TKL learned `sibling_weight → 0 at high n` is CONFIRMED by ablation.** Structure prior is value-decaying.
+
+### exp71_geneprint (HERO synthesis attempt) — FAILED hero, useful as §5 evidence
+
+3-channel disentangled `z = [z_T(256); z_D(256); z_M(256)]` with HSIC orthogonality + topology / decoding /
+motif channel-specific losses.
+
+**Results (Macro-F1 test):**
+
+| Bench | 1% | 5% | 20% | gap@20% | rho_T@20% | F1 zero_T drop | zero_D | zero_M |
+|:--|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|
+| CoDET-M4 | 0.5460 | 0.6424 | 0.7051 | +0.0105 | +0.615 | +0.000 | +0.000 | +0.014 |
+| AICD-T2 | 0.2927 | 0.3847 | 0.4805 | −0.0084 | +0.813 | +0.010 | +0.007 | −0.007 |
+
+**Falsifier verdict (3 hooks):**
+- F1 zero-out drop ≤ 0.025 → **classifier IGNORES every channel** (decomposition not used)
+- F2 HSIC < 0.003 → orthogonality achieved (PASS)
+- F3 Spearman(z_T, d_tree) = 0.81 on AICD → topology learned (PASS)
+
+> **Negative finding for §5:** Author identity is **NOT factorisable** along S-fact channel lines despite
+> orthogonal + topology-learning channels. The classifier blends the full representation rather than
+> consuming individual channels. Rigorous negative result.
+
+### exp72_tieh (paradigm competitor) — Hyperbolic embedding sub-Euclidean
+
+Embed encoder output to Poincaré ball B^64; learnable prototypes constrained `d_H(p_i, p_j) ≈ d_tree(i, j)`.
+
+**Results (Macro-F1 test):**
+
+| Bench | 1% | 5% | 20% | gap@20% | proto_rho | proto_norm |
+|:--|:-:|:-:|:-:|:-:|:-:|:-:|
+| CoDET-M4 | **0.4271** ⚠️ | 0.6112 | 0.7017 | +0.0070 | +0.722 | 0.959 |
+| AICD-T2 | **0.1729** ⚠️ | 0.3226 | 0.4444 | −0.0028 | +0.557 | 0.963 |
+
+> **Hyperbolic paradigm fails:** low-n collapse (1% AICD = 0.17 vs Euclidean baseline 0.30). Prototype norms
+> 0.96 confirm hyperbolic structure IS used but encoder lacks data to learn metric reliably under
+> hyperbolic loss landscape.  Euclidean disentangled (GENEPRINT) > Hyperbolic at every slot.
+
+---
+
+## 🚀 Round 4 — Lit-grounded few-shot methods + augmentation (exp73–exp76, 2026-05-18)
+
+> **Motivation:** exp65 ablation showed CE-only matches structure-aware methods at 20%.
+> exp71 GENEPRINT showed factorisation doesn't help.  To break the ceiling we must add NEW SIGNAL the
+> encoder hasn't seen.  Round 4 introduces 4 lit-grounded paradigms missing from prior rounds:
+
+| File | Method | Paradigm | Lit reference |
+|:--|:--|:--|:--|
+| `exp73_tapa.py` | TAPA | Prototypical network + tree-iso constraint + multi-layer pooling | Snell 2017, LIGHT arXiv:2503.00958 |
+| `exp74_setfit_tw.py` | SETFIT-TW | Two-stage: SupCon-TW stage 1, frozen-encoder linear head stage 2 | SetFit arXiv:2209.11055 |
+| `exp75_racl.py` | RACL | Retrieval-augmented logit: learned mix β·param + (1−β)·kNN(tree-weighted) | RAFC arXiv:2406.11148, kNN-LM |
+| `exp76_traco.py` | TRACO | Token-level S7-grounded augmentation contrastive (2-view encoder) | new (SimCLR/MoCo paradigm, S7 grounded) |
+
+Status: **all 4 file scaffolded, pending Kaggle run.**
+
 
 
 ```bash
