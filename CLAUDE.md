@@ -157,6 +157,7 @@ Diversity finds the hero and populates §4 baselines. Paper is single-method (§
 | `exp73_tapa` | **TAPA** Tree-Anchored Prototypical Attribution: EMA prototypes + multi-layer pooling + tree-iso constraint | S1+S9 | Snell 2017 + LIGHT arXiv:2503.00958 |
 | `exp74_setfit_tw` | **SETFIT-TW** SetFit two-stage: SupCon w/ tree-weighted negatives → frozen-encoder linear head | S1+S9 | SetFit arXiv:2209.11055 |
 | `exp75_racl` | **RACL** Retrieval-Augmented Code Logit: learned mix `β · param + (1−β) · kNN`, kNN with tree-aware weighting | S1+S9 | RAFC arXiv:2406.11148 + kNN-LM |
+| `exp76_traco` | **TRACO** Token-level Robust Augmentation Contrastive: 2-view encoder enforces S7 invariance under {token_dropout, id_rename, ws_jitter, comment_strip} | S7+S1 | new (SimCLR/MoCo paradigm, S7-grounded for code) |
 
 **Killed (chưa run, generic ML):** `exp64_dgk` (kernel-alignment trùng HTKA), `exp73_srcbdoor` (trùng CIE/CFT/HETE), `exp75_humclust` (chỉ K-means trên human). **GENEPRINT exp71 / TIEH exp72: falsifier failed (run completed), kept as analysis evidence in §5.**
 
