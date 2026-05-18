@@ -305,7 +305,7 @@ Embed encoder output to Poincaré ball B^64; learnable prototypes constrained `d
 
 > **Motivation:** exp65 ablation showed CE-only matches structure-aware methods at 20%.
 > exp71 GENEPRINT showed factorisation doesn't help.  To break the ceiling we must add NEW SIGNAL the
-> encoder hasn't seen.  Round 4 introduces 4 lit-grounded paradigms missing from prior rounds:
+> encoder hasn't seen.  Round 4 introduces 4 lit-grounded paradigms missing from prior rounds.
 
 | File | Method | Paradigm | Lit reference |
 |:--|:--|:--|:--|
@@ -314,7 +314,69 @@ Embed encoder output to Poincaré ball B^64; learnable prototypes constrained `d
 | `exp75_racl.py` | RACL | Retrieval-augmented logit: learned mix β·param + (1−β)·kNN(tree-weighted) | RAFC arXiv:2406.11148, kNN-LM |
 | `exp76_traco.py` | TRACO | Token-level S7-grounded augmentation contrastive (2-view encoder) | new (SimCLR/MoCo paradigm, S7 grounded) |
 
+### CoDET-M4 — Macro-F1 (Round 4)
+
+| Method | 1% | 5% | 20% | val-test gap @ 20% |
+|:--|:-:|:-:|:-:|:-:|
+| 🥇 **TRACO** (exp76) | **0.5887** | **0.6622** | 0.7186 | +0.0116 |
+| RACL (exp75) | 0.5621 | 0.6457 | 0.6873 | +0.0066 |
+| TAPA (exp73) | 0.4969 | 0.5743 | 0.6722 | +0.0131 |
+| SETFIT-TW (exp74) | 0.4353 | 0.4871 | 0.6608 | +0.0020 |
+
+### AICD-T2 — Macro-F1 (Round 4)
+
+| Method | 1% | 5% | 20% | val-test gap @ 20% |
+|:--|:-:|:-:|:-:|:-:|
+| TRACO (exp76) | 0.2965 | 0.3998 | 0.4876 | −0.0128 |
+| TAPA (exp73) ⚠️ | 0.2300 | 0.2746 | 0.2635 | −0.0015 |
+| SETFIT-TW (exp74) | 0.1405 | 0.2196 | 0.3413 | −0.0032 |
+| RACL (exp75) | — | — | — | (not run) |
+
+### Round 4 falsifier readouts
+
+| Method | Falsifier | Verdict |
+|:--|:--|:--|
+| **TRACO** (exp76) | view_cos 0.95–0.97 | ✅ S7 invariance verified |
+| TAPA (exp73) | proto_spearman −0.47 to −0.68 | ❌ prototypes ANTI-correlate with d_tree; EMA + tree-iso conflict |
+| SETFIT-TW (exp74) | pair-AUC 0.97 / frozen-head F1 << band | 🟡 separable embeddings but frozen-stage hurts |
+| RACL (exp75) | learned β → 0.02 at 20% | 🟡 retrieval dominates but combined < retrieval-alone (mixture trivial) |
+
+### 🎉 TRACO Breakthrough — first method to break saturation at extreme few-shot
+
+- **CoDET-M4 1%** 0.5887 (vs prior best RACO 0.5627, +0.026)
+- **CoDET-M4 5%** 0.6622 (vs prior best TKL 0.6549, +0.007)
+- CoDET-M4 20% 0.7186 (≈ band top, Δ −0.001 vs TKL/TOURN)
+- AICD-T2 20% 0.4876 (≈ DTKE SOTA 0.4882)
+- val_test_gap healthy (+0.012 CoDET 20%)
+
+**Paper narrative:** S7 invariance enforcement via on-the-fly code augmentation is the FIRST signal beyond
+encoder + RAS-schedule + label CE that genuinely lifts few-shot AI-code attribution. TRACO is the hero
+candidate of Round 4.
+
+---
+
+## 🚀 Round 5 — Elite synthesis attempts (exp77–exp80, 2026-05-19)
+
+> **Goal:** push beyond TRACO 0.7186 CoDET 20% / 0.4876 AICD 20%. Four genuinely-novel paradigms targeting
+> different signal channels.
+
+| File | Method | Object | S-fact | Lit reference |
+|:--|:--|:--|:--|:--|
+| `exp77_cronos.py` | CRONOS | Single-encoder + 3 S-fact aux heads (tree-dist regressor, decoding-fp regressor, sibling-pair classifier) | S1+S2+S9 | multi-task aux co-training, fixes GENEPRINT mistake (no channel split) |
+| `exp78_cascade.py` | CASCADE | Hierarchical decoding `p(y=k) = p(family) · p(sibling\|family)` | S1 | extends hierarchical softmax (Morin & Bengio 2005) to LLM-genealogy attribution |
+| `exp79_mage.py` | MAGE | Genealogy-conditioned mixup: pair sampling ∝ exp(-γ·d_tree) | S1 | extends Zhang 2018 mixup with label-tree-conditioned sampler |
+| `exp80_tracod.py` | TRACOD | TRACO + EMA teacher self-distillation (DINO-style centered targets) under code augmentation views | S7+stability | extends DINO arXiv:2104.14294 with supervised CE + TRACO augmentations |
+
 Status: **all 4 file scaffolded, pending Kaggle run.**
+
+### Expected targets
+
+| File | CoDET 20% target | AICD 20% target | Few-shot 1% target |
+|:--|:-:|:-:|:-:|
+| exp77_cronos | 0.72+ | 0.49+ | aux-regularizes all slots |
+| exp78_cascade | 0.72 (sparse tree) | **0.50+** (4×3 hierarchy explicit) | family-acc decomposition |
+| exp79_mage | low-n boost | sibling-conf drop | strong at 1%/5% |
+| exp80_tracod | 0.73+ (push TRACO ceiling) | 0.49+ | TRACO stabilized |
 
 
 

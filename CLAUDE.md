@@ -120,24 +120,39 @@ Diversity finds the hero and populates §4 baselines. Paper is single-method (§
 
 ---
 
-## 4. Current leaderboard (CoDET-M4 Author 20%, Macro-F1)
+## 4. Current leaderboard (best per slot across all rounds, Macro-F1)
 
-| Rank | Method | Score | Δ vs paper 0.6633 |
-|:-:|:--|:-:|:-:|
-| 🥇 | TKL  (exp63) | 0.7198 | +0.0565 |
-| 🥈 | SSL-RAS (exp56) | 0.7186 | +0.0553 |
-| 🥉 | SCR  (exp62) | 0.7185 | +0.0552 |
-| 4 | GSCE (exp57) | 0.7185 | +0.0552 |
-| 5 | RASL (exp58) | 0.7181 | +0.0548 |
-| 6 | GFTS (exp59) | 0.7177 | +0.0544 |
-| 7 | HTKA (exp60) | 0.7092 | +0.0459 |
-| 7 | PTR  (exp61) | 0.7091 | +0.0458 |
+### CoDET-M4 Author
 
-**Saturation band:** top 6 within 0.002 of each other → schedule + any genealogy prior in aggregate drives the gain.
+| Frac | Best | Score | Δ vs paper 0.6633 | Runner-up |
+|:-:|:--|:-:|:-:|:--|
+| 1% | **TRACO** (exp76) | **0.5887** | — | RACO 0.5627 |
+| 5% | **TRACO** (exp76) | **0.6622** | — | TKL 0.6549 |
+| 20% | TKL / TOURN | 0.7198 | +0.0565 | TRACO 0.7186, SSL-RAS 0.7186 |
 
-**TKL signal (CRITICAL):** learned `sibling_weight @20% = 0.016`, near-zero. Genealogy structure value DECAYS as `n` grows. PTR confirms phase transition. Hero candidate should be **regime-adaptive**, not static loss-reshape.
+### AICD-T2 Model-Family
 
-**AICD-T2 saturated** at Macro-F1 ≈ 0.48 @ 20% across HTKA/PTR/SCR/TKL. Needs orthogonal attack (source / decoding / perplexity).
+| Frac | Best | Score | Runner-up |
+|:-:|:--|:-:|:--|
+| 1% | TKL (exp63) | 0.3038 | TOURN 0.2972 |
+| 5% | DECOFP (exp70) | 0.4108 | RACL 0.4030 |
+| 20% | **DTKE** (exp66) | **0.4882** | CE-only 0.4881 ≈ tied |
+
+### Critical findings
+
+1. **TRACO (exp76) breaks the saturation band at 1% and 5% CoDET-M4** — first method to do so. Falsifier `view_cos = 0.97` confirms S7 invariance empirically achieved.
+
+2. **CE-only @20% matches band ceiling on both benchmarks** (ablation exp65_abl): CoDET-M4 0.7118 / AICD-T2 0.4881. `DTKE − CE-only` on AICD = +0.0001 → saturation is encoder-level, not method-level. Adding structure-aware loss terms doesn't help at 20% data.
+
+3. **TKL learned `sibling_weight @20% → 0`** — structure prior decays with n. Confirmed by exp65 ablation.
+
+4. **RACO's `λ` GROWS with n** (0.64→0.82→0.97) — opposite direction from TKL. Loss-level vs rep-level structure priors are regime-dependent in OPPOSITE ways.
+
+5. **GENEPRINT exp71 falsifier FAILED**: 3-channel orthogonal but zero-out drops < 0.025 → classifier ignores channels. Negative finding: author identity is NOT factorisable along S-fact channels.
+
+6. **TIEH exp72 hyperbolic FAILED**: low-n collapse (AICD 1% = 0.17). Hyperbolic geometry too unstable for sparse data.
+
+7. **TAPA exp73 collapse**: prototype Spearman anti-correlated with d_tree (-0.47 to -0.68). EMA prototypes conflict with tree-iso constraint.
 
 ---
 
@@ -158,6 +173,10 @@ Diversity finds the hero and populates §4 baselines. Paper is single-method (§
 | `exp74_setfit_tw` | **SETFIT-TW** SetFit two-stage: SupCon w/ tree-weighted negatives → frozen-encoder linear head | S1+S9 | SetFit arXiv:2209.11055 |
 | `exp75_racl` | **RACL** Retrieval-Augmented Code Logit: learned mix `β · param + (1−β) · kNN`, kNN with tree-aware weighting | S1+S9 | RAFC arXiv:2406.11148 + kNN-LM |
 | `exp76_traco` | **TRACO** Token-level Robust Augmentation Contrastive: 2-view encoder enforces S7 invariance under {token_dropout, id_rename, ws_jitter, comment_strip} | S7+S1 | new (SimCLR/MoCo paradigm, S7-grounded for code) |
+| `exp77_cronos` | **CRONOS** Single-encoder + 3 S-fact aux heads (tree-dist regressor + decoding-fp regressor + sibling-pair classifier) | S1+S2+S9 | multi-task aux co-training, fixes GENEPRINT failure |
+| `exp78_cascade` | **CASCADE** Hierarchical family-then-sibling decoding: `p(y=k) = p(family) · p(sibling\|family)` | S1 | extends hierarchical softmax to LLM-genealogy attribution |
+| `exp79_mage` | **MAGE** Genealogy-conditioned mixup: pair sampling ∝ exp(-γ·d_tree) → sibling-heavy embedding-mixup | S1 | extends mixup with label-tree-conditioned sampler |
+| `exp80_tracod` | **TRACOD** TRACO + EMA teacher self-distillation (DINO-style centered targets) under code augmentation views | S7+stability | extends DINO arXiv:2104.14294 with supervised CE and TRACO augmentations |
 
 **Killed (chưa run, generic ML):** `exp64_dgk` (kernel-alignment trùng HTKA), `exp73_srcbdoor` (trùng CIE/CFT/HETE), `exp75_humclust` (chỉ K-means trên human). **GENEPRINT exp71 / TIEH exp72: falsifier failed (run completed), kept as analysis evidence in §5.**
 
