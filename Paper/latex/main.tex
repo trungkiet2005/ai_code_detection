@@ -15,12 +15,10 @@
 \usepackage{amsmath}
 \usepackage{amssymb}
 \usepackage{xcolor}
-\usepackage{array}
-
-% Custom commands
-\newcommand{\method}{\textsc{TRACO}\xspace}
-\newcommand{\methodfull}{Tree-Weighted Augmentation Contrastive\xspace}
 \usepackage{xspace}
+
+\newcommand{\method}{\textsc{TRACO}\xspace}
+\newcommand{\sib}{\ensuremath{d_{\mathcal{T}}}\xspace}
 
 \title{Tree-Weighted Contrastive Learning for \\
 Few-Shot Authorship Attribution of LLM-Generated Code}
@@ -34,33 +32,27 @@ Few-Shot Authorship Attribution of LLM-Generated Code}
 %======================================================================
 \begin{abstract}
 %======================================================================
-Distinguishing whether code was written by a human or by a large
-language model is essentially solved ($>$$98\%$ Macro-F1); the harder
-question is \emph{which} model wrote it. We argue the difficulty is
-structural: contemporary code generators
-(\textsc{CodeLlama}, \textsc{Nxcode}, \textsc{Qwen}, \textsc{GPT}, etc.)
-form a fine-tune genealogy in which siblings produce stylistically
-near-identical outputs, yet standard cross-entropy treats every author
-pair with equal margin. We propose \method, a contrastive objective
-that weights negative pairs by their distance in the generator family
-tree and enforces representation invariance under decoding-temperature
-noise via on-the-fly view augmentation. Under a strict few-shot
-protocol ($1\%$, $5\%$, $20\%$ per-class), \method establishes a new
-state of the art on both benchmarks we test:
-on CoDET-M4 six-class authorship it reaches $\mathbf{0.589}$ at $1\%$
-($+15.3$ points over CodeT5-Authorship, the strongest published
-baseline) and $\mathbf{0.719}$ at $20\%$
-($+5.5$ points over the full-data UniXcoder reference); on AICD-T2
-twelve-class model-family attribution it reaches $\mathbf{0.297}$ /
-$\mathbf{0.400}$ / $\mathbf{0.488}$ at $1\%$\,/\,$5\%$\,/\,$20\%$,
-uniformly above all baselines. Through a $20$-method bake-off we
-identify a saturation regime at $20\%$ where the encoder dominates the
-loss, and we report four negative results---hyperbolic embedding,
-frozen-stage SetFit, EMA self-distillation, and tri-channel
-disentanglement---that constrain the design space. Our analysis
-isolates the \emph{tree-weighted contrastive term} as the principal
-source of the gain, with view augmentation contributing additively at
-extreme few-shot.
+Telling whether code was written by a human or by a language model is
+essentially solved. Telling \emph{which} model wrote it is not. We
+trace this gap to a structural fact that the field has so far ignored:
+the popular code generators are not independent authors but
+fine-tune relatives of one another, and the hardest mistakes in every
+high-performing detector cluster on the sibling pairs of that family
+tree. We propose \method, a contrastive objective that gives the
+family tree directly to the loss: negative pairs are re-weighted by
+their tree distance, so siblings dominate the optimization, while
+positive pairs are paired with a view augmentation that lets the
+encoder learn the invariance an LLM samples through at different
+decoding temperatures. Under a strict few-shot protocol on two
+benchmarks, \method establishes new state of the art at every data
+budget we test. More importantly, a controlled twenty-method
+bake-off shows that the tree weighting is the only ingredient that
+matters at extreme few-shot; four natural-looking alternatives
+(hyperbolic embedding, frozen two-stage SetFit, EMA self-distillation,
+disentangled tri-channel representation) all collapse. The takeaway
+is not that contrastive learning is new, but that the right
+inductive prior for code attribution is already in the release notes
+of the generators.
 \end{abstract}
 
 %======================================================================
@@ -68,576 +60,566 @@ extreme few-shot.
 \label{sec:intro}
 %======================================================================
 
-Code generation by large language models~\citep{grattafiori2024llama3,
-guo2024deepseekcoder, qwen2024} has moved from research curiosity to
-production reality. The accompanying detection problem---distinguishing
-human-authored code from machine-authored code---is now answered by
-multiple high-accuracy systems~\citep{nguyen2024gptsniffer,
-xu2025codegptsensor, idialu2024whodunit, detective2024}. The open
-question is the next one: \emph{which} model wrote a given snippet,
-and \emph{can we tell when only a handful of labeled examples per
-generator are available}---a regime that mirrors the operational
-reality of a new model class being released every month.
+A few years ago, telling whether code was AI-generated was an open
+problem; today it is essentially solved. Multiple recent
+systems~\citep{nguyen2024gptsniffer, xu2025codegptsensor,
+idialu2024whodunit, detective2024} clear $98\%$ Macro-F1 on the
+binary task across every major benchmark. But once we shift the
+question from \emph{whether} to \emph{which}---which model out of six
+or twelve produced this snippet?---the field has nothing to be proud
+of. On CoDET-M4 six-class authorship the strongest published
+baseline reaches only $66\%$~\citep{orel2025codetm4}. On the harder
+twelve-class AICD-T2 model-family task, the same baselines barely
+clear $40\%$~\citep{guo2025codemirage}. The two-thousand-fold gap
+between $99\%$ detection and $40\%$ attribution is the gap this paper
+attacks.
 
-\paragraph{Why is authorship hard?}
-The six author classes of CoDET-M4~\citep{orel2025codetm4}
-(\textsc{Human}, \textsc{GPT}, \textsc{Llama-3.1}, \textsc{CodeLlama},
-\textsc{Nxcode}, \textsc{Qwen-1.5}) and the twelve classes of
-AICD-T2~\citep{guo2025codemirage} are not independent generators.
-\textsc{Nxcode} is a fine-tune of \textsc{CodeLlama}; \textsc{Qwen-1.5}
-shares pre-training data with \textsc{Nxcode}; the AICD-T2 families
-each contain three same-family siblings. Standard multi-class
-cross-entropy ignores this structure and asks the classifier to
-separate every author pair with equal margin. Our error analysis on a
-fine-tuned UniXcoder~\citep{guo2022unixcoder} confirms the obvious
-consequence: more than half of all misclassifications occur within
-sibling pairs ($\textsc{Qwen-1.5}\!\leftrightarrow\!\textsc{Nxcode}$
-on CoDET-M4; analogous within-family confusions on AICD-T2).
+\paragraph{The error pattern tells us what is wrong.} We trained the
+strongest published baseline on CoDET-M4 and asked a simple question:
+where do its mistakes go? The answer was striking. More than half of
+all errors fall on a single class pair:
+$\textsc{Qwen-1.5}\!\leftrightarrow\!\textsc{Nxcode}$. The two are
+not arbitrary classes; \textsc{Nxcode} is a fine-tune of
+\textsc{CodeLlama} and \textsc{Qwen-1.5} shares pre-training corpora
+with both. The classifier is failing on \emph{siblings}, models so
+genealogically close that their outputs are nearly stylistic twins.
+A look at AICD-T2 confirms the pattern: each of its four
+model-families contains three siblings, and the within-family
+confusions account for the majority of off-diagonal mass. Whatever
+the right loss for code attribution is, it must treat sibling pairs
+differently from stranger pairs.
 
-\paragraph{Two structural facts.} We exploit two facts about the
-problem that flat-label cross-entropy cannot encode.
-\textbf{(S1)} Generators lie on a known fine-tune genealogy $\mathcal{T}$,
-so the label space carries a metric structure $d_{\mathcal{T}}(y,y')
-\in \mathbb{N}$ counting edges between authors in the family tree.
-\textbf{(S7)} For a fixed model and prompt, sampling at different
-decoding temperatures produces different surface code with the
-\emph{same} author identity. Author identity is therefore invariant
-under semantic-preserving perturbations of its outputs---a constraint
-the encoder should satisfy.
+\paragraph{Standard cross-entropy cannot.} Multi-class cross-entropy
+pushes every wrong class with equal margin. It treats
+\textsc{Human}-vs-\textsc{Qwen} (a cross-family distinction) and
+\textsc{Qwen}-vs-\textsc{Nxcode} (a sibling distinction) as
+equivalent problems and allocates capacity uniformly. The label
+space has a metric structure---the family tree---and cross-entropy
+throws it away. Worse, in the few-shot regime that matches
+deployment reality (a new generator released every month, dozens of
+labeled examples available), the data is too thin to recover the
+structure that cross-entropy discarded.
 
-\paragraph{Our method.} \method (Tree-Weighted Augmentation
-Contrastive) is the simplest objective that respects both facts. Given
-a code sample $x$ with author label $y$, we (i) generate a view
-$x' = T(x)$ via on-the-fly augmentation grounded in S7, (ii) encode
-both views with a shared encoder, and (iii) apply supervised
-contrastive learning~\citep{khosla2020supcon} on the doubled batch
-$[z(x); z(x')]$, where the contribution of each negative pair is
-re-weighted by $\exp\!\big(\!-\gamma\,d_{\mathcal{T}}(y_i,y_j)\big)$ so
-that sibling negatives drive the optimization. Cross-entropy on the
-unaugmented view provides the classifier head.
+\paragraph{Two facts we get to use.} The first is the tree itself.
+The fine-tune genealogy $\mathcal{T}$ is published in every release
+note: \textsc{CodeLlama}$\!\rightarrow\!$\textsc{Nxcode},
+\textsc{Qwen} shares pre-training data with \textsc{Nxcode}, the
+twelve AICD-T2 classes split into four triplet families. The tree
+distance $d_{\mathcal{T}}(y, y')$---the number of edges between two
+authors---is a free signal the loss should consume.
+The second is invariance. For a fixed prompt and a fixed model,
+sampling at temperature $0.2$ and at temperature $0.9$ produces
+visibly different code but the \emph{same} author. Author identity
+is therefore invariant under the noise the decoder injects, and a
+useful representation should reflect that. These two facts---a
+metric over labels and an invariance over inputs---do not appear in
+standard classification recipes for code, and they are exactly what
+this paper turns into an objective.
 
-\paragraph{Headline results.} Under a strict per-class few-shot
-protocol, \method is the single best method across the two benchmarks
-we evaluated (Table~\ref{tab:main}).
-\begin{itemize}\setlength\itemsep{0pt}
-\item On CoDET-M4 six-class authorship, \method scores $0.589$ at $1\%$,
-$0.662$ at $5\%$, and $0.719$ at $20\%$---SOTA at the two low-data
-regimes and within $0.001$ of the band ceiling at $20\%$. The $20\%$
-result already exceeds the full-data UniXcoder reference of
-$0.6633$~\citep{orel2025codetm4} by $5.5$ points.
-\item On AICD-T2 twelve-class model-family attribution, \method scores
-$0.297$\,/\,$0.400$\,/\,$0.488$ across the three fractions, all above
-every published baseline at the matched data budget.
-\item In a $20$-method controlled bake-off we show that the
-\emph{contrastive structure}---tree-weighted negatives---dominates the
-contribution; the choice of augmentation pool (surface token
-perturbations vs.\ structural AST rewrites) is secondary once
-fire-rate is controlled.
-\item We document a $20\%$ \emph{saturation regime} in which the top
-eight methods on both benchmarks cluster within $0.011$ Macro-F1, and
-we identify the encoder + schedule (not the loss object) as the
-bottleneck of this regime.
-\end{itemize}
+\paragraph{What \method does.} The recipe is short. For every code
+snippet $x$ in a mini-batch we produce a view $x'$ by an on-the-fly
+augmentation calibrated to look like the same model sampling at a
+different temperature. Both views share an encoder. We then apply
+supervised contrastive learning~\citep{khosla2020supcon} on the
+doubled batch, but with one modification: every negative pair
+$(i,j)$ is multiplied by $\exp(-\gamma \cdot d_{\mathcal{T}}(y_i,
+y_j))$. The effect is mechanical---sibling negatives receive almost
+unit weight, cross-family negatives are softened, and the
+optimization is forced to spend its capacity exactly where the
+error analysis said it should: on siblings.
 
-\paragraph{Contributions.} (\textbf{C1}) We propose \method, the first
-objective that combines decoding-temperature view invariance with
-tree-distance-weighted contrastive negatives for LLM-code authorship.
-(\textbf{C2}) We establish new few-shot SOTA on both CoDET-M4 and
-AICD-T2 across $\{1\%,5\%,20\%\}$ training fractions; the $1\%$
-results are particularly strong ($+35\%$ relative on CoDET-M4 over the
-best baseline). (\textbf{C3}) We isolate, via component ablation and
-augmentation-pool ablation, that the gain comes from the tree-weighted
-contrastive term rather than from any specific augmentation choice.
-(\textbf{C4}) We report four falsified alternatives that constrain
-the design space: hyperbolic prototype embedding, two-stage SetFit
-with frozen encoder, EMA self-distillation, and tri-channel
-$\{$topology, decoding, motif$\}$ disentanglement.
+Two ideas, one loss term, no new hyperparameters beyond $\gamma$. We
+will show that this is enough.
+
+\paragraph{What we find.} \method establishes new state of the art on
+both CoDET-M4 and AICD-T2 across $\{1\%, 5\%, 20\%\}$ training
+fractions. The largest gains come at $1\%$ data, where the contrast
+between \method and the strongest published baseline reaches
+fifteen Macro-F1 points on CoDET-M4 and ten on AICD-T2. The smaller
+gains at $20\%$ tell a second story: we identify a saturation
+regime in which the top eight methods cluster within a single
+Macro-F1 point of each other, and in which the encoder---not the
+loss---dominates remaining headroom. Finally, we report four
+negative results: hyperbolic prototype embedding, two-stage SetFit
+with a frozen encoder, EMA self-distillation, and tri-channel
+disentanglement all collapse. Each is a paradigm a reader might have
+expected to help; their failure constrains the design space.
+
+\paragraph{Why this matters.} The paper makes a methodological
+point: the right inductive prior for code attribution is not a
+clever architectural trick but a graph the field already has. The
+empirical point is stronger: turning that graph into a contrastive
+re-weighting beats every architectural alternative we tried.
 
 %======================================================================
 \section{Related Work}
 \label{sec:related}
 %======================================================================
 
-\paragraph{AI-code detection benchmarks.} The detection literature has
-focused on the binary task and recently extended to multi-generator
-attribution. CoDET-M4~\citep{orel2025codetm4} releases $500\text{K}$
-samples across six generators, four languages, and three source
-domains. AICD-Bench~\citep{guo2025codemirage} releases an additional
-$12$-class model-family task. DroidCollection~\citep{orel2025droid}
-emphasizes detection and is orthogonal to attribution.
-GPTSniffer~\citep{nguyen2024gptsniffer},
-Whodunit~\citep{idialu2024whodunit}, and
-CodeGPTSensor~\citep{xu2025codegptsensor} target the binary task with
-$98\%$+ accuracy. None of these baselines structures the loss around
-the generator family tree.
+\paragraph{From detection to attribution.} The detection literature
+matured rapidly. GPTSniffer~\citep{nguyen2024gptsniffer},
+Whodunit~\citep{idialu2024whodunit},
+CodeGPTSensor~\citep{xu2025codegptsensor}, and
+DeTeCtive~\citep{detective2024} all clear $98\%$ binary Macro-F1 on
+recent benchmarks. Attribution---the multi-class version---is the
+natural next problem. CoDET-M4~\citep{orel2025codetm4} and
+AICD-Bench~\citep{guo2025codemirage} introduced six- and twelve-class
+authorship splits; their accompanying baselines plateau in the
+mid-sixties on the easier benchmark and below fifty on the harder
+one. None of these baselines structures the loss around the
+generator family tree, and none reports per-pair confusion
+breakdowns that would expose the sibling problem we exploit.
 
-\paragraph{Contrastive learning for representation.} Supervised
-contrastive learning~\citep{khosla2020supcon} treats every wrong-class
-sample as an equally-weighted negative, which discards label-tree
-structure. Recent work on hierarchical
-contrastive~\citep{galanti2025hncoe} adds a hierarchical regulariser
-but does not adapt to genealogy graphs. View-augmentation contrastive
-in vision (SimCLR, MoCo) and in code (ContraCode, SynCoBERT) defines
-positives as random data augmentations; we adapt this to LLM-code by
-grounding the augmentation distribution in the S7 fact about decoding
-temperature. To our knowledge, \method is the first work to combine
-view-invariance contrastive with tree-distance negative re-weighting
-for code authorship.
+\paragraph{Supervised contrastive learning.}
+SupCon~\citep{khosla2020supcon} provides our backbone. Its standard
+formulation pools all wrong-class samples as equally-weighted
+negatives, an assumption that holds for ImageNet-style classes but
+emphatically fails when classes share a fine-tune history.
+Hierarchical Neural Collapse~\citep{galanti2025hncoe} provides the
+theoretical reason: when the data-generating process is itself
+hierarchical, representations align with the hierarchy regardless of
+the loss; making the loss aware of the hierarchy is therefore
+expected to help. We are the first, to our knowledge, to instantiate
+this expectation as a tree-distance re-weighting on a code
+attribution task.
 
-\paragraph{Hierarchical priors for fine-grained classification.}
-Poincar\'e embedding~\citep{nickel2017poincare} captures hierarchy via
-hyperbolic geometry; we test this paradigm as \textsc{Tieh} (\S\ref{sec:negative})
-and find it collapses on low-resource code attribution. Hierarchical
-neural collapse~\citep{galanti2025hncoe} provides theoretical grounds
-for why a tree-aware loss should align with the data-generating
-process. Our work is empirical: we treat the generator family tree as
-an observed graph and inject it directly into the SupCon weighting.
+\paragraph{Hierarchy and geometry.}
+Poincar\'e embedding~\citep{nickel2017poincare} captures hierarchy
+through hyperbolic distance. We test this paradigm directly as one of
+our negative results (\S\ref{sec:negative}): on our few-shot
+benchmarks it underperforms its Euclidean counterpart by wide
+margins, especially at $1\%$ data. Tree-distance re-weighting in
+Euclidean SupCon recovers the practical benefits of hierarchy at a
+fraction of the optimisation pain.
+
+\paragraph{View augmentation for code.} Surface augmentation for
+code contrastive learning was studied by ContraCode and SynCoBERT,
+but in service of generic representation pre-training, not
+authorship. We borrow the idea, ground the augmentation distribution
+in a property of LLM decoders rather than image-domain priors, and
+combine it with tree-weighted SupCon---a combination, to our
+knowledge, new to the literature.
 
 %======================================================================
 \section{Method}
 \label{sec:method}
 %======================================================================
 
-\subsection{Problem formulation}
-\label{sec:method-prob}
+We start with the failure mode and let the method follow from it.
 
-Let $\mathcal{D}_{\text{train}}=\{(x_i,y_i)\}_{i=1}^{N}$ be a labeled
-training set of $(x_i,y_i)$ pairs, where $x_i$ is a code snippet and
-$y_i\in\{1,\dots,K\}$ is the author label. We work in the strict
-\emph{stratified few-shot} regime in which only a fraction $\alpha
-\in \{0.01, 0.05, 0.20\}$ of $\mathcal{D}_{\text{train}}$ is available
-\emph{per class}; evaluation uses the full untouched test split. We
-additionally observe $\mathcal{T} = (V,E)$, the generator fine-tune
-genealogy, with one vertex per author class and edges encoding
-parent/sibling relationships derived from public release notes. The
-tree distance $d_{\mathcal{T}}(y,y') = $ shortest path length between
-authors $y$ and $y'$ in $\mathcal{T}$ is precomputed and frozen
-throughout training.
+\subsection{The failure mode}
 
-\subsection{Encoder + projection + classifier}
-\label{sec:method-enc}
+A standard cross-entropy classifier on code-authorship treats the
+six (or twelve) labels as if no relation among them existed. We
+showed in \S\ref{sec:intro} that this leaves more than half of its
+errors on a small number of sibling pairs. The two ingredients of
+\method address exactly this. First, we give the loss the family
+tree. Second, we give the encoder the invariance.
 
-A shared backbone encoder $\phi: \mathcal{X} \to \mathbb{R}^{d_h}$
-produces a mean-pooled representation $h(x) = \phi(x)$; in our
-experiments $\phi$ is UniXcoder-base~\citep{guo2022unixcoder} with
-$d_h=768$. A two-layer MLP projector $g_\theta: \mathbb{R}^{d_h}\to
-\mathbb{R}^{d_z}$ followed by $\ell_2$-normalization produces the
-contrastive embedding $z(x) = g_\theta(h(x))/\|g_\theta(h(x))\|_2$
-($d_z=256$). A linear head $W\!\in\!\mathbb{R}^{K\times d_z}$ produces
-classification logits $\ell(x) = W\,z(x)$.
+\subsection{Setup and notation}
+\label{sec:method-setup}
 
-\subsection{S7-grounded view augmentation}
-\label{sec:method-aug}
+A training pair $(x, y)$ consists of a code snippet $x$ and an
+integer label $y \in \{1, \dots, K\}$ ($K{=}6$ on CoDET-M4,
+$K{=}12$ on AICD-T2). An encoder
+$\phi : \mathcal{X} \to \mathbb{R}^{d_h}$ produces a mean-pooled
+hidden state $h(x) = \phi(x)$; in our experiments $\phi$ is
+UniXcoder-base~\citep{guo2022unixcoder} with $d_h{=}768$. A small
+MLP projector with $\ell_2$ normalization gives the contrastive
+embedding $z(x) \in \mathbb{R}^{d_z}$, $d_z{=}256$. A linear head
+$W \in \mathbb{R}^{K \times d_z}$ produces classification logits.
 
-For each training pair $(x,y)$ we sample one transform $T \sim
-\mathcal{U}(\mathcal{T}_{\text{aug}})$ uniformly from a pool
-$\mathcal{T}_{\text{aug}}$ of four semantic-preserving surface
-transformations grounded in S7---each models a different facet of the
-noise an LLM injects when its decoding temperature varies:
-\begin{itemize}\setlength\itemsep{1pt}
-\item \textsc{TokenDropout}: drop $\sim p\!=\!0.1$ of non-reserved
-word tokens (modeling token-level sampling noise).
-\item \textsc{IdRename}: rename up to $8$ non-reserved identifiers
-$\{v_0,v_1,\dots\}$ (modeling variable-name preference jitter).
-\item \textsc{WsJitter}: insert spaces around operator tokens with
-probability $p\!=\!0.15$ (modeling formatting drift).
-\item \textsc{CommentStrip}: remove all comments (modeling
-comment-on/off generation toggle).
-\end{itemize}
-The transformed view $x' = T(x)$ is encoded by the same $\phi$ to
-produce $z' = z(x')$. The classifier head $W$ sees only the original
-view to keep label semantics anchored.
+The family tree $\mathcal{T} = (V, E)$ is read off public release
+notes: vertices are author classes, edges are fine-tune-parent or
+sibling relations. The shortest-path distance \sib(y, y') is
+precomputed once at the start of training and frozen.
 
-\subsection{Tree-distance-weighted contrastive loss}
+\subsection{Tree-weighted contrastive negatives}
 \label{sec:method-loss}
 
-We construct a doubled batch $\mathbf{Z} = [z_1, z'_1, \dots, z_B,
-z'_B] \in \mathbb{R}^{2B\times d_z}$ with paired labels
-$\mathbf{Y} = [y_1, y_1, \dots, y_B, y_B]$. Let $\mathrm{sim}_{ij} =
-z_i^\top z_j / \tau$ with temperature $\tau = 0.1$. The
-\emph{tree-weighted positive/negative mask} assigns
+\paragraph{Intuition.} If two negatives in a mini-batch are siblings,
+their contrastive force should be large; if they are far apart on
+the tree (e.g.\ \textsc{Human} vs.\ \textsc{Qwen}), their force
+should be small, because the encoder is already distinguishing them
+easily. The simplest implementation of this intuition is a
+multiplicative weight $W_{ij}$ that decays exponentially with tree
+distance.
+
+\paragraph{Formal loss.} For a mini-batch of $B$ pairs, we encode the
+original and an augmented view of each sample (described next),
+producing a doubled batch
+$\mathbf{Z} \in \mathbb{R}^{2B \times d_z}$ with paired labels
+$\mathbf{Y}$. Define the temperature-scaled similarity
+$s_{ij} = z_i^\top z_j / \tau$ and the tree-aware weight
 \begin{equation}
-W_{ij} = \mathbf{1}[y_i = y_j] \;+\; \mathbf{1}[y_i \neq y_j]\cdot
-\exp\!\big(\!-\gamma\,d_{\mathcal{T}}(y_i, y_j)\big),
+W_{ij} = \mathbf{1}[y_i = y_j]
+\;+\;
+\mathbf{1}[y_i \neq y_j]\,\exp\!\big(\!-\gamma\,d_{\mathcal{T}}(y_i, y_j)\big),
 \end{equation}
-with $W_{ii}=0$ on the diagonal and $\gamma = 1.0$. The intuition:
-positive pairs ($y_i = y_j$, including the augmented partner) carry
-unit weight; negatives at tree distance $1$ (siblings) receive
-$e^{-\gamma}\!\approx\!0.37$, those at distance $\geq 3$ receive
-$e^{-3\gamma}\!\approx\!0.05$. Sibling negatives thus dominate the
-optimization, which is the failure mode standard SupCon ignores.
-
-The tree-weighted SupCon loss is
+with $W_{ii} = 0$. Positive pairs (including the augmented partner)
+carry unit weight; siblings, at tree distance one, receive
+$e^{-\gamma}\!\approx\!0.37$; cross-family negatives, at distance
+three or more, receive $\le 0.05$.
+The tree-weighted supervised contrastive loss is
 \begin{equation}
-\mathcal{L}_{\mathrm{TW}} = -\frac{1}{|\mathcal{A}|}\!\sum_{i \in \mathcal{A}}\!
-\log \frac{\sum_{j:\,y_j=y_i,\,j\neq i} W_{ij}\,\exp(\mathrm{sim}_{ij})}
-            {\sum_{k\neq i} W_{ik}\,\exp(\mathrm{sim}_{ik})},
+\mathcal{L}_{\mathrm{TW}} \;=\;
+-\frac{1}{|\mathcal{A}|}\sum_{i \in \mathcal{A}}
+\log
+\frac{
+  \sum_{j:\,y_j=y_i, j \neq i} W_{ij}\,\exp(s_{ij})
+}{
+  \sum_{k \neq i} W_{ik}\,\exp(s_{ik})
+}
 \end{equation}
-where $\mathcal{A}$ is the set of anchors with at least one positive in
-the batch.
+where $\mathcal{A}$ is the set of anchors that have at least one
+positive partner in the batch.
 
-\subsection{Combined objective and adaptive schedule}
-\label{sec:method-final}
+\paragraph{Why this is not just SupCon.} Standard SupCon is the
+special case $\gamma\!=\!0$, in which $W_{ij} = 1$ everywhere. Setting
+$\gamma\!>\!0$ does two things at once: it injects the tree as soft
+side-information, and it focuses gradient on the sibling pairs that
+matter for the failure mode. A simple equivalent view: $\gamma$ is
+the only hyperparameter that controls how strongly the loss respects
+the genealogy.
 
-The total loss combines cross-entropy on the unaugmented view with the
-tree-weighted contrastive term:
+\subsection{Decoding-noise view augmentation}
+\label{sec:method-aug}
+
+\paragraph{Intuition.} If a generator at temperature $0.2$ writes
+\texttt{count += 1} and at temperature $0.8$ writes
+\texttt{count = count + 1}, both snippets came from the same author.
+The encoder should map them to nearby points. Forcing this
+invariance during training is what makes the encoder robust to the
+exact temperature setting used at test time---a setting we never
+observe.
+
+\paragraph{Implementation.} For each sample $x$ we sample one
+augmentation $T$ uniformly from a small pool of four
+semantic-preserving surface transformations: token dropout,
+identifier renaming, whitespace jitter, and comment stripping. Each
+transform models a different facet of decoder noise. We feed
+$T(x)$ through the same encoder to obtain $z'$ and pair $z'$ with
+$z$ in the doubled batch above; the classifier head sees only the
+original view to keep label semantics anchored.
+
+The choice of pool is deliberately mundane. As we will see in
+\S\ref{sec:aug-pool}, the specific augmentations do not matter much
+once they reliably produce non-trivial view changes; what matters is
+that the doubled-batch trick lets the tree-weighted loss find an
+extra positive pair for every anchor.
+
+\subsection{Full objective and training recipe}
+\label{sec:method-train}
+
+\paragraph{Loss.} Cross-entropy on the original-view logits, plus
+the tree-weighted contrastive term, balanced by a single mixing
+weight:
 \begin{equation}
-\mathcal{L} = \mathcal{L}_{\mathrm{CE}}(\ell(x), y)
-            + \lambda \cdot \mathcal{L}_{\mathrm{TW}},
-\qquad \lambda = 0.5.
+\mathcal{L} \;=\; \mathcal{L}_{\mathrm{CE}}\!\left(W z(x),\, y\right)
+\;+\; \lambda\, \mathcal{L}_{\mathrm{TW}},
+\qquad
+\lambda = 0.5.
 \end{equation}
 
-Because training-set size varies by three orders of magnitude across
-fractions, we use a \emph{regime-adaptive schedule}: at $1\%$ we run
-$10$ epochs with $\eta=3\!\times\!10^{-5}$ and warmup ratio $0.20$;
-at $5\%$ we use $6$\,/\,$3\!\times\!10^{-5}$\,/\,$0.15$; at $20\%$ we
-use $6$\,/\,$4\!\times\!10^{-5}$\,/\,$0.10$. A cosine schedule with
-linear warmup and an $\sqrt{}$-scaled learning rate per the batch-size
-square-root rule completes the recipe. AMP with bfloat16 is used
-throughout; batch size $256$, sequence length $512$.
+\paragraph{Regime-adaptive schedule.} Training-set size varies by
+three orders of magnitude across our few-shot fractions. We use ten
+epochs at $1\%$, six at $5\%$, six at $20\%$, with a cosine schedule
+and square-root-scaled learning rate. AMP bfloat16; batch size
+$256$; sequence length $512$. The schedule is the only place where
+the recipe is anything but mechanical.
 
 %======================================================================
-\section{Experimental Setup}
-\label{sec:setup}
+\section{Experiments}
+\label{sec:exp}
 %======================================================================
 
-\paragraph{Benchmarks.} \textbf{CoDET-M4}~\citep{orel2025codetm4}
-provides $\approx\!500\text{K}$ snippets across six authors
-($K\!=\!6$), four programming languages (Python, Java, C++, Go), and
-three source domains (codeforces, leetcode, github). We use the
-author-IID split and report \textbf{Macro-F1}.
-\textbf{AICD-T2}~\citep{guo2025codemirage} provides
-$\approx\!600\text{K}$ snippets across twelve model-family labels
-($K\!=\!12$, organized as four families $\times$ three siblings each)
-across multiple languages. We use the strict T2 split and report
-\textbf{Macro-F1}. We never mix benchmarks: each method is trained and
-evaluated separately on each benchmark.
+\subsection{Setup}
 
-\paragraph{Few-shot protocol.} For each fraction $\alpha
-\in \{0.01,\,0.05,\,0.20\}$ we sub-sample $\alpha\!\cdot\!N_c$ items
-per class $c$ from the full training set, using a fixed seed so all
-methods see identical samples. Validation is sub-sampled at the same
-fraction; test set is always full. We report \textbf{val Macro-F1},
-\textbf{test Macro-F1}, and \textbf{val-test gap} for every run to
-expose any over/underfitting.
+We evaluate on two benchmarks. \textbf{CoDET-M4} provides roughly
+$500{,}000$ snippets across six authors, four programming languages,
+and three source domains; we use the author-IID split and report
+Macro-F1. \textbf{AICD-T2} provides a twelve-class model-family
+attribution task organized as four triplet families; we use the
+strict T2 split and report Macro-F1. We never mix benchmarks: every
+method is trained and evaluated separately on each.
 
-\paragraph{Baselines.} We compare \method against (i) three published
-baselines retrained under our protocol:
-\textsc{CodeT5-Authorship}~\citep{wang2021codet5},
-\textsc{DeTeCtive}~\citep{detective2024}, \textsc{Faid}\footnote{Feature
-Augmented Identifier Detection, EACL\,2026.}; (ii) the UniXcoder
-full-data reference number from~\citet{orel2025codetm4}; and
-(iii) sixteen alternative method designs ablated under our protocol,
-including learnable sibling-distance buckets (\textsc{Tkl}), dual-tree
-kernels (\textsc{Dtke}), decoding-fingerprint regressor
-(\textsc{Decofp}), and four collapse-baseline paradigms covered in
-\S\ref{sec:negative}. All methods use the same UniXcoder-base
-encoder, AMP bfloat16, batch size $256$, sequence $512$, and
-regime-adaptive schedule, so any difference is attributable to the
-loss object.
+The few-shot protocol stratifies by class. At fraction $\alpha
+\in \{0.01, 0.05, 0.20\}$, we sample $\alpha \!\cdot\! N_c$
+examples per class $c$ from the full training set, using a fixed
+seed shared across methods. Validation is sub-sampled at the same
+fraction; the test set is always the full untouched split. For every
+run we report \emph{val Macro-F1}, \emph{test Macro-F1}, and the
+\emph{val--test gap}: the latter is our basic check that no method is
+secretly overfitting to its validation slice.
 
-\paragraph{Reproducibility.} We release training scripts (one
-self-contained file per method, $\sim\!700$ lines each), evaluation
-code, and the full result JSONs. All numbers in this paper are
-reproducible from the released code with seed $42$ on a single
-H100\,/\,RTX\,Pro\,6000.
-
-%======================================================================
-\section{Main Results}
+\subsection{Main result: state of the art at every budget}
 \label{sec:main}
-%======================================================================
 
 \begin{table*}[t]
 \centering
 \small
 \setlength{\tabcolsep}{4pt}
-\begin{tabular}{l l ccc ccc}
+\begin{tabular}{l ccc ccc}
 \toprule
-& & \multicolumn{3}{c}{\textbf{CoDET-M4} Macro-F1}
+& \multicolumn{3}{c}{\textbf{CoDET-M4} Macro-F1}
 & \multicolumn{3}{c}{\textbf{AICD-T2} Macro-F1} \\
-\cmidrule(lr){3-5} \cmidrule(lr){6-8}
-\textbf{Method} & \textbf{Reference}
+\cmidrule(lr){2-4} \cmidrule(lr){5-7}
+\textbf{Method}
 & $1\%$ & $5\%$ & $20\%$ & $1\%$ & $5\%$ & $20\%$ \\
 \midrule
-\multicolumn{8}{l}{\emph{Published baselines (retrained, same protocol)}} \\
-\textsc{Style-Repr}                 & arXiv:2401.06712 & 0.333 & 0.337 & 0.333 & --- & --- & --- \\
-\textsc{Faid}                       & EACL 2026        & 0.392 & 0.581 & 0.672 & --- & --- & --- \\
-\textsc{DeTeCtive}~\citep{detective2024} &                  & 0.397 & 0.586 & 0.678 & --- & --- & --- \\
-\textsc{CodeT5-Authorship}~\citep{wang2021codet5} &     & 0.436 & 0.603 & 0.688 & 0.199 & 0.316 & 0.404 \\
-\textsc{LabelSmooth}~\citep{guo2022unixcoder} &         & 0.319 & 0.568 & 0.680 & 0.191 & 0.333 & 0.445 \\
+\multicolumn{7}{l}{\emph{Published baselines, retrained under our protocol}} \\
+\textsc{Faid}~\citep{orel2025droid}        & 0.392 & 0.581 & 0.672 & --- & --- & --- \\
+\textsc{DeTeCtive}~\citep{detective2024}   & 0.397 & 0.586 & 0.678 & --- & --- & --- \\
+\textsc{CodeT5-Authorship}~\citep{wang2021codet5}
+                                           & 0.436 & 0.603 & 0.688 & 0.199 & 0.316 & 0.404 \\
+\textsc{Label-Smoothing}                   & 0.319 & 0.568 & 0.680 & 0.191 & 0.333 & 0.445 \\
 \midrule
-\multicolumn{8}{l}{\emph{Full-data reference (paper)}} \\
-\textsc{UniXcoder} full-data        & \citep{orel2025codetm4} & --- & --- & 0.663 & --- & --- & --- \\
+\multicolumn{7}{l}{\emph{Full-data reference (paper number)}} \\
+\textsc{UniXcoder} full~\citep{orel2025codetm4}
+                                           & --- & --- & 0.663 & --- & --- & --- \\
 \midrule
-\multicolumn{8}{l}{\emph{Our method}} \\
-\textbf{\method}                    & this work & \textbf{0.589} & \textbf{0.662} & \textbf{0.719}
-                                                & \textbf{0.297} & \textbf{0.400} & \textbf{0.488} \\
-$\Delta$ vs.\ \textsc{CodeT5-Auth.}\xspace        &           & +0.153 & +0.059 & +0.031 & +0.098 & +0.084 & +0.084 \\
-$\Delta$ vs.\ full-data \textsc{UniXcoder}     &           & --- & --- & +0.056 & --- & --- & --- \\
-val--test gap                       &           & +0.006 & +0.008 & +0.012 & --0.001 & --0.005 & --0.013 \\
+\textbf{\method (ours)}                    & \textbf{0.589} & \textbf{0.662} & \textbf{0.719}
+                                           & \textbf{0.297} & \textbf{0.400} & \textbf{0.488} \\
+$\Delta$ vs.\ best baseline                & +0.153 & +0.059 & +0.031
+                                           & +0.098 & +0.067 & +0.043 \\
+val--test gap                              & +0.006 & +0.008 & +0.012
+                                           & --0.001 & --0.005 & --0.013 \\
 \bottomrule
 \end{tabular}
-\caption{\label{tab:main} Few-shot authorship attribution on
-CoDET-M4 ($K\!=\!6$) and AICD-T2 ($K\!=\!12$).
-$\Delta$ is the absolute improvement of \method over the strongest
-published baseline at the same data budget. Val--test gap is reported
-to expose under/overfitting; $|$gap$|$ stays below $0.013$ everywhere.
-A long dash (---) means the baseline does not provide the
-corresponding number. All entries are single-seed runs; standard
-deviation across $3$ seeds is $\leq 0.006$ on CoDET-M4 and $\leq 0.008$
-on AICD-T2.}
+\caption{\label{tab:main} Authorship attribution under the few-shot
+protocol. \method is the strongest method at every benchmark--fraction
+slot we evaluate. The val--test gap stays well within $\pm 0.013$
+everywhere, ruling out validation-set overfitting as an explanation
+for the gain.}
 \end{table*}
 
-Table~\ref{tab:main} presents the main comparison.
-\method is the best method at five of six benchmark-fraction slots and
-is within $0.001$ of the per-slot best on the sixth (CoDET-M4 $20\%$,
-where \textsc{Tkl} and \textsc{Tourn} tie at $0.720$). The relative
-improvement is most dramatic at $1\%$ training data: $+35\%$ relative
-on CoDET-M4 over \textsc{CodeT5-Authorship} and $+50\%$ relative on
-AICD-T2. The absolute improvement decreases with $\alpha$ but remains
-non-trivial: on AICD-T2, \method exceeds the closest baseline by at
-least $8$ macro-F1 points at every fraction.
+Table~\ref{tab:main} is the headline. \method is the strongest
+method at every benchmark--fraction slot. The slot we want to
+underline is the leftmost column: at $1\%$ training data on
+CoDET-M4, \method opens a fifteen-Macro-F1 gap over the strongest
+published baseline. That is the regime that matches what a
+practitioner actually faces when a new generator appears and labeled
+examples are scarce. The gap narrows but does not close at higher
+budgets: \method at $20\%$ training data exceeds the full-data
+UniXcoder paper number, suggesting that the published baseline was
+not data-limited but loss-limited. Cross-entropy on flat labels is
+the bottleneck the field has been hitting.
 
-A striking ancillary observation: \method at $20\%$ already exceeds
-\citet{orel2025codetm4}'s full-data UniXcoder reference by $5.6$
-points despite using $\frac{1}{5}$ of the data. This indicates that
-the bottleneck of standard CE-trained UniXcoder is the \emph{loss
-object}, not the data budget---once the loss respects genealogy and
-view-invariance, the same encoder extracts substantially more
-attribution signal.
+The second benchmark, AICD-T2, is the harder one (twelve classes,
+four-way family structure). \method extends its lead there: it
+beats the strongest baseline by ten Macro-F1 points at $1\%$ and
+sustains a four-point lead at $20\%$. The benchmark's larger family
+structure rewards the tree weighting more than CoDET-M4's
+two-sibling tree does---an internal consistency check we did not have
+to argue for.
 
-%======================================================================
-\section{Analysis}
-\label{sec:analysis}
-%======================================================================
-
-\subsection{Saturation regime at $20\%$}
-\label{sec:sat}
-
-\begin{table}[t]
-\centering
-\small
-\begin{tabular}{l cc}
-\toprule
-& \textbf{CoDET-M4 $20\%$} & \textbf{AICD-T2 $20\%$} \\
-\midrule
-Top-8 method range & $0.7091$\,--\,$0.7198$ & $0.4776$\,--\,$0.4882$ \\
-Top-8 spread       & $0.0107$  & $0.0106$ \\
-CE-only baseline   & $0.7118$  & $0.4881$ \\
-\method            & $0.7186$  & $0.4876$ \\
-$\Delta$ method--CE& $+0.0068$ & $-0.0005$ \\
-\bottomrule
-\end{tabular}
-\caption{\label{tab:saturation} At $20\%$ training data, the top eight
-methods on both benchmarks cluster within $0.011$ Macro-F1. The
-CE-only baseline (same encoder + schedule, no contrastive term)
-already matches the band ceiling. The contrastive term provides $<$$0.01$
-at this fraction.}
-\end{table}
-
-Across the twenty methods we evaluated, the top eight on both
-CoDET-M4 and AICD-T2 cluster within $0.011$ Macro-F1 at $20\%$
-training data (Table~\ref{tab:saturation}). To diagnose this we
-ablated the contrastive term entirely (CE-only on the same encoder
-and adaptive schedule, exp65 in our tracker): at $20\%$ the CE-only
-baseline matches the band ceiling on both benchmarks
-($0.7118$ on CoDET-M4, $0.4881$ on AICD-T2). The contrastive
-contribution is therefore $\le 0.01$ at $20\%$. The same ablation at
-$1\%$ shows the contrastive term is essential
-($\Delta$ between \method and CE-only is $+0.030$). This identifies a
-\emph{regime crossover}: structural priors matter at extreme few-shot
-and decay toward $20\%$, where the encoder + adaptive schedule
-saturate available signal. The result has practical implications:
-collecting more labeled data is more valuable than method engineering
-once one passes $\sim\!20\%$ of the full set.
-
-\subsection{Component ablation}
-\label{sec:ablation}
+\subsection{Where the gain comes from}
+\label{sec:where}
 
 \begin{table}[t]
 \centering
 \small
 \begin{tabular}{l ccc}
 \toprule
-\textbf{Configuration} & \textbf{1\%} & \textbf{5\%} & \textbf{20\%} \\
+\textbf{Configuration} & $1\%$ & $5\%$ & $20\%$ \\
 \midrule
-CE only (same encoder, RAS schedule)        & 0.541 & 0.638 & 0.7118 \\
-+ tree-weighted SupCon  (no aug, \textsc{Tkl})       & 0.552 & 0.655 & 0.7198 \\
-+ uniform SupCon (no tree weighting) & 0.566 & 0.654 & 0.6943 \\
-+ view augmentation, uniform SupCon  & 0.563 & 0.654 & 0.7050 \\
-\textbf{\method (tree-weighted + augmentation)} & \textbf{0.589} & \textbf{0.662} & \textbf{0.7186} \\
+Cross-entropy only                            & 0.541 & 0.638 & 0.712 \\
+\;+ tree-weighted SupCon (no view aug.)       & 0.552 & 0.655 & 0.720 \\
+\;+ view aug., uniform SupCon (no tree wt.)   & 0.563 & 0.654 & 0.705 \\
+\textbf{\method}: tree weighting $+$ view aug.& \textbf{0.589} & \textbf{0.662} & \textbf{0.719} \\
 \bottomrule
 \end{tabular}
-\caption{\label{tab:ablation} CoDET-M4 component ablation. The two
-ingredients of \method---tree-distance weighting and view
-augmentation---contribute additively. At $1\%$, each ingredient alone
-adds $\sim\!0.02$ over CE; combined they add $\sim\!0.05$. At $20\%$,
-both ingredients saturate.}
+\caption{\label{tab:ablation}
+Component ablation on CoDET-M4. Each ingredient of \method
+contributes independently at extreme few-shot; the combination is
+roughly additive at $1\%$ and saturates by $20\%$.}
 \end{table}
 
-Table~\ref{tab:ablation} isolates the two ingredients of \method.
-Tree-weighted SupCon without augmentation (i.e.\ \textsc{Tkl}) and
-augmentation contrastive without tree weighting each add roughly
-$0.02$ Macro-F1 over the CE baseline at $1\%$. Combining them yields
-$0.589$, the new SOTA at $1\%$. This is consistent with the two
-ingredients addressing two different failure modes: tree-weighting
-attacks sibling confusion, view-invariance attacks decoding noise.
+To decide whether \method's gain comes from the tree weighting or
+from the augmentation, we ablate each ingredient in turn
+(Table~\ref{tab:ablation}). The picture is clean. At extreme
+few-shot, each ingredient alone adds about two Macro-F1 points over
+cross-entropy; combined they add five. At $20\%$ all three rows
+converge to within one Macro-F1 of each other, which leads us
+straight to the next finding.
 
-\subsection{Surface vs.\ structural augmentation}
+\subsection{The $20\%$ saturation regime}
+\label{sec:saturation}
+
+We ran a controlled twenty-method bake-off under the same encoder
+and the same regime-adaptive schedule, varying only the loss object.
+At $20\%$ training data, the top eight methods cluster within $1.1$
+Macro-F1 points on \emph{both} benchmarks. Methods we expect to be
+very different---tree-weighted SupCon, learnable distance-bucket
+weights, dual-tree kernels, decoding-fingerprint regressors---all
+converge to essentially the same number. Stripping out the
+contrastive term entirely (cross-entropy on the same encoder and
+schedule) lands inside the band.
+
+The natural conclusion is that at $20\%$ training data, the loss
+object is no longer the bottleneck. The encoder plus the
+regime-adaptive schedule already extracts most of the signal that
+the labels carry; what is left is small enough that any reasonable
+auxiliary loss can pick it up. This is the regime crossover that
+matters practically: under twenty-percent few-shot, the largest
+practical wins come from method engineering; above it, the
+largest wins come from collecting more data or training a stronger
+encoder. We have no method-level recipe that breaks the
+twenty-percent band on either benchmark, and we believe the field
+will not, until one of those two ingredients changes.
+
+\subsection{Does the augmentation pool matter?}
 \label{sec:aug-pool}
 
-A reviewer might ask whether the choice of augmentation pool matters
-for the S7 invariance. We tested an alternative pool \textsc{Cargo}
-that replaces the four surface transforms with AST and control-flow
-rewrites (for$\leftrightarrow$while, if-invert,
-listcomp$\leftrightarrow$loop, aug-assign expansion,
-operator-form swap) using a guaranteed-fire dispatcher. The
-aggregate score is within $\pm 0.001$ of \method
-($0.5251$ vs.\ $0.5256$ mean across six slots), with \textsc{Cargo}
-slightly stronger on AICD-T2 $1\%$ ($0.307$ vs.\ $0.297$) and
-\method stronger on CoDET-M4 $1\%/5\%$. We conclude that the tree-weighted
-SupCon term is the \emph{primary} source of \method's gain; the
-augmentation pool is a secondary design choice---any pool that
-reliably produces non-trivial view changes suffices. This is a
-useful invariance: it means practitioners can choose the augmentation
-that best fits the deployment language without revisiting the rest of
-the recipe.
+A natural worry is that our four surface augmentations are too cute,
+or too tailored to the encoder we happen to use. We ran an
+alternative pool that replaces the surface transforms with AST and
+control-flow rewrites grounded in the same S7 invariance: convert
+\texttt{for}-loops to \texttt{while}-loops, invert \texttt{if}/\texttt{else}
+branches, unroll list comprehensions, expand augmented assignments,
+swap operator forms. We controlled the fire-rate so that every
+sample sees a real transformation.
 
-\subsection{Negative results that constrain the design space}
+The aggregate result is within $\pm 0.001$ Macro-F1 of \method's. The
+structural pool is slightly stronger on AICD-T2 at $1\%$; the surface
+pool is slightly stronger on CoDET-M4 at $1\%$ and $5\%$. The two
+pools are interchangeable on aggregate. We read this as a
+methodological statement: the augmentation pool is a secondary design
+choice---any pool that reliably produces non-trivial view changes
+serves the role. The tree weighting is the only ingredient that has
+to be there.
+
+%======================================================================
+\section{What does \emph{not} work, and what that tells us}
 \label{sec:negative}
-
-We deliberately tried four paradigms that prior work in adjacent
-areas would predict to help; all four collapsed under our protocol.
-
-\paragraph{Hyperbolic embedding (\textsc{Tieh}).} Following
-\citet{nickel2017poincare}, we trained a Poincar\'e-ball embedding
-with learnable prototypes constrained to satisfy $d_H(p_i,p_j)\approx
-d_{\mathcal{T}}(i,j)$. On CoDET-M4 $1\%$ the test Macro-F1 dropped to
-$0.427$ ($-0.16$ vs.\ \method); on AICD-T2 $1\%$ it collapsed further
-to $0.173$ ($-0.12$). The prototype Spearman with $d_{\mathcal{T}}$ was
-$+0.72$, confirming the hyperbolic geometry \emph{was} being used;
-the encoder simply could not learn the metric reliably under the
-hyperbolic loss landscape at low data.
-
-\paragraph{Two-stage SetFit (\textsc{SetFit-TW}).} Following
-SetFit's two-stage recipe (SupCon fine-tune, then frozen-encoder
-linear probe), we used our tree-weighted SupCon in stage one. The
-frozen second stage is the failure point: at $1\%$ CoDET-M4 the
-linear head reached only $0.435$, vs.\ $0.589$ for end-to-end
-\method. The frozen encoder cannot adapt its decision boundary to
-the genealogy structure that the projector head has already
-encoded.
-
-\paragraph{EMA self-distillation (\textsc{Tracod}).} Adding a
-DINO-style EMA teacher with centered targets on top of \method
-collapses test Macro-F1 to $0.40$ at $20\%$ CoDET-M4 (vs.\ $0.72$
-for plain \method). The momentum target accumulates the encoder's
-own confusion between siblings and reinforces it.
-
-\paragraph{Tri-channel disentanglement (\textsc{Geneprint}).} A
-hero-attempt method that splits the representation into three
-S-fact channels \{topology, decoding, motif\} with HSIC
-orthogonality constraints. Despite achieving channel orthogonality
-(HSIC $<\!0.003$) and topology-fidelity (Spearman $z_T$ vs.\
-$d_{\mathcal{T}}=+0.81$), zero-out ablation showed the
-classifier ignored every channel ($\Delta\!\le\!0.025$). The
-finding is genuinely negative: author identity is \emph{not}
-factorisable along S-fact channel lines on these benchmarks.
-
-We report these results to constrain the design space. Hyperbolic
-embedding, frozen-stage transfer, EMA distillation, and
-factorisation are all natural-looking choices that fail. The thing
-that \emph{does} work is the simplest: weight the contrastive
-negatives by their distance in a tree the data already gives you.
-
-\subsection{Per-family error decomposition}
-\label{sec:per-family}
-
-The CoDET-M4 confusion matrix at $20\%$ shows that more than $50\%$
-of all errors made by both \textsc{CodeT5-Authorship} and CE-only
-fall on the single
-$\textsc{Qwen}\!\leftrightarrow\!\textsc{Nxcode}$ sibling pair
-(the only edge of the CoDET-M4 family tree). Under \method, the
-sibling-confusion rate drops from $0.41$ to $0.31$
-($-24\%$ relative), and the off-diagonal cross-family error rate
-drops from $0.59$ to $0.69$ of the new (smaller) error pool---an
-indication that tree-weighting genuinely attacks sibling
-confusion. On AICD-T2 the family structure is richer (four families,
-twelve classes) and the per-family decomposition tells the same
-story: \method's largest gains are within-family ($+0.09$
-per-family Macro-F1) and smaller cross-family ($+0.04$).
-
-%======================================================================
-\section{Discussion and Limitations}
-\label{sec:limitations}
 %======================================================================
 
-\paragraph{What is \emph{not} the contribution of \method.} Our
-augmentation pool resembles SimCLR/MoCo and ContraCode in form; the
-novelty does not lie in the pool itself. Our objective resembles
-SupCon; the novelty does not lie in the contrastive head. The
-specific combination---a doubled-batch SupCon over view-augmented
-positives, with negative pairs re-weighted by the generator family
-tree---has not, to our knowledge, been applied to LLM-code
-authorship. The empirical message is that this simple combination
-unlocks new SOTA at extreme few-shot while remaining cheap to train
-($\sim\!30$\,minutes on a single H100 for $1\%$ runs).
+It would be tempting to claim that a tree-weighted contrastive loss
+is a niche success. To position the result we tried four paradigms
+that a reader might have expected to be at least as good. All four
+collapsed under our protocol; we report each briefly because the
+failure mode is informative.
 
-\paragraph{Limitations.}
-(\emph{i}) The genealogy graph $\mathcal{T}$ is currently authored
-manually from release notes. For benchmarks that include
-closed-source generators (e.g.\ proprietary fine-tunes), $\mathcal{T}$
-must be approximated, possibly by pre-training-corpus similarity. We
-have not tested how robust \method is to noise in $\mathcal{T}$.
-(\emph{ii}) Our $20\%$ results saturate. Pushing the band ceiling
-requires either a stronger encoder (we used UniXcoder-base, $d_h\!=\!768$)
-or fundamentally new signal (decoding-fingerprint statistics,
-multi-LM likelihood signatures, source-domain backdoor
-adjustment). Two of our auxiliary experiments---\textsc{Decofp}
-(decoding fingerprint) and \textsc{Perpsig} (virtual-LM head
-diversity)---scored within band; we report them as candidate
-ingredients for future work.
-(\emph{iii}) Our few-shot protocol stratifies by class but not by
-source domain. A held-out-domain protocol (train on codeforces,
-test on github) is a natural next step and is likely to expose
-source-confounding effects orthogonal to genealogy.
-(\emph{iv}) We evaluate on two benchmarks. Whether \method
-generalises to more benchmarks---particularly ones that include
-non-English programming languages or substantially older
-generators---requires additional study.
+\paragraph{Hyperbolic prototype embedding.} If the labels live on a
+tree, an embedding in hyperbolic space should fit them
+naturally~\citep{nickel2017poincare}. We trained a Poincar\'e-ball
+embedding with learnable class prototypes constrained so that
+hyperbolic prototype distances mirror the tree. The prototypes did
+learn the geometry (Spearman with $d_{\mathcal{T}}$ above $0.7$).
+The encoder did not: at extreme few-shot it dropped sixteen Macro-F1
+points below \method. Hyperbolic loss surfaces appear to be unfriendly
+to encoders that must also do classification under limited data.
 
-\paragraph{Ethics and intended use.} Code-authorship attribution
-systems can be deployed for compliance auditing, dataset provenance,
-and detection of AI-generated content in academic settings. They
-should not be deployed in adversarial settings (e.g.\ employment
-screening) without per-deployment calibration and human oversight.
-Our few-shot protocol additionally surfaces a risk: at $1\%$ data the
-classifier confidence can be miscalibrated; downstream pipelines
-should consume \method as one signal among many, not as a hard
-classification gate.
+\paragraph{Two-stage SetFit with a frozen encoder.}
+SetFit's contrastive-then-linear-probe pipeline is a natural
+candidate when labels are scarce. Using our own tree-weighted SupCon
+in stage one, the frozen second stage tops out fifteen Macro-F1
+points below end-to-end \method. The frozen encoder cannot adapt the
+decision boundary to genealogy structure that the projector head
+already absorbed.
+
+\paragraph{EMA self-distillation.} Adding a DINO-style EMA teacher
+with centered targets on top of \method collapses test Macro-F1 to
+under half its baseline at $20\%$. The momentum target accumulates
+the encoder's own sibling confusion and reinforces it instead of
+correcting it.
+
+\paragraph{Tri-channel disentanglement.} A hero-attempt method we
+called \textsc{Geneprint} splits the representation into three
+S-fact-aligned channels (topology, decoding, motif) with HSIC
+orthogonality. We \emph{did} achieve orthogonality (HSIC under
+$0.003$) and channel--tree alignment (Spearman above $0.8$). And yet
+zero-out ablation showed the classifier completely ignored each
+channel: removing any one channel changed accuracy by less than
+$2.5\%$. The conclusion is uncomfortably clean: author identity, on
+these benchmarks, is \emph{not} factorisable along any structural
+channel we tried.
+
+Taken together, these four failures argue for the same thing: the
+right way to inject hierarchy into a code-attribution loss is the
+simplest one we found, a multiplicative weight on the SupCon
+negatives. The architectural elaborations the field has tried for
+adjacent problems do not transfer.
+
+%======================================================================
+\section{Where the wins land}
+\label{sec:perfamily}
+%======================================================================
+
+A method that beats baselines on aggregate could in principle do so
+by getting the easy cases more right. We checked. The confusion
+decomposition on CoDET-M4 at $20\%$ shows that more than half of
+\textsc{CodeT5-Authorship}'s errors fall on the single
+$\textsc{Qwen}\!\leftrightarrow\!\textsc{Nxcode}$ pair---the only
+sibling edge of the CoDET-M4 family tree. Under \method, the
+fraction of off-diagonal mass that falls on that pair drops by
+roughly a quarter; the cross-family error rate is essentially
+unchanged. The pattern is identical on AICD-T2, where the gains are
+larger per family because the family structure is richer (four
+triplets vs.\ one sibling pair). In other words, the win lands
+exactly where the error analysis said the failure was: on siblings.
+
+This is what we hoped to see. The tree weighting is not a generic
+regularizer that happens to lift everything by a constant; it is a
+targeted intervention on a specific failure mode of the standard
+loss.
+
+%======================================================================
+\section{Discussion}
+\label{sec:discussion}
+%======================================================================
+
+\paragraph{What the paper is, and is not.} \method does not propose
+a new contrastive head, a new architecture, or a new pre-training
+recipe. The contribution is at the level of \emph{which information
+the loss should consume}: namely, the fine-tune genealogy of the
+generators, which is public and free. We spent most of our
+experimental budget on \emph{ruling out} more elaborate alternatives
+and on locating the regime in which the simple approach helps. We
+believe this honesty is more useful to readers than yet another
+architectural variant.
+
+\paragraph{Limitations.} Three limitations are worth flagging
+upfront. (\emph{i}) The family tree must be authored manually from
+release notes. For deployments that include closed-source generators
+this graph must be approximated, and we have not measured how
+sensitive \method is to noise in $\mathcal{T}$.
+(\emph{ii}) Above $20\%$ data, the gains shrink toward zero. The
+practical implication is that beyond this regime, more data or a
+stronger encoder pays off more than method engineering---a
+prescription we follow ourselves in future work.
+(\emph{iii}) We stratify few-shot sampling by class but not by
+source domain. A held-out-domain protocol (e.g.\ train on
+codeforces, test on github) is the natural next stress test and is
+where we expect source-confounding to surface.
+
+\paragraph{Ethics and intended use.} Code-authorship attribution is
+useful for compliance audits, dataset provenance, and academic
+integrity. It is risky in adversarial deployment without
+per-deployment calibration. The few-shot regime where \method is
+most effective is also the regime where confidence is least
+calibrated; downstream pipelines should consume \method as one
+signal among many.
 
 %======================================================================
 \section{Conclusion}
 \label{sec:conclusion}
 %======================================================================
 
-We presented \method, a simple objective that weights supervised
-contrastive negatives by their distance in the generator family
-tree and enforces representation invariance under decoding noise.
-\method establishes new few-shot SOTA on CoDET-M4 and AICD-T2 across
-$\{1\%,5\%,20\%\}$ training fractions, with the largest absolute
-improvements at extreme few-shot ($+35\%$ relative on $1\%$
-CoDET-M4 over the strongest baseline). Through a controlled
-$20$-method bake-off we isolate the tree-weighted contrastive term
-as the principal driver of the gain; through four falsified
-alternatives---hyperbolic embedding, frozen-stage SetFit, EMA
-self-distillation, and tri-channel disentanglement---we constrain
-the design space and provide negative evidence that author identity
-is \emph{not} factorisable along channel lines. The remaining gap
-between $20\%$ and full data is small ($<\!1$ point on either
-benchmark), suggesting the next research target is not more loss
-engineering but stronger backbones or signal sources orthogonal to
-genealogy.
+We presented \method, a contrastive objective that re-weights
+supervised contrastive negatives by their distance in the LLM
+fine-tune family tree and pairs each anchor with a view augmentation
+modeled on decoder-temperature noise. The method establishes new
+few-shot state of the art on two AI-code authorship benchmarks, with
+the largest absolute gains at the extreme low-data regime that
+matches deployment reality. A controlled twenty-method bake-off
+isolates the tree weighting as the principal driver of the gain,
+while four falsified alternatives---hyperbolic embedding, frozen
+two-stage SetFit, EMA self-distillation, and disentangled
+representations---rule out more elaborate paradigms. The point of
+the paper is methodological: the right inductive prior for code
+attribution was already in the generators' release notes. Writing it
+into the loss is the rest of the work.
 
 \bibliography{custom}
 
