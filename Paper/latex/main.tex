@@ -564,12 +564,22 @@ secretly overfitting to its validation slice.
 \textbf{Method}
 & $1\%$ & $5\%$ & $20\%$ & $1\%$ & $5\%$ & $20\%$ \\
 \midrule
-\multicolumn{7}{l}{\emph{Published baselines, retrained under our protocol}} \\
+\multicolumn{7}{l}{\emph{Published detection / attribution baselines, retrained under our protocol}} \\
 \textsc{Faid}~\citep{orel2025droid}        & 0.392 & 0.581 & 0.672 & --- & --- & --- \\
-\textsc{DeTeCtive}~\citep{detective2024}   & 0.397 & 0.586 & 0.678 & --- & --- & --- \\
+\textsc{DeTeCtive}~\citep{detective2024}   & 0.397 & 0.586 & 0.678 & 0.206 & 0.329 & 0.416 \\
 \textsc{CodeT5-Authorship}~\citep{wang2021codet5}
                                            & 0.436 & 0.603 & 0.688 & 0.199 & 0.316 & 0.404 \\
-\textsc{Label-Smoothing}                   & 0.319 & 0.568 & 0.680 & 0.191 & 0.333 & 0.445 \\
+\midrule
+\multicolumn{7}{l}{\emph{Classification recipes adapted to AI-code authorship}} \\
+\textsc{Label-Smoothing}~\citep{guo2022unixcoder}
+                                           & 0.319 & 0.568 & 0.680 & 0.191 & 0.333 & 0.445 \\
+\textsc{Focal-CE}                          & 0.387 & 0.580 & 0.666 & 0.191 & 0.306 & 0.392 \\
+\textsc{Ortho-CLF}~\citep{galanti2025hncoe}
+                                           & 0.394 & 0.590 & 0.677 & 0.205 & 0.317 & 0.410 \\
+\textsc{Mixup-MGA}                         & 0.398 & 0.598 & 0.677 & 0.226 & 0.344 & 0.427 \\
+\textsc{ETF-Simplex}~\citep{galanti2025hncoe}
+                                           & 0.440 & 0.598 & 0.683 & 0.226 & 0.340 & 0.413 \\
+\textsc{Hap}                               & 0.436 & 0.584 & 0.670 & --- & --- & --- \\
 \midrule
 \multicolumn{7}{l}{\emph{Full-data reference (paper number)}} \\
 \textsc{UniXcoder} full~\citep{orel2025codetm4}
@@ -577,17 +587,23 @@ secretly overfitting to its validation slice.
 \midrule
 \textbf{\method (ours)}                    & \textbf{0.589} & \textbf{0.662} & \textbf{0.719}
                                            & \textbf{0.297} & \textbf{0.400} & \textbf{0.488} \\
-$\Delta$ vs.\ best baseline                & +0.153 & +0.059 & +0.031
-                                           & +0.098 & +0.067 & +0.043 \\
+$\Delta$ vs.\ best baseline                & +0.149 & +0.059 & +0.031
+                                           & +0.071 & +0.056 & +0.043 \\
 val--test gap                              & +0.006 & +0.008 & +0.012
                                            & --0.001 & --0.005 & --0.013 \\
 \bottomrule
 \end{tabular}
 \caption{\label{tab:main} Authorship attribution under the few-shot
-protocol. \method is the strongest method at every benchmark--fraction
-slot we evaluate. The val--test gap stays well within $\pm 0.013$
-everywhere, ruling out validation-set overfitting as an explanation
-for the gain.}
+protocol on ten baselines covering three families: published code
+detectors retrained on the multi-class task; classification recipes
+borrowed from the broader literature; and the full-data UniXcoder
+reference number reported by the benchmark authors. \method is the
+strongest method at every benchmark--fraction slot. The $\Delta$
+row reports the gap to the strongest baseline at the same slot.
+The val--test gap stays within $\pm 0.013$ throughout, ruling out
+validation-set overfitting as an explanation for the gain. Cells
+marked ``---'' lack a re-runnable artefact; see
+\S\ref{sec:exp}\,Setup for the encoder protocol.}
 \end{table*}
 
 Table~\ref{tab:main} is the headline. \method is the strongest
