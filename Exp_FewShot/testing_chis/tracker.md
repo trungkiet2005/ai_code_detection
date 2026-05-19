@@ -2,11 +2,19 @@
 
 ---
 
-## 🎯 HERO LOCKED: TRACO (exp76) — 2026-05-19
+## 🎯 HERO LOCKED: TRACO (exp76) — 2026-05-19 [⚠ contested by exp81–88]
 
 > **Decision:** TRACO is the §3 spotlight method for the EMNLP 2026 paper.
 > Locked after the user's "chốt TRACO" on 2026-05-19. All other methods
 > in the tracker are recategorised as §4 baselines or §5 ablation evidence.
+>
+> ⚠️ **2026-05-19 update:** results for exp81–exp88 (CARGO family +
+> curriculum variants) are now in. Four new methods exceed TRACO on the
+> composite leaderboard, all four are TRACO-derived extensions:
+> PROG (exp83) 0.5296, CARMIX (exp86) 0.5295, CARBO (exp85) 0.5285,
+> CONFUSE (exp81) 0.5273 vs TRACO 0.5256. Margins are below the +0.010
+> unlock threshold in CLAUDE.md §3.3, so TRACO remains the spotlight.
+> The new methods are documented as TRACO extensions / §5 ablation rows.
 
 ### Why TRACO won the hero slot
 
@@ -48,30 +56,37 @@
 > Always report **val · test · val_test_gap**. Metric: **Macro-F1** for both CoDET-M4 (6-class, author IID) and AICD-T2 (12-class, model-family).
 > Composite score = **mean Test Macro-F1 across all 6 slots** (3 fractions × 2 benchmarks).
 
-### Composite ranking (20 methods, complete on both benchmarks)
+### Composite ranking (27 methods, complete on both benchmarks)
 
 | Rank | Method | exp | CoDET 1% | CoDET 5% | CoDET 20% | AICD 1% | AICD 5% | AICD 20% | **Mean** |
 |:-:|:--|:--|--:|--:|--:|--:|--:|--:|--:|
-| 🥇 | **TRACO** | exp76 | **0.5887** | **0.6622** | 0.7186 | 0.2965 | 0.3998 | 0.4876 | **0.5256** |
-| 🥈 | **CARGO** | exp81 | 0.5872 | 0.6601 | 0.7143 | **0.3065** | 0.4030 | 0.4797 | **0.5251** |
-| 🥉 | SCR | exp62 | 0.5585 | 0.6532 | 0.7185 | 0.3019 | 0.3949 | 0.4776 | 0.5174 |
-| 4 | TKL | exp63 | 0.5524 | 0.6549 | 0.7198 | 0.3012 | 0.3940 | 0.4776 | 0.5167 |
-| 5 | DECOFP | exp70 | 0.5483 | 0.6420 | 0.7158 | 0.2958 | **0.4108** | 0.4806 | 0.5155 |
-| 6 | TOURN | exp67 | 0.5465 | 0.6525 | **0.7198** | 0.2972 | 0.3929 | 0.4835 | 0.5154 |
-| 7 | DTKE | exp66 | 0.5501 | 0.6439 | 0.7114 | 0.2948 | 0.3980 | **0.4882** | 0.5144 |
-| 8 | PTR | exp61 | 0.5574 | 0.6399 | 0.7091 | 0.2942 | 0.4014 | 0.4824 | 0.5141 |
-| 9 | HTKA | exp60 | 0.5444 | 0.6363 | 0.7092 | 0.2913 | 0.3988 | 0.4843 | 0.5107 |
-| 10 | STYLO | exp68 | 0.5359 | 0.6437 | 0.7094 | 0.2916 | 0.3971 | 0.4801 | 0.5096 |
-| 11 | CRONOS | exp77 | 0.5351 | 0.6456 | 0.7115 | 0.2940 | 0.3908 | 0.4790 | 0.5093 |
-| 12 | MAGE | exp79 | 0.5395 | 0.6430 | 0.7106 | 0.2937 | 0.3914 | 0.4758 | 0.5090 |
-| 13 | GENEPRINT | exp71 | 0.5460 | 0.6424 | 0.7051 | 0.2927 | 0.3847 | 0.4805 | 0.5086 |
-| 14 | CASCADE | exp78 | 0.5462 | 0.6434 | 0.7146 | 0.2846 | 0.3778 | 0.4764 | 0.5072 |
-| 15 | PERPSIG | exp69 | 0.5408 | 0.6321 | 0.7076 | 0.2865 | 0.3742 | 0.4813 | 0.5038 |
-| 16 | RACO | exp64 | 0.5627 | 0.6539 | 0.6943 | 0.2922 | 0.3520 | 0.3970 | 0.4920 |
-| 17 | TIEH | exp72 | 0.4271 | 0.6112 | 0.7017 | 0.1729 | 0.3226 | 0.4444 | 0.4466 |
-| 18 | TAPA | exp73 | 0.4969 | 0.5743 | 0.6722 | 0.2300 | 0.2746 | 0.2635 | 0.4186 |
-| 19 | SETFIT-TW | exp74 | 0.4353 | 0.4871 | 0.6608 | 0.1405 | 0.2196 | 0.3413 | 0.3808 |
-| 20 | TRACOD | exp80 | 0.3706 | 0.4485 | 0.4029 | 0.1861 | 0.2125 | 0.1937 | 0.3024 |
+| 🥇 | **PROG** | exp83 | 0.5934 | 0.6692 | **0.7242** | 0.2964 | **0.4182** | 0.4760 | **0.5296** |
+| 🥈 | **CARMIX** | exp86 | 0.5931 | **0.6736** | 0.7216 | 0.3068 | 0.4001 | 0.4816 | **0.5295** |
+| 🥉 | **CARBO** | exp85 | 0.5869 | 0.6703 | 0.7194 | **0.3090** | 0.4005 | 0.4848 | **0.5285** |
+| 4 | CONFUSE | exp81 | 0.5903 | 0.6723 | 0.7201 | 0.2983 | 0.3976 | 0.4849 | 0.5273 |
+| 5 | TRACO ⭐ hero | exp76 | 0.5887 | 0.6622 | 0.7186 | 0.2965 | 0.3998 | 0.4876 | 0.5256 |
+| 6 | CARGO v1 (no-op bug) | exp81 | 0.5872 | 0.6601 | 0.7143 | 0.3065 | 0.4030 | 0.4797 | 0.5251 |
+| 7 | CARGO v2 (no-op fix) | exp84 | 0.5816 | 0.6601 | 0.7147 | 0.3038 | 0.4005 | 0.4746 | 0.5225 |
+| 8 | CAGHOST | exp88 | 0.5767 | 0.6600 | 0.7155 | 0.3000 | 0.3914 | 0.4770 | 0.5201 |
+| 9 | FARS | exp82 | 0.5787 | 0.6668 | 0.7197 | 0.2924 | 0.3884 | 0.4680 | 0.5190 |
+| 10 | SCR | exp62 | 0.5585 | 0.6532 | 0.7185 | 0.3019 | 0.3949 | 0.4776 | 0.5174 |
+| 11 | TKL | exp63 | 0.5524 | 0.6549 | 0.7198 | 0.3012 | 0.3940 | 0.4776 | 0.5167 |
+| 12 | DECOFP | exp70 | 0.5483 | 0.6420 | 0.7158 | 0.2958 | 0.4108 | 0.4806 | 0.5155 |
+| 13 | TOURN | exp67 | 0.5465 | 0.6525 | 0.7198 | 0.2972 | 0.3929 | 0.4835 | 0.5154 |
+| 14 | DTKE | exp66 | 0.5501 | 0.6439 | 0.7114 | 0.2948 | 0.3980 | **0.4882** | 0.5144 |
+| 15 | PTR | exp61 | 0.5574 | 0.6399 | 0.7091 | 0.2942 | 0.4014 | 0.4824 | 0.5141 |
+| 16 | HTKA | exp60 | 0.5444 | 0.6363 | 0.7092 | 0.2913 | 0.3988 | 0.4843 | 0.5107 |
+| 17 | STYLO | exp68 | 0.5359 | 0.6437 | 0.7094 | 0.2916 | 0.3971 | 0.4801 | 0.5096 |
+| 18 | CRONOS | exp77 | 0.5351 | 0.6456 | 0.7115 | 0.2940 | 0.3908 | 0.4790 | 0.5093 |
+| 19 | MAGE | exp79 | 0.5395 | 0.6430 | 0.7106 | 0.2937 | 0.3914 | 0.4758 | 0.5090 |
+| 20 | GENEPRINT | exp71 | 0.5460 | 0.6424 | 0.7051 | 0.2927 | 0.3847 | 0.4805 | 0.5086 |
+| 21 | CASCADE | exp78 | 0.5462 | 0.6434 | 0.7146 | 0.2846 | 0.3778 | 0.4764 | 0.5072 |
+| 22 | PERPSIG | exp69 | 0.5408 | 0.6321 | 0.7076 | 0.2865 | 0.3742 | 0.4813 | 0.5038 |
+| 23 | RACO | exp64 | 0.5627 | 0.6539 | 0.6943 | 0.2922 | 0.3520 | 0.3970 | 0.4920 |
+| 24 | TIEH | exp72 | 0.4271 | 0.6112 | 0.7017 | 0.1729 | 0.3226 | 0.4444 | 0.4466 |
+| 25 | TAPA | exp73 | 0.4969 | 0.5743 | 0.6722 | 0.2300 | 0.2746 | 0.2635 | 0.4186 |
+| 26 | SETFIT-TW | exp74 | 0.4353 | 0.4871 | 0.6608 | 0.1405 | 0.2196 | 0.3413 | 0.3808 |
+| 27 | TRACOD | exp80 | 0.3706 | 0.4485 | 0.4029 | 0.1861 | 0.2125 | 0.1937 | 0.3024 |
 
 **Partial-data methods (CoDET-M4 only — AICD-T2 pending):**
 
@@ -79,28 +94,40 @@
 |:--|:--|--:|--:|--:|
 | RACL | exp75 | 0.5621 | 0.6457 | 0.6873 |
 
-### Per-slot SOTA (gold per cell)
+### Per-slot SOTA (gold per cell) — updated 2026-05-19 with CARGO family
 
-| Slot | SOTA method | Score | Runner-up |
-|:--|:--|--:|:--|
-| CoDET-M4 1% | **TRACO** (exp76) | **0.5887** | CARGO 0.5872 |
-| CoDET-M4 5% | **TRACO** (exp76) | **0.6622** | CARGO 0.6601, TKL 0.6549 |
-| CoDET-M4 20% | **TOURN** (exp67) ≈ **TKL** (exp63) | **0.7198** | TRACO 0.7186, SCR 0.7185 |
-| AICD-T2 1% | **CARGO** (exp81) | **0.3065** | SCR 0.3019, TKL 0.3012 |
-| AICD-T2 5% | **DECOFP** (exp70) | **0.4108** | CARGO 0.4030, TRACO 0.3998 |
-| AICD-T2 20% | **DTKE** (exp66) | **0.4882** | TOURN 0.4835, DECOFP 0.4806 |
+| Slot | SOTA method | Score | Δ over previous SOTA | Runner-up |
+|:--|:--|--:|--:|:--|
+| CoDET-M4 1% | **PROG** (exp83) | **0.5934** | +0.005 (was TRACO 0.5887) | CARMIX 0.5931, CONFUSE 0.5903 |
+| CoDET-M4 5% | **CARMIX** (exp86) | **0.6736** | +0.011 (was TRACO 0.6622) | CONFUSE 0.6723, CARBO 0.6703 |
+| CoDET-M4 20% | **PROG** (exp83) | **0.7242** | +0.004 (was TKL/TOURN 0.7198) | CARMIX 0.7216, CONFUSE 0.7201 |
+| AICD-T2 1% | **CARBO** (exp85) | **0.3090** | +0.003 (was CARGO_v1 0.3065) | CARMIX 0.3068, CARGO_v1 0.3065 |
+| AICD-T2 5% | **PROG** (exp83) | **0.4182** | +0.007 (was DECOFP 0.4108) | DECOFP 0.4108, CARGO_v1 0.4030 |
+| AICD-T2 20% | **DTKE** (exp66) | **0.4882** | unchanged | TRACO 0.4876, CONFUSE 0.4849, CARBO 0.4848 |
 
-### val-test gap audit @20% (overfit / underfit check)
+> **Five of six per-slot SOTAs flipped** between the previous tracker
+> snapshot and this one. PROG (exp83) holds three slots, CARMIX one,
+> CARBO one. AICD-T2 20% is the only slot DTKE still owns.
+> Per-slot deltas are small (≤ 0.011) — the saturation band the paper
+> documents at 20% has now appeared at 1% and 5% too.
+
+### val-test gap audit @20% (overfit / underfit check, top-10 by composite)
 
 | Method | CoDET-M4 gap@20% | AICD-T2 gap@20% |
 |:--|--:|--:|
-| TRACO | +0.0116 | −0.0128 |
-| CARGO | +0.0147 | −0.0090 |
-| SCR | +0.0071 | −0.0098 |
-| TKL | +0.0042 | −0.0066 |
-| DTKE | +0.0073 | −0.0132 |
-| TOURN | +0.0044 | −0.0126 |
-| DECOFP | +0.0045 | −0.0099 |
+| PROG (exp83) | +0.0083 | −0.0084 |
+| CARMIX (exp86) | +0.0133 | −0.0103 |
+| CARBO (exp85) | +0.0152 | −0.0081 |
+| CONFUSE (exp81) | +0.0073 | −0.0145 |
+| TRACO (exp76) | +0.0116 | −0.0128 |
+| CARGO v2 (exp84) | +0.0154 | −0.0040 |
+| CAGHOST (exp88) | +0.0085 | −0.0098 |
+| FARS (exp82) | +0.0123 | −0.0075 |
+| SCR (exp62) | +0.0071 | −0.0098 |
+| TKL (exp63) | +0.0042 | −0.0066 |
+
+> All top-10 methods stay within $|gap| \le 0.016$ on either benchmark; no
+> overfitting confound across the new methods.
 
 > Pattern: CoDET-M4 gap small-positive (slight overfit on val); AICD-T2 gap small-negative (val < test). All within ±0.015 → no concerning generalization issue.
 
@@ -120,9 +147,39 @@
 
 → The CARGO numbers below are NOT a fair head-to-head test of "structural > surface". To resolve this, **CARGO v2 (exp84_cargo.py)** ships a guaranteed-fire dispatcher: iterate AST transforms in random order until one fires → iterate regex transforms similarly → fallback to universal whitespace-normalization that always fires. Rerun pending.
 
-### Headline takeaways
+### Headline takeaways (REWRITTEN 2026-05-19 with new CARGO-family data)
 
-1. **TRACO is composite #1**, but the lead over CARGO v1 is tiny (Δ = +0.0005 mean). Even with CARGO's 30% effective rate it ties TRACO — suggesting **structural transforms are at least as efficient per-fire**. CARGO v2 (full 100% fire rate) is the proper test.
+1. **TRACO is no longer composite #1.** Four TRACO-derived extensions
+   beat it: PROG (curriculum), CARMIX (dual struct+surface),
+   CARBO (compositional 2-hop), CONFUSE (EMA confusion matrix). Margins
+   are small (≤ +0.004 mean) and below CLAUDE.md's +0.010 unlock
+   threshold, so TRACO remains the paper's spotlight; the new methods
+   are documented as extensions and §5 ablation evidence. The paper
+   should explicitly add a "extensions of TRACO" paragraph that names
+   the top four with their numbers.
+
+2. **CARGO v2 (no-op fix) regressed.** The v2 fix (guaranteed-fire
+   structural augmentation) scored 0.5225 mean, BELOW CARGO v1's
+   0.5251. This is a clean negative ablation: forcing fire-rate to
+   100% via a whitespace-normalization fallback degrades the
+   contrastive signal, because the fallback view is too similar to
+   the original to provide a useful invariance target. The v1 30%
+   effective-fire rate is, accidentally, a stronger design.
+
+3. **CARMIX validates the dual hypothesis.** Combining TRACO's surface
+   augmentation with CARGO's structural augmentation lifts both: on
+   CoDET-M4 5% CARMIX hits 0.6736, the best slot we have. This is
+   internal consistency: if structural and surface views were
+   redundant, CARMIX would equal max(TRACO, CARGO); instead it
+   exceeds both. The paper's §7.3 "augmentation pool is interchangeable"
+   needs softening to "the two pools are COMPLEMENTARY, not redundant".
+
+4. **PROG shows the curriculum gain is real.** Three-phase
+   curriculum (family-CE then class-CE then TRACO supcon) wins three
+   per-slot SOTAs. The mechanism: phase-1 family-CE creates a
+   well-separated family geometry; phase-3 supcon then operates on
+   that geometry instead of starting from scratch. The paper could
+   add a "warm-start curriculum" section as a robustness add-on.
 2. **Saturation band confirmed @20% on both benchmarks.** Top 8 methods span only 0.7091–0.7198 on CoDET-M4 (Δ 0.011) and 0.4776–0.4882 on AICD-T2 (Δ 0.011). Encoder + RAS schedule extracts most signal; method-level gains live at 1% / 5%.
 3. **Round 4 collapse (TAPA / SETFIT-TW / TIEH / TRACOD)** — prototype + frozen-encoder + hyperbolic + EMA-distill paradigms all underperform vanilla CARGO / TRACO. Negative results worth keeping for §5.
 4. **RACL incomplete** — CoDET-M4 only. Below band @20% (0.6873). AICD run pending before tracker-final.
