@@ -3,233 +3,177 @@ description:
 alwaysApply: true
 ---
 
-# CLAUDE.md — Repo Briefing (EMNLP 2026 Main target)
+# CLAUDE.md — Repo Briefing (EMNLP 2026 Main, Aiming Oral A*)
 
 > Read this file first. If it disagrees with the code, trust the code and fix this file.
 
 ---
 
-## -1. 12-rule template (global)
+## 0. North Star
 
-Apply to every task unless explicitly overridden. Bias: caution over speed on non-trivial work.
+**Goal:** EMNLP 2026 Main, long paper, 8 pages. **Target: ORAL.**
 
-1. **Think Before Coding** — State assumptions. If uncertain, ask. Stop when confused.
-2. **Simplicity First** — Minimum code. No features beyond ask. No abstractions for single-use code.
-3. **Surgical Changes** — Touch only what you must. Don't refactor what isn't broken.
-4. **Goal-Driven Execution** — Define success criteria, loop until verified.
-5. **Use the model only for judgment calls** — If code can answer, code answers.
-6. **Token budgets are not advisory** — Per-task 4k, per-session 30k. Summarize and restart if breached.
-7. **Surface conflicts, don't average them** — Pick one (more recent / more tested). Flag the other.
-8. **Read before you write** — Read callers and shared utilities before adding code.
-9. **Tests verify intent, not just behavior** — Encode WHY behavior matters.
-10. **Checkpoint after every significant step** — Summarize done / verified / left.
-11. **Match the codebase's conventions** — Conformance > taste. If harmful, surface; don't fork silently.
-12. **Fail loud** — "Completed" is wrong if anything was skipped silently.
+What "oral A*" means for this project:
+- A clear scientific contribution a reviewer will remember a week later.
+- A surprising empirical finding the field has not seen.
+- An architectural or methodological move that opens a new direction, not closes one.
+- Numbers that are state-of-the-art at the regimes that matter, defended by ablation that the reviewer cannot wave away.
 
-**Project-specific addendum:** Every new `exp*.py` MUST open with `# expNN — Method` comment.
+Everything else is in service of this. If a rule in this file gets in the way of an oral A* swing, the rule is wrong and we change the rule, not the swing.
+
+**Deadline:** ~2026-05-26. Time is the binding constraint, not method conservatism.
 
 ---
 
-## 0. Submission target
+## 1. Operating philosophy (replaces previous "frozen protocol")
 
-- **Venue:** EMNLP 2026 Main (long, 8 pages). Aim: Oral.
-- **Deadline:** ~2026-05-26.
-- **Strategy:** Single-method hero in §3, family-diverse baselines in §4, ablation in §5. **HERO LOCKED 2026-05-19: TRACO (exp76)** after user "chốt". Composite #1 mean Macro-F1 = 0.5256 across 6 slots, SOTA CoDET 1%/5%, combines S1+S7. All other methods relegated to §4 baselines or §5 ablation.
+Three principles, in order of priority:
 
-### 0.1 Frozen operational protocol (NOT design space)
+### 1.1 Novelty first, polish second
+A new method that scores 0.65 with a novel architectural object beats an old method that scores 0.72 with a parameter tweak. Reviewers reward ideas, not Macro-F1 alone. We will spend effort on **what is being modelled**, not on which scheduler decays better.
 
-| Setting | Value |
+### 1.2 Architecture is a design space, not a constant
+The encoder, the projector, the head, the augmentation, the schedule, the loss family — all of these are tunable. There are no permanent commitments. If a candidate hero method needs ModernBERT instead of UniXcoder, or a graph-neural head instead of a linear classifier, or a multi-task encoder with three heads, run it. The historical "unixcoder-base only" rule is now a default starting point, not a constraint.
+
+### 1.3 Impact > rigour, but rigour is the moat
+A high-impact claim with shaky evidence is worse than a polished but boring claim. The deal: we swing big on the contribution, then back it with the rigour the field expects (component ablation, controlled comparison, negative results that constrain the design space, val--test gap audit). Big swings without rigour get desk-rejected. Rigour without a big swing gets short-paper'd.
+
+---
+
+## 2. What changes vs the previous CLAUDE.md
+
+| Old rule | New rule |
 |:--|:--|
-| Encoder | `unixcoder-base` only, `local_files_only=True` |
-| Benchmarks | `codet_m4` (Macro-F1, 6-class), `aicd_t2` (Macro-F1, 12-class) |
-| Fractions | `[0.01, 0.05, 0.20]` per-class |
-| AMP | `torch.autocast(device_type='cuda', dtype=torch.bfloat16)` |
-| HW knobs | `bs=256, seq=512, num_workers=4, pin_memory=True`; `_hw(cfg)` auto-downscales |
-| AST features | legacy-aligned 22-feature `extract_ast_features` |
-| Schedule | regime-adaptive (1%→10ep, 5%→6ep, 20%→6ep); LR sqrt-scaled; cosine + warmup |
-| Reporting | always `val_macro`, `test_macro`, `val_test_gap` |
-| Output | one combined `{expNN_method}_results.json` with full `eval_pack` |
+| Hero LOCKED to TRACO (exp76) | **Hero UNLOCKED.** TRACO is the current best, not the final hero. Any new method that beats TRACO on the composite leaderboard with a falsifier-passing novelty claim displaces it. |
+| Frozen protocol: unixcoder-base only, fraction `[0.01, 0.05, 0.20]`, RAS schedule | **Default protocol, not frozen.** New methods can swap the encoder (GraphCodeBERT, CodeT5+, StarCoder2, DeepSeek-Coder-1.3B-Base), expand fractions (add 0.50 and full), or pick a new schedule. Justify the change in the theory block; do not silently drift. |
+| Single-method §3, baselines §4, ablation §5 | **Single dominant contribution still preferred** for oral clarity, but the contribution can be a **system** (encoder + loss + inference recipe) rather than a single loss term. |
+| Every exp must exploit ≥ 1 of S1–S10 | **S-facts are inspiration, not gatekeepers.** A method that introduces a genuinely new architectural object for code attribution is acceptable even if the S-fact map is post-hoc. Generic ML re-applications are still rejected. |
+| "DO NOT" decision rules | Reduced to **three hard rules** (see §6). |
 
-**`_load_aicd("t2")` is STRICT:** raises `FileNotFoundError` if T2 dir missing. No HF fallback.
-
-⚠️ **DATA BUG (exp1–exp17):** old `_load_aicd` returned T1 binary instead of T2. Quote AICD results only from exp18+.
+The 12-rule template (think before coding, simplicity first, surgical changes, fail loud, etc.) is retained verbatim in §7.
 
 ---
 
-## 1. Research question
+## 3. Where we are right now
 
-How should a few-shot attribution model use the known genealogy of LLM generators instead of treating every author label as unrelated?
+### 3.1 Empirical state (composite leaderboard)
 
-**Thesis (open form):** The flat-simplex baseline is wrong on a label space with metric structure. Genealogy-aware objects (kernels, residuals, contrastive variants, temperatures, factorizations, alignments) define new mathematical objects that have no analogue under unstructured labels. The headline object is decided by ablation, NOT pre-locked.
-
----
-
-## 2. Novelty bar — problem-specific only
-
-Every new exp MUST introduce a NEW MATHEMATICAL OBJECT that is **undefined for flat-label classification** and exploits ≥ 1 of S1–S10 structural facts. If a reviewer can say "this is X applied to Y", REJECT.
-
-### 2.1 Structural facts of AI-code attribution (the irreducible tokens)
-
-| # | Fact | Enables |
-|:-:|:--|:--|
-| S1 | Two trees co-exist: AST (syntax) + genealogy (model family) | Dual-tree kernels, joint geometry |
-| S2 | Decoding fingerprints (T, top-p, rep-penalty) leak into output | Decoding-artifact heads |
-| S3 | Pretraining-corpus provenance (Stack/BigCode/GitHub) leaks | Provenance-trace heads |
-| S4 | Prompts shared across generators in benchmarks | Prompt-invariant attribution |
-| S5 | Authors have characteristic AST motifs | AST subtree mining, motif banks |
-| S6 | Detector can re-encode under each candidate LM → likelihood vector | Multi-LM perplexity signature |
-| S7 | Same prompt × different T from same model → different outputs; identity invariant | Temperature-augmented training |
-| S8 | Source domain (cf/lc/gh) observed and confounding | Source-stratified backdoor adjustment |
-| S9 | Few-shot is the operating regime (new generator added monthly) | Prototype-generator meta, tournament |
-| S10 | Human is a class with internal cluster substructure | Human-cluster prototypes |
-
-**Acceptance test:** the proposed equation contains ≥ 1 of `{AST_i, prompt_embed, log p_LM, source domain, decoding param, d_tree, family-anchor}`.
-
-### 2.2 Anti-patterns (REJECT)
-
-- "Apply SupCon/ArcFace/SimCSE/R-Drop/LoRA to code" — generic.
-- Loss-weight tuning presented as novelty.
-- Feature stacking without theory grounding.
-- Engineering wins (schedule, LR, bs, AMP) presented as method.
-
----
-
-## 3. Method-diversity matrix — discovery tool (NOT contribution)
-
-Diversity finds the hero and populates §4 baselines. Paper is single-method (§3 spotlight goes to ONE method only).
-
-| Family | Active in repo |
-|:--|:--|
-| Sibling-weighted CE (F1) | SSL, TKL, SCR — saturated |
-| Soft labels (F2) | GSCE |
-| Kernel/Gram alignment (F3) | HTKA, DGK |
-| Contrastive InfoNCE (F4) | TPNL, GIBA, BGB |
-| Output temperature (F5) | GFTS |
-| Residual/disentangle (F6) | GRA, RASL, GFR |
-| Curriculum / phase-transition (F7) | PTR, KAC |
-| Causal / backdoor (F8) | CFT, CIE, HETE, RCE |
-| Optimal transport (F9) | GOT, MMDG |
-| Spectral (F10) | SGE, DGK |
-| Hyperbolic (F11) | HPA |
-| Bayesian (F12) | PAC-A, BUA |
-| Retrieval (F13) | TBD exp67_tourn-adjacent |
-| MoE / Hypernet / KAN / SSM (F14–F17) | gap — legacy-only |
-| Stylometry fusion | exp68_stylo |
-| Multi-LM likelihood | exp69_perpsig |
-| Decoding-fingerprint | exp70_decofp |
-
----
-
-## 4. Current leaderboard (best per slot across all rounds, Macro-F1)
-
-### CoDET-M4 Author
-
-| Frac | Best | Score | Δ vs paper 0.6633 | Runner-up |
-|:-:|:--|:-:|:-:|:--|
-| 1% | **TRACO** (exp76) | **0.5887** | — | RACO 0.5627 |
-| 5% | **TRACO** (exp76) | **0.6622** | — | TKL 0.6549 |
-| 20% | TKL / TOURN | 0.7198 | +0.0565 | TRACO 0.7186, SSL-RAS 0.7186 |
-
-### AICD-T2 Model-Family
-
-| Frac | Best | Score | Runner-up |
+| Rank | Method | Composite Macro-F1 | Per-slot SOTA |
 |:-:|:--|:-:|:--|
-| 1% | TKL (exp63) | 0.3038 | TOURN 0.2972 |
-| 5% | DECOFP (exp70) | 0.4108 | RACL 0.4030 |
-| 20% | **DTKE** (exp66) | **0.4882** | CE-only 0.4881 ≈ tied |
+| 1 | TRACO (exp76) | 0.5256 | CoDET 1%, CoDET 5% |
+| 2 | CARGO (exp84) | 0.5251 | AICD 1% |
+| 3 | SCR (exp62) | 0.5174 | -- |
+| 4 | TKL (exp63) | 0.5167 | CoDET 20% (tied) |
+| 5 | DECOFP (exp70) | 0.5155 | AICD 5% |
 
-### Critical findings
+Top 8 methods within 0.018 of each other on the composite. The cluster suggests the **encoder + RAS schedule** dominates at $20\%$ data; method-level wins live at extreme few-shot.
 
-1. **TRACO (exp76) breaks the saturation band at 1% and 5% CoDET-M4** — first method to do so. Falsifier `view_cos = 0.97` confirms S7 invariance empirically achieved.
+### 3.2 Big unexplored directions (priority for oral swings)
 
-2. **CE-only @20% matches band ceiling on both benchmarks** (ablation exp65_abl): CoDET-M4 0.7118 / AICD-T2 0.4881. `DTKE − CE-only` on AICD = +0.0001 → saturation is encoder-level, not method-level. Adding structure-aware loss terms doesn't help at 20% data.
+Each of these is worth a separate exp file. None has been tried in the active slate. All would, if they work, justify an oral pitch by themselves.
 
-3. **TKL learned `sibling_weight @20% → 0`** — structure prior decays with n. Confirmed by exp65 ablation.
+1. **Encoder pivot: pretrained code LLM as encoder.** Replace UniXcoder-base (125M) with a frozen 1B-2B code LLM (DeepSeek-Coder-1.3B, StarCoder2-3B with adapter, or a Qwen2.5-Coder-1.5B). Mean-pool the final hidden, train only a small projector + classifier. If this beats fine-tuned UniXcoder, the entire encoder choice in the field has been wrong.
 
-4. **RACO's `λ` GROWS with n** (0.64→0.82→0.97) — opposite direction from TKL. Loss-level vs rep-level structure priors are regime-dependent in OPPOSITE ways.
+2. **Graph-of-thoughts encoder.** Run a small AST/DFG GNN on top of UniXcoder outputs, with edge types encoding the family-tree (S1) prior. Genuinely new architectural object: a **dual-graph** encoder (token-graph $\cap$ AST-graph) for attribution.
 
-5. **GENEPRINT exp71 falsifier FAILED**: 3-channel orthogonal but zero-out drops < 0.025 → classifier ignores channels. Negative finding: author identity is NOT factorisable along S-fact channels.
+3. **Retrieval-augmented attribution.** Index the training set with FAISS; at inference, mix the parametric classifier logits with a kNN vote over retrieved samples, with the retrieval weight learned. Test-time adaptation without finetuning.
 
-6. **TIEH exp72 hyperbolic FAILED**: low-n collapse (AICD 1% = 0.17). Hyperbolic geometry too unstable for sparse data.
+4. **Multi-task encoder with auxiliary genealogy decoder.** Train a single encoder with three heads: classification, tree-distance regression, decoding-temperature regression. Use only the classification head at test, but the auxiliary tasks shape the representation.
 
-7. **TAPA exp73 collapse**: prototype Spearman anti-correlated with d_tree (-0.47 to -0.68). EMA prototypes conflict with tree-iso constraint.
+5. **Prompt-conditioned attribution.** Most CoDET-M4 samples share prompts across generators. Encode the prompt explicitly; predict author conditional on the (prompt, code) pair. Tests whether style is the actual signal or whether it is just "this prompt produces consistent outputs from generator X".
 
----
+6. **Differentiable family-tree learning.** Replace the hard-coded $\mathcal{T}$ with a learnable tree (parameterised as a Gumbel-softmax over edges or a continuous ultrametric matrix) that recovers a genealogy from data, not from release notes. Massively reduces the practical objection that we are using insider information.
 
-## 5. Active slate (NEW round, sequential IDs)
+7. **Active-learning few-shot.** Train a smaller initial model, score every unlabeled sample by predicted-entropy, label only the top-K by oracle, repeat. Pushes the $1\%$ regime from random to informed sampling.
 
-| ID | Method | New object | S-fact | Reference (cite/baseline) |
-|:--|:--|:--|:--|:--|
-| `exp64_raco` | **RACO** Regime-Adaptive Contrastive: `L = λ(n)·SupCon(d_tree-weighted) + (1−λ(n))·CE`, λ learned | S9 + structure | Differs from LASCL (arXiv:2402.00232) by phase-transition gate |
-| `exp65_abl` | Ablation: CE / SSL / HTKA / GSCE / SCR component decomposition | — | diagnostic |
-| `exp66_dtke` | **DTKE** Dual-Tree Kernel: `K(x,y) = K_ast(AST_x, AST_y) · K_gene(y, y')` | S1 | undefined w/o both trees |
-| `exp67_tourn` | **TOURN** Tournament few-shot, tree-aware bracket | S9 | arXiv:2501.08165 |
-| `exp68_stylo` | **STYLO** Stylometry feature fusion (30+ features) ⊕ unixcoder | S5 | arXiv:2506.17323 |
-| `exp69_perpsig` | **PERPSIG** Multi-LM likelihood signature classifier | S6 | new |
-| `exp70_decofp` | **DECOFP** Decoding-fingerprint regressor + conditional attribution | S2 | new |
-| `exp71_geneprint` | **GENEPRINT** ⭐ HERO: tri-channel disentangled `z=[z_T;z_D;z_M]` w/ HSIC orthogonality; channel-specific losses (topology / decoding / motif) | S1+S2+S5 | synthesises all Round-2 insights |
-| `exp72_tieh` | **TIEH** Tree-Isometric Hyperbolic Embedding in Poincare ball; learnable prototypes constrained `d_H(p_i,p_j) ≈ d_tree(i,j)` | S1 (geometric) | extends Nickel & Kiela 2017 |
-| `exp73_tapa` | **TAPA** Tree-Anchored Prototypical Attribution: EMA prototypes + multi-layer pooling + tree-iso constraint | S1+S9 | Snell 2017 + LIGHT arXiv:2503.00958 |
-| `exp74_setfit_tw` | **SETFIT-TW** SetFit two-stage: SupCon w/ tree-weighted negatives → frozen-encoder linear head | S1+S9 | SetFit arXiv:2209.11055 |
-| `exp75_racl` | **RACL** Retrieval-Augmented Code Logit: learned mix `β · param + (1−β) · kNN`, kNN with tree-aware weighting | S1+S9 | RAFC arXiv:2406.11148 + kNN-LM |
-| `exp76_traco` | **TRACO** Token-level Robust Augmentation Contrastive: 2-view encoder enforces S7 invariance under {token_dropout, id_rename, ws_jitter, comment_strip} | S7+S1 | new (SimCLR/MoCo paradigm, S7-grounded for code) |
-| `exp77_cronos` | **CRONOS** Single-encoder + 3 S-fact aux heads (tree-dist regressor + decoding-fp regressor + sibling-pair classifier) | S1+S2+S9 | multi-task aux co-training, fixes GENEPRINT failure |
-| `exp78_cascade` | **CASCADE** Hierarchical family-then-sibling decoding: `p(y=k) = p(family) · p(sibling\|family)` | S1 | extends hierarchical softmax to LLM-genealogy attribution |
-| `exp79_mage` | **MAGE** Genealogy-conditioned mixup: pair sampling ∝ exp(-γ·d_tree) → sibling-heavy embedding-mixup | S1 | extends mixup with label-tree-conditioned sampler |
-| `exp80_tracod` | **TRACOD** TRACO + EMA teacher self-distillation (DINO-style centered targets) under code augmentation views | S7+stability | extends DINO arXiv:2104.14294 with supervised CE and TRACO augmentations |
-| `exp81_confuse` | **CONFUSE** EMA confusion matrix replaces tree prior as hard-negative weight in TRACO supcon | CASCADE-grounded | data-driven adaptation of LASCL/TRACO with cold-start tree prior |
-| `exp82_fars` | **FARS** TRACO + EMA family centroids with hinge-margin repulsion across cross-family pairs | CASCADE family-bottleneck | extends ArcFace/CenterLoss to label-tree FAMILIES |
-| `exp83_prog` | **PROG** 3-phase curriculum: P1 family-CE → P2 class-CE → P3 + TRACO supcon | CASCADE curriculum | curriculum learning (Bengio 2009) with label-tree granularity |
+8. **Reasoning-trace attribution.** Use a small reasoning model (Qwen-3-Reason or DeepSeek-R1-Distill-1.5B) to produce a chain-of-thought explanation of "who wrote this code" then attribute. Tests whether explicit reasoning closes the sibling-confusion gap.
 
-**Killed (chưa run, generic ML):** `exp64_dgk` (kernel-alignment trùng HTKA), `exp73_srcbdoor` (trùng CIE/CFT/HETE), `exp75_humclust` (chỉ K-means trên human). **GENEPRINT exp71 / TIEH exp72: falsifier failed (run completed), kept as analysis evidence in §5.**
+Pick one, scope it for ten days, and run. If it fails, pivot. The bar is not "this is novel"; the bar is "this is novel and **could lift the composite by $+0.03$ or more**".
 
-**Hero-locking gate:** ~~chỉ chốt khi user nói "chốt"~~ **LOCKED 2026-05-19: TRACO (exp76)**. Tất cả new method từ giờ đi vào §5 ablation hoặc §4 baseline, không thay thế hero. Để pivot hero, user phải explicit nói "đổi hero" hoặc "unlock".
+### 3.3 Hero method status
+
+- **Currently:** TRACO (exp76).
+- **Unlocked:** any new method that (i) beats TRACO on the composite by $\ge 0.01$ and (ii) passes its own falsifier, becomes the new hero candidate.
+- **To displace TRACO**: the new method must produce a paper-section-level reframe of the contribution, not just a number bump. The paper is currently written around TRACO + tree-weighting + view augmentation; switching hero requires rewriting §3 and §6 around the new method.
 
 ---
 
-## 6. Repo layout
+## 4. Research question (current framing)
+
+How should a few-shot code-authorship model exploit the fact that the label space is not flat?
+
+The answer set is bigger than just "tree-weighted contrastive". The current paper says it is tree-weighted contrastive; an oral pitch can broaden it to "we expose what the label-space hierarchy implies for representation learning, and we show three different architectural ways to consume it: a loss term (TRACO), an encoder bias (graph head), and an inference rule (retrieval/kNN)".
+
+---
+
+## 5. Repo layout
 
 ```
 Exp_FewShot/testing_chis/      ← ACTIVE
-  tracker.md                   ← primary leaderboard
-  baseline_0[1-3].py           ← CodeT5, DeTeCtive, FAID
-  exp_n{06,07,09,13..19}.py    ← novel + baselines
-  exp{20,25-29}.py             ← rescued theory
-  exp{31..37}.py               ← oral-tier single-tree
-  exp{38..55}.py               ← dual-tree refactors
-  exp{56..63}.py               ← RAS-schedule round (results logged)
-  exp{64..70}.py               ← new slate (pending)
-  legacy/                      ← read-only
-Exp_Climb/, Exp_CodeDet/, Exp_DM/   ← FROZEN
-Paper/latex/main.tex                ← draft
-legacy/                             ← archived
+  tracker.md                   ← live leaderboard
+  exp{60..89}.py               ← method round 2 + 3 + CARGO family
+  exp{90..92}.py               ← external-baseline adapters (CGPTS, DETMULTI, DCGPT)
+  external_baselines/          ← read-only third-party clones
+  legacy/                      ← read-only old methods
+Paper/latex/main.tex           ← current draft, written around TRACO
+Paper/outline.md               ← section-level plan
+Exp_Climb/, Exp_CodeDet/, Exp_DM/   ← frozen, do not touch
 ```
 
----
-
-## 7. How to add a new experiment
-
-1. Write the 6-line theory block: NAME / ARXIV_ID / ONE-LINE CLAIM / EQUATION / WHY NOT BEFORE / FALSIFIER.
-2. Verify the new object exploits ≥ 1 S-fact and is undefined for flat labels.
-3. Copy closest active exp (e.g. `exp42_ssl.py`, `exp60_htka.py`, `exp63_tkl.py`) as skeleton.
-4. **First line of file:** `# expNN — Method name` comment.
-5. Use `unixcoder-base`, `local_files_only=True`, fraction protocol, AMP bf16, `_hw(cfg)`.
-6. Output ONE combined `{expNN_method}_results.json` with full `eval_pack`.
-7. Register in `tracker.md` after run with val + test + Δ + val_test_gap.
+New experiments live in `Exp_FewShot/testing_chis/`. Pick the next free `expNN` ID (current free range starts at exp93).
 
 ---
 
-## 8. Decision rules (DO NOT do unprompted)
+## 6. Three hard rules (everything else is negotiable)
 
-- Don't reuse `expNN` IDs.
-- Don't add HF fallback or `dirs_to_try` to `_load_aicd`.
-- Don't drop `local_files_only=True`.
-- Don't revert AMP to fp16+GradScaler on RTX Pro 6000.
-- Don't quote AICD numbers from exp1–17 (T1-binary bug).
-- Don't add experiments to `Exp_Climb/`, `Exp_CodeDet/`, `Exp_DM/` (frozen).
-- ~~Don't declare "hero method" until user says "chốt".~~ **Hero LOCKED 2026-05-19: TRACO (exp76).** Don't propose alternative heroes unless user says "đổi hero" or "unlock".
-- Don't propose generic ML — every method must cite ≥ 1 S-fact.
-- Always report val_test_gap.
+1. **Never reuse an `expNN` ID.** History is append-only.
+2. **Always report `val_macro`, `test_macro`, and the `val_test_gap`** for every run. A method without a val--test gap report is not finished.
+3. **Never mix benchmarks in a single Macro-F1 cell.** CoDET-M4 → Macro-F1, AICD-T2 → Macro-F1, Droid → Weighted-F1 (per the repo hook). Each benchmark stays in its own column.
+
+Everything else, including encoder choice, schedule, augmentation pool, loss family, hero method, S-fact mapping, even the paper's framing, is up for renegotiation.
+
+---
+
+## 7. The 12-rule template (retained)
+
+Apply to every task unless explicitly overridden. Bias: caution over speed on non-trivial work.
+
+1. **Think before coding** — state assumptions, ask if uncertain.
+2. **Simplicity first** — no abstractions for single-use code.
+3. **Surgical changes** — touch only what you must.
+4. **Goal-driven execution** — define success, loop until verified.
+5. **Use the model only for judgment calls** — if code can answer, code answers.
+6. **Token budgets are not advisory** — per-task 4k, per-session 30k.
+7. **Surface conflicts, do not average them** — pick one, flag the other.
+8. **Read before you write** — read callers and shared utilities first.
+9. **Tests verify intent** — encode why behavior matters.
+10. **Checkpoint after every significant step** — summarise done / verified / left.
+11. **Match codebase conventions** — conformance over taste.
+12. **Fail loud** — "completed" is wrong if anything was skipped silently.
+
+**Project addendum:** every new `expNN_*.py` file MUST open with `# expNN — Method name` and include the 6-line theory block (NAME / ARXIV_ID / ONE-LINE CLAIM / EQUATION / WHY NOT BEFORE / FALSIFIER) before any imports.
+
+---
+
+## 8. How to add a new experiment
+
+1. **Pick the next free `expNN` ID** (currently exp93+).
+2. **Write the 6-line theory block.** State the new mathematical object or architectural component in equation form. State what would falsify your claim.
+3. **Decide whether you need the existing protocol or a new one.** If new (different encoder, different fractions, different schedule), justify it in one paragraph at the top.
+4. **Implement.** Reuse plumbing from the closest existing exp (TRACO at `exp76_traco.py` is the canonical template) but feel free to swap any component.
+5. **Always report val + test + val--test gap.** Output a single `{expNN_method}_results.json` with the full eval pack.
+6. **Update `tracker.md`** with the row.
+
+Theory block example:
+```
+# exp93 — METHOD_NAME
+# NAME       : ...
+# REFERENCE  : ... (arXiv id or "new")
+# CLAIM      : one sentence
+# EQUATION   : L = ...
+# WHY NEW    : what existing method does NOT do this
+# FALSIFIER  : what metric, on what test set, would invalidate the claim
+```
 
 ---
 
@@ -237,11 +181,23 @@ legacy/                             ← archived
 
 - Paper draft: [Paper/latex/main.tex](Paper/latex/main.tex)
 - Section outline: [Paper/outline.md](Paper/outline.md)
-- Benchmark refs: `docs/references/paper_{AICD,Droid,CodeDet_M4}.md`
 - Active tracker: [Exp_FewShot/testing_chis/tracker.md](Exp_FewShot/testing_chis/tracker.md)
-- Key external (lit-search 2026-05-17):
-  - [LASCL — Label Hierarchy SupCon (arXiv:2402.00232)](https://arxiv.org/abs/2402.00232)
-  - [HCAL — Hierarchy-Consistent Adaptive Loss (arXiv:2508.13452)](https://arxiv.org/html/2508.13452v1)
-  - [Disentangled Authorship (arXiv:2604.21300)](https://arxiv.org/abs/2604.21300)
-  - [LLM-AuthorBench Stylometry (arXiv:2506.17323)](https://arxiv.org/abs/2506.17323)
-  - [Tournament Code Attribution (arXiv:2501.08165)](https://arxiv.org/html/2501.08165v1)
+- External baselines: [Exp_FewShot/external_baselines/README.md](Exp_FewShot/external_baselines/README.md)
+- Benchmarks:
+  - CoDET-M4 (Orel et al., ACL Findings 2025)
+  - AICD Bench Task 2 (Orel et al., EACL 2026)
+  - Droid (Orel et al., EMNLP 2025)
+
+Recent literature worth reading for the new directions in §3.2:
+- LASCL — Label Hierarchy SupCon (arXiv:2402.00232)
+- HCAL — Hierarchy-Consistent Adaptive Loss (arXiv:2508.13452)
+- Tournament Code Attribution (arXiv:2501.08165)
+- LLM-AuthorBench Stylometry (arXiv:2506.17323)
+- CodeT5-JSA / Hidden DNA structural patterns (arXiv:2510.10493)
+- Code Fingerprints / DCAN disentangled attribution (arXiv:2603.04212)
+
+---
+
+## 10. One closing note
+
+If you are reading this and thinking "should I run a small parameter sweep on TRACO to squeeze another $0.005$ Macro-F1?", the answer is no. Spend that time on one of the eight directions in §3.2. The paper has its hero number already; the paper is missing its **second act**.
