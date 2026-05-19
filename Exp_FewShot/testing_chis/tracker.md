@@ -1,5 +1,112 @@
 # Testing Chis — Experiment Tracker
 
+---
+
+## 🏆 Master Leaderboard (LIVE, 2026-05-19)
+
+> **Setup:** `unixcoder-base`, regime-adaptive schedule (1%→10ep, 5%→6ep, 20%→6ep), AMP bf16, bs=256, seq=512.
+> Always report **val · test · val_test_gap**. Metric: **Macro-F1** for both CoDET-M4 (6-class, author IID) and AICD-T2 (12-class, model-family).
+> Composite score = **mean Test Macro-F1 across all 6 slots** (3 fractions × 2 benchmarks).
+
+### Composite ranking (20 methods, complete on both benchmarks)
+
+| Rank | Method | exp | CoDET 1% | CoDET 5% | CoDET 20% | AICD 1% | AICD 5% | AICD 20% | **Mean** |
+|:-:|:--|:--|--:|--:|--:|--:|--:|--:|--:|
+| 🥇 | **TRACO** | exp76 | **0.5887** | **0.6622** | 0.7186 | 0.2965 | 0.3998 | 0.4876 | **0.5256** |
+| 🥈 | **CARGO** | exp81 | 0.5872 | 0.6601 | 0.7143 | **0.3065** | 0.4030 | 0.4797 | **0.5251** |
+| 🥉 | SCR | exp62 | 0.5585 | 0.6532 | 0.7185 | 0.3019 | 0.3949 | 0.4776 | 0.5174 |
+| 4 | TKL | exp63 | 0.5524 | 0.6549 | 0.7198 | 0.3012 | 0.3940 | 0.4776 | 0.5167 |
+| 5 | DECOFP | exp70 | 0.5483 | 0.6420 | 0.7158 | 0.2958 | **0.4108** | 0.4806 | 0.5155 |
+| 6 | TOURN | exp67 | 0.5465 | 0.6525 | **0.7198** | 0.2972 | 0.3929 | 0.4835 | 0.5154 |
+| 7 | DTKE | exp66 | 0.5501 | 0.6439 | 0.7114 | 0.2948 | 0.3980 | **0.4882** | 0.5144 |
+| 8 | PTR | exp61 | 0.5574 | 0.6399 | 0.7091 | 0.2942 | 0.4014 | 0.4824 | 0.5141 |
+| 9 | HTKA | exp60 | 0.5444 | 0.6363 | 0.7092 | 0.2913 | 0.3988 | 0.4843 | 0.5107 |
+| 10 | STYLO | exp68 | 0.5359 | 0.6437 | 0.7094 | 0.2916 | 0.3971 | 0.4801 | 0.5096 |
+| 11 | CRONOS | exp77 | 0.5351 | 0.6456 | 0.7115 | 0.2940 | 0.3908 | 0.4790 | 0.5093 |
+| 12 | MAGE | exp79 | 0.5395 | 0.6430 | 0.7106 | 0.2937 | 0.3914 | 0.4758 | 0.5090 |
+| 13 | GENEPRINT | exp71 | 0.5460 | 0.6424 | 0.7051 | 0.2927 | 0.3847 | 0.4805 | 0.5086 |
+| 14 | CASCADE | exp78 | 0.5462 | 0.6434 | 0.7146 | 0.2846 | 0.3778 | 0.4764 | 0.5072 |
+| 15 | PERPSIG | exp69 | 0.5408 | 0.6321 | 0.7076 | 0.2865 | 0.3742 | 0.4813 | 0.5038 |
+| 16 | RACO | exp64 | 0.5627 | 0.6539 | 0.6943 | 0.2922 | 0.3520 | 0.3970 | 0.4920 |
+| 17 | TIEH | exp72 | 0.4271 | 0.6112 | 0.7017 | 0.1729 | 0.3226 | 0.4444 | 0.4466 |
+| 18 | TAPA | exp73 | 0.4969 | 0.5743 | 0.6722 | 0.2300 | 0.2746 | 0.2635 | 0.4186 |
+| 19 | SETFIT-TW | exp74 | 0.4353 | 0.4871 | 0.6608 | 0.1405 | 0.2196 | 0.3413 | 0.3808 |
+| 20 | TRACOD | exp80 | 0.3706 | 0.4485 | 0.4029 | 0.1861 | 0.2125 | 0.1937 | 0.3024 |
+
+**Partial-data methods (CoDET-M4 only — AICD-T2 pending):**
+
+| Method | exp | CoDET 1% | CoDET 5% | CoDET 20% |
+|:--|:--|--:|--:|--:|
+| RACL | exp75 | 0.5621 | 0.6457 | 0.6873 |
+
+### Per-slot SOTA (gold per cell)
+
+| Slot | SOTA method | Score | Runner-up |
+|:--|:--|--:|:--|
+| CoDET-M4 1% | **TRACO** (exp76) | **0.5887** | CARGO 0.5872 |
+| CoDET-M4 5% | **TRACO** (exp76) | **0.6622** | CARGO 0.6601, TKL 0.6549 |
+| CoDET-M4 20% | **TOURN** (exp67) ≈ **TKL** (exp63) | **0.7198** | TRACO 0.7186, SCR 0.7185 |
+| AICD-T2 1% | **CARGO** (exp81) | **0.3065** | SCR 0.3019, TKL 0.3012 |
+| AICD-T2 5% | **DECOFP** (exp70) | **0.4108** | CARGO 0.4030, TRACO 0.3998 |
+| AICD-T2 20% | **DTKE** (exp66) | **0.4882** | TOURN 0.4835, DECOFP 0.4806 |
+
+### val-test gap audit @20% (overfit / underfit check)
+
+| Method | CoDET-M4 gap@20% | AICD-T2 gap@20% |
+|:--|--:|--:|
+| TRACO | +0.0116 | −0.0128 |
+| CARGO | +0.0147 | −0.0090 |
+| SCR | +0.0071 | −0.0098 |
+| TKL | +0.0042 | −0.0066 |
+| DTKE | +0.0073 | −0.0132 |
+| TOURN | +0.0044 | −0.0126 |
+| DECOFP | +0.0045 | −0.0099 |
+
+> Pattern: CoDET-M4 gap small-positive (slight overfit on val); AICD-T2 gap small-negative (val < test). All within ±0.015 → no concerning generalization issue.
+
+### Δ vs paper baseline (UniXcoder full-data on CoDET-M4 = 0.6633)
+
+| Method | CoDET 20% Δ | Notes |
+|:--|--:|:--|
+| TKL / TOURN | **+0.0565** | tied at 0.7198 |
+| TRACO | +0.0553 | breaks band @1% & @5% |
+| CARGO | +0.0510 | breaks AICD @1% SOTA |
+| SCR | +0.0552 | band |
+| DECOFP | +0.0525 | band |
+
+### Headline takeaways
+
+1. **TRACO is composite #1**, but the lead over CARGO is tiny (Δ = +0.0005 mean). The two are statistically indistinguishable on aggregate — TRACO won on CoDET low-n, CARGO won on AICD 1%, both top the band. The user's "true-S7" critique against TRACO ⇒ CARGO is **validated**: structural rewrites match surface jitter on average and beat it on the harder benchmark.
+2. **Saturation band confirmed @20% on both benchmarks.** Top 8 methods span only 0.7091–0.7198 on CoDET-M4 (Δ 0.011) and 0.4776–0.4882 on AICD-T2 (Δ 0.011). Encoder + RAS schedule extracts most signal; method-level gains live at 1% / 5%.
+3. **Round 4 collapse (TAPA / SETFIT-TW / TIEH / TRACOD)** — prototype + frozen-encoder + hyperbolic + EMA-distill paradigms all underperform vanilla CARGO / TRACO. Negative results worth keeping for §5.
+4. **RACL incomplete** — CoDET-M4 only. Below band @20% (0.6873). AICD run pending before tracker-final.
+5. **Round 5 CARGO family (exp84–exp89) pushed but unrun.** See "Round 5" section below.
+
+---
+
+## 🚀 Round 5 — CARGO family (exp84–exp89, pushed 2026-05-19)
+
+> **Motivation:** CARGO (exp81) closes the theory-implementation gap of TRACO and matches the band ceiling on AICD 1%.
+> Round 5 dissects CARGO along 5 axes to find the single hero for §3 and populate §4 baselines + §5 ablation.
+
+| ID | Method | Math object (new for AI-code attribution) | S-fact | Status |
+|:--|:--|:--|:--|:--|
+| exp84 | **CARGO** | AST/CFG rewrite distribution + Tree-Weighted SupCon | S1+S5+S7 | ⏳ rerun (renamed from exp81) |
+| exp85 | **CARBO** | Compositional invariance over transform monoid `φ(T₂∘T₁(x))` | S7 | ⏳ pending |
+| exp86 | **CARMIX** | Dual-distribution invariance loss `λ_s·SupCon_struct + λ_t·SupCon_surf` | S5+S7 | ⏳ pending |
+| exp87 | **CAARC** | Transform-conditional reward policy `w_k = softmax(r_k/τ)` | S7+S9 | ⏳ pending |
+| exp88 | **CAGHOST** | k-view + sibling-conditional hard-negative mining over genealogy graph | S1+S5 | ⏳ pending |
+| exp89 | **CARCURR** | Difficulty-annealing schedule on transform tiers `σ_t(epoch)` | S7+S9 | ⏳ pending |
+
+**Run order priority** (highest insight per GPU-hour):
+1. exp86_carmix — directly tests CARGO ⊥ TRACO hypothesis
+2. exp89_carcurr — tests if collapse at hard transforms is the bottleneck
+3. exp87_caarc — gives interpretable per-transform reward signal
+4. exp85_carbo — compositional invariance test (3x compute)
+5. exp88_caghost — sibling mining (most complex)
+
+---
+
 ## Overview
 
 Self-contained experiments for Hier-NTK ablation + published baselines.
