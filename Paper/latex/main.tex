@@ -893,18 +893,37 @@ and on locating the regime in which the simple approach helps. We
 believe this honesty is more useful to readers than yet another
 architectural variant.
 
-\paragraph{Limitations.} Three limitations are worth flagging
-upfront. (\emph{i}) The family tree must be authored manually from
-release notes. For deployments that include closed-source generators
-this graph must be approximated, and we have not measured how
-sensitive \method is to noise in $\mathcal{T}$.
-(\emph{ii}) Above $20\%$ data, the gains shrink toward zero. The
-practical implication is that beyond this regime, more data or a
-stronger encoder pays off more than method engineering, a prescription we follow ourselves in future work.
+\paragraph{Limitations.} Six limitations are worth flagging
+upfront; for each, we point at the rebuttal experiment that
+attempts to bound it. The experiments live in
+\texttt{Reviews/R1\_responses/}.
+(\emph{i}) The family tree is authored manually from release
+notes; closed-source generators force approximation
+(\texttt{R1\_01\_treenoise.py} measures Macro-F1 vs edge-corruption
+rate at five noise levels).
+(\emph{ii}) Above $20\%$ data, the gains shrink toward zero; more
+data or a stronger encoder pays off more than method engineering.
 (\emph{iii}) We stratify few-shot sampling by class but not by
-source domain. A held-out-domain protocol (e.g.\ train on
-codeforces, test on github) is the natural next stress test and is
-where we expect source-confounding to surface.
+source domain (\texttt{R1\_07\_oodsrc.py} trains on
+Codeforces and tests on the held-out GitHub and LeetCode slices).
+(\emph{iv}) The HUMAN-vs-AI default distance of $3$ was hand
+picked, not learned (\texttt{R1\_06\_treedist.py} sweeps the
+constant over $\{1, 2, 3, 4, 5\}$).
+(\emph{v}) The four surface augmentations preserve AST parse on
+three of four families but \textsc{token-dropout} reduces parse
+rate by design (\texttt{R1\_08\_augsem.py} measures parse-rate and
+AST-edit distance per augmentation; the contrastive head treats
+strict semantic equivalence as sufficient but not necessary).
+(\emph{vi}) Our headline evaluation is closed-set. A small
+open-set / leave-one-generator-out study
+(\texttt{R1\_03\_openset.py}) extends the deployment-relevance
+discussion. We also provide a hyperparameter sensitivity sweep
+over $\gamma, \tau, \lambda$
+(\texttt{R1\_02\_hpsens.py}), a ModernBERT-encoder comparison
+(\texttt{R1\_04\_modernbert.py}), a per-class breakdown
+diagnosing the Macro-vs-Weighted F1 gap on AICD-T2
+(\texttt{R1\_05\_perclass.py}), and a hierarchical cross-entropy
+direct baseline (\texttt{R1\_09\_hierce.py}).
 
 \paragraph{Ethics and intended use.} Code-authorship attribution is
 useful for compliance audits, dataset provenance, and academic
