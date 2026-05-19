@@ -87,7 +87,7 @@ snippet, the field has nothing to be proud of.
 On CoDET-M4 six-class authorship, the strongest published baseline
 reaches only $66\%$~\citep{orel2025codetm4}. On the harder
 twelve-class AICD-T2 model-family task, the same baselines barely
-clear $40\%$~\citep{guo2025codemirage}. The gap between near-perfect
+clear $40\%$~\citep{orel2026aicd}. The gap between near-perfect
 detection and mid-forties attribution is the gap this paper attacks.
 
 \paragraph{The error pattern tells us what is wrong.} We trained the
@@ -181,7 +181,7 @@ CodeGPTSensor~\citep{xu2025codegptsensor}, and
 DeTeCtive~\citep{detective2024} all clear $98\%$ binary Macro-F1 on
 recent benchmarks. Attribution, the multi-class version, is the
 natural next problem. CoDET-M4~\citep{orel2025codetm4} and
-AICD-Bench~\citep{guo2025codemirage} introduced six- and twelve-class
+AICD-Bench~\citep{orel2026aicd} introduced six- and twelve-class
 authorship splits; their accompanying baselines plateau in the
 mid-sixties on the easier benchmark and below fifty on the harder
 one. None of these baselines structures the loss around the
@@ -1240,7 +1240,7 @@ $350$ GPU-hours, distributed across two H100s and one RTX Pro 6000.
 
 \paragraph{Data.} CoDET-M4 and AICD-Bench are released under their
 respective public licenses by the original authors
-\citep{orel2025codetm4, guo2025codemirage}. We did not modify the
+\citep{orel2025codetm4, orel2026aicd}. We did not modify the
 data; the only pre-processing step is whitespace stripping at file
 boundaries to match the encoder tokenizer.
 
