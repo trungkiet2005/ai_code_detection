@@ -1,32 +1,35 @@
 \documentclass[11pt]{article}
 
-% review mode (anonymous) for EMNLP 2026 submission
+% Change "review" to "final" to generate the final (camera-ready) version.
+% Change to "preprint" to generate a non-anonymous version with page numbers.
 \usepackage[review]{acl}
 
+% Standard package includes
 \usepackage{times}
 \usepackage{latexsym}
+
+% For proper rendering and hyphenation of words containing Latin characters
 \usepackage[T1]{fontenc}
+% This assumes your files are encoded as UTF8
 \usepackage[utf8]{inputenc}
+
+% This improves the layout of the manuscript
 \usepackage{microtype}
+
+% This improves the aesthetics of text in the typewriter font.
 \usepackage{inconsolata}
+
+% Including images requires the graphicx package.
 \usepackage{graphicx}
-\usepackage{booktabs}
-\usepackage{multirow}
+
+% Math + tables + figures used in this paper
 \usepackage{amsmath}
 \usepackage{amssymb}
+\usepackage{booktabs}
 \usepackage{xcolor}
 \usepackage{xspace}
 \usepackage{tikz}
 \usetikzlibrary{shapes.geometric, arrows.meta, positioning, fit, backgrounds, calc}
-
-% Line-number positioning under the ACL [review] mode.
-% acl.sty's default places numbers ~4pt left of the text block, which
-% on some viewers visually merges into the body. We push them out a
-% touch farther and force a small numeric font so the column reads
-% cleanly even at low PDF render DPI.
-\usepackage{lineno}
-\setlength{\linenumbersep}{2em}
-\renewcommand\linenumberfont{\normalfont\scriptsize\sffamily\color{gray!70}}
 
 \newcommand{\method}{\textsc{TRACO}\xspace}
 \newcommand{\sib}{\ensuremath{d_{\mathcal{T}}}\xspace}
@@ -1201,5 +1204,7 @@ classifier head (\textsc{Geneprint}). The simplest objective in our
 study---a soft re-weighting of supervised contrastive negatives by
 tree distance---navigates all three failure modes by adding zero
 architectural constraint and one scalar hyperparameter.
+
+\nolinenumbers
 
 \end{document}
