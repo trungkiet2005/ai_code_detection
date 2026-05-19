@@ -19,7 +19,6 @@ codet_m4_checkpoints/
 *.pt
 *.bin
 *.h5
-results/
 logs/
 temp/
 tmp/
@@ -30,8 +29,6 @@ Exp_ZeroShot/run_zs_*_results.json
 third_party/
 
 # Few-shot result JSONs (downloaded from Kaggle, not version-controlled)
-results/
-Exp_FewShot/results/
 
 # LaTeX build artifacts
 *.aux
