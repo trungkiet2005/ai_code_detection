@@ -74,9 +74,15 @@
 | SCR | +0.0552 | band |
 | DECOFP | +0.0525 | band |
 
+### ⚠️ AUDIT 2026-05-19 — CARGO v1 had a silent no-op bug
+
+`exp81_cargo` (result in tracker) used a dispatcher that picked ONE random transform per sample and accepted no-op output silently. Result: **effective fire rate 27%–34% across 6 slots** (66%–73% of "augmentations" returned the original code unchanged). The SupCon loss received identity-pair gradients (= 0) for the majority of training, so CARGO v1 was effectively "CE + 30% real contrastive". TRACO's surface transforms by contrast always fire (100% effective).
+
+→ The CARGO numbers below are NOT a fair head-to-head test of "structural > surface". To resolve this, **CARGO v2 (exp84_cargo.py)** ships a guaranteed-fire dispatcher: iterate AST transforms in random order until one fires → iterate regex transforms similarly → fallback to universal whitespace-normalization that always fires. Rerun pending.
+
 ### Headline takeaways
 
-1. **TRACO is composite #1**, but the lead over CARGO is tiny (Δ = +0.0005 mean). The two are statistically indistinguishable on aggregate — TRACO won on CoDET low-n, CARGO won on AICD 1%, both top the band. The user's "true-S7" critique against TRACO ⇒ CARGO is **validated**: structural rewrites match surface jitter on average and beat it on the harder benchmark.
+1. **TRACO is composite #1**, but the lead over CARGO v1 is tiny (Δ = +0.0005 mean). Even with CARGO's 30% effective rate it ties TRACO — suggesting **structural transforms are at least as efficient per-fire**. CARGO v2 (full 100% fire rate) is the proper test.
 2. **Saturation band confirmed @20% on both benchmarks.** Top 8 methods span only 0.7091–0.7198 on CoDET-M4 (Δ 0.011) and 0.4776–0.4882 on AICD-T2 (Δ 0.011). Encoder + RAS schedule extracts most signal; method-level gains live at 1% / 5%.
 3. **Round 4 collapse (TAPA / SETFIT-TW / TIEH / TRACOD)** — prototype + frozen-encoder + hyperbolic + EMA-distill paradigms all underperform vanilla CARGO / TRACO. Negative results worth keeping for §5.
 4. **RACL incomplete** — CoDET-M4 only. Below band @20% (0.6873). AICD run pending before tracker-final.
@@ -91,7 +97,7 @@
 
 | ID | Method | Math object (new for AI-code attribution) | S-fact | Status |
 |:--|:--|:--|:--|:--|
-| exp84 | **CARGO** | AST/CFG rewrite distribution + Tree-Weighted SupCon | S1+S5+S7 | ⏳ rerun (renamed from exp81) |
+| exp84 | **CARGO v2** | AST/CFG rewrites + Tree-Weighted SupCon, **guaranteed-fire dispatcher** | S1+S5+S7 | ⏳ rerun required — v1 had 70% no-op bug |
 | exp85 | **CARBO** | Compositional invariance over transform monoid `φ(T₂∘T₁(x))` | S7 | ⏳ pending |
 | exp86 | **CARMIX** | Dual-distribution invariance loss `λ_s·SupCon_struct + λ_t·SupCon_surf` | S5+S7 | ⏳ pending |
 | exp87 | **CAARC** | Transform-conditional reward policy `w_k = softmax(r_k/τ)` | S7+S9 | ⏳ pending |
