@@ -1,4 +1,4 @@
-# exp100 — METATRACO: MAML meta-initialisation for cross-generator few-shot
+﻿# exp100 â€” METATRACO: MAML meta-initialisation for cross-generator few-shot
 # =============================================================================
 # NAME       : METATRACO (Model-Agnostic Meta-Learning for cross-generator)
 # REFERENCE  : new; adapts MAML (Finn 2017) to AI-code authorship for fast
@@ -135,11 +135,13 @@ def _hw(c):
         torch.backends.cudnn.allow_tf32 = True
         torch.backends.cudnn.benchmark = True
         mem = torch.cuda.get_device_properties(0).total_memory / 1e9
-        # foMAML still memory-heavy; use smaller batch
-        if mem >= 40: c.bs, c.seq = 96, 512
-        elif mem >= 20: c.bs, c.seq = 64, 448
-        elif mem >= 10: c.bs, c.seq = 48, 384
-        else: c.bs, c.seq = 24, 256
+        # foMAML stores param snapshot + 3 inner steps; memory-heavy.
+        if mem >= 80:   c.bs, c.seq = 192, 512   # RTX Pro 6000 96GB
+        elif mem >= 40: c.bs, c.seq = 128, 512   # H100 80GB
+        elif mem >= 20: c.bs, c.seq = 64,  448
+        elif mem >= 10: c.bs, c.seq = 48,  384
+        else:           c.bs, c.seq = 24,  256
+        logger.info(f"[hw] mem={mem:.1f}GB bs={c.bs} seq={c.seq} (foMAML)")
     return c
 
 def set_seed(s):
@@ -222,7 +224,7 @@ def meta_train(model, tok, tr_data, dist, cfg):
     """foMAML outer loop on a fixed encoder. Each meta-step: sample a task
     (support+query), adapt parameters on support via inner SGD, compute query
     loss, backprop through QUERY ONLY (first-order)."""
-    opt_outer = torch.optim.AdamW(model.parameters(), lr=cfg.lr_enc, weight_decay=cfg.wd)
+    opt_outer = torch.optim.AdamW(model.parameters(), lr=cfg.lr_enc, weight_decay=cfg.wd, fused=True)
     for step in range(cfg.meta_steps):
         seed_t = cfg.seed + step
         (s_ids, s_m, s_y), (q_ids, q_m, q_y) = sample_task(
@@ -294,7 +296,7 @@ def run_exp(cfg, tag):
     tr_ids, tr_m, tr_y = to_loader(tr_sub)
     vl_ids, vl_m, vl_y = to_loader(vl_data)
     ts_ids, ts_m, ts_y = to_loader(ts_data)
-    opt = torch.optim.AdamW(model.parameters(), lr=cfg.lr_enc, weight_decay=cfg.wd)
+    opt = torch.optim.AdamW(model.parameters(), lr=cfg.lr_enc, weight_decay=cfg.wd, fused=True)
     sch = get_cosine_schedule_with_warmup(opt, max(1, int(cfg.epochs * 4 * cfg.warmup)), cfg.epochs * 4)
     scaler = GradScaler()
     bs = cfg.bs

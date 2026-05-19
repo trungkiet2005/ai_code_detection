@@ -1,4 +1,4 @@
-# exp87 — ADVTRACO: Adversarial min-max view-augmentation for code attribution
+﻿# exp87 â€” ADVTRACO: Adversarial min-max view-augmentation for code attribution
 # =============================================================================
 # NAME       : ADVTRACO (Adversarial TRACO)
 # REFERENCE  : new; combines Madry-style adversarial training
@@ -177,10 +177,12 @@ def _hw(c):
         torch.backends.cudnn.benchmark = True
         mem = torch.cuda.get_device_properties(0).total_memory / 1e9
         # K+1 views per batch in adversary scoring => smaller bs
-        if mem >= 40: c.bs, c.seq = 64, 512
-        elif mem >= 20: c.bs, c.seq = 48, 448
-        elif mem >= 10: c.bs, c.seq = 32, 384
-        else: c.bs, c.seq = 16, 256
+        # RTX Pro 6000 Blackwell has 96GB; H100 80GB; A100 40GB; etc.
+        if mem >= 80:   c.bs, c.seq = 128, 512   # RTX Pro 6000 96GB / H100 NVL
+        elif mem >= 40: c.bs, c.seq = 96,  512   # H100 80GB / A100 80GB
+        elif mem >= 20: c.bs, c.seq = 48,  448   # A100 40GB / L40
+        elif mem >= 10: c.bs, c.seq = 32,  384   # T4 / RTX 4090
+        else:           c.bs, c.seq = 16,  256
         logger.info(f"[hw] mem={mem:.1f}GB bs={c.bs} seq={c.seq} (K+1 views, K={c.K_aug})")
     return c
 
@@ -360,7 +362,7 @@ def run_exp(cfg, tag):
     enc_ids = {id(p) for p in model.encoder.parameters()}
     head = [p for p in model.parameters() if id(p) not in enc_ids]
     opt = torch.optim.AdamW([{"params": list(model.encoder.parameters()), "lr": cfg.lr_enc},
-                              {"params": head, "lr": cfg.lr_head}], weight_decay=cfg.wd)
+                              {"params": head, "lr": cfg.lr_head}], weight_decay=cfg.wd, fused=True)
     sch = get_cosine_schedule_with_warmup(opt, max(1, int(total * cfg.warmup)), total)
     scaler = GradScaler()
     best_val, best_state, vh, adv_history = 0.0, None, [], []

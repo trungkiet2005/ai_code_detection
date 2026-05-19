@@ -1,4 +1,4 @@
-# exp99 — UNCERTTRACO: Uncertainty-aware selective prediction
+﻿# exp99 â€” UNCERTTRACO: Uncertainty-aware selective prediction
 # =============================================================================
 # NAME       : UNCERTTRACO (Uncertainty-aware TRACO with selective prediction)
 # REFERENCE  : new; combines MC-dropout (Gal & Ghahramani 2016) and selective
@@ -18,7 +18,7 @@
 #                       AUC of risk-coverage curve.
 # WHY NEW    : No published code-attribution paper reports selective
 #              prediction metrics. This is the deployment story missing
-#              from the saturation discussion in §7.
+#              from the saturation discussion in Â§7.
 # FALSIFIER  : Coverage@5%Risk > 0.50 at 20pct AICD-T2 means we can serve
 #              >50% of inputs with only 5% error -- the saturated band is
 #              irrelevant for deployment if we abstain on the uncertain ones.
@@ -201,10 +201,13 @@ def _hw(c):
         torch.backends.cudnn.allow_tf32 = True
         torch.backends.cudnn.benchmark = True
         mem = torch.cuda.get_device_properties(0).total_memory / 1e9
-        if mem >= 40: c.bs, c.seq = 128, 512
-        elif mem >= 20: c.bs, c.seq = 96, 448
-        elif mem >= 10: c.bs, c.seq = 64, 384
-        else: c.bs, c.seq = 32, 256
+        # 2-view contrastive train + K=20 MC dropout eval (no grad in eval)
+        if mem >= 80:   c.bs, c.seq = 256, 512   # RTX Pro 6000 96GB
+        elif mem >= 40: c.bs, c.seq = 160, 512   # H100 80GB
+        elif mem >= 20: c.bs, c.seq = 96,  448
+        elif mem >= 10: c.bs, c.seq = 64,  384
+        else:           c.bs, c.seq = 32,  256
+        logger.info(f"[hw] mem={mem:.1f}GB bs={c.bs} seq={c.seq}")
     return c
 
 def set_seed(s):
@@ -328,7 +331,7 @@ def run_exp(cfg, tag):
     enc_ids = {id(p) for p in model.encoder.parameters()}
     head = [p for p in model.parameters() if id(p) not in enc_ids]
     opt = torch.optim.AdamW([{"params": list(model.encoder.parameters()), "lr": cfg.lr_enc},
-                              {"params": head, "lr": cfg.lr_head}], weight_decay=cfg.wd)
+                              {"params": head, "lr": cfg.lr_head}], weight_decay=cfg.wd, fused=True)
     sch = get_cosine_schedule_with_warmup(opt, max(1, int(total * cfg.warmup)), total)
     scaler = GradScaler()
     best_val, best_state, vh = 0.0, None, []

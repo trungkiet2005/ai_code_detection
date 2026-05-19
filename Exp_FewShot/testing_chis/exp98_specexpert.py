@@ -1,4 +1,4 @@
-# exp98 — SPECEXPERT: Per-family sibling-discriminator experts (MoE)
+﻿# exp98 â€” SPECEXPERT: Per-family sibling-discriminator experts (MoE)
 # =============================================================================
 # NAME       : SPECEXPERT (Specialist Expert mixture for siblings)
 # REFERENCE  : new; combines mixture-of-experts (Shazeer 2017) with TRACO,
@@ -203,10 +203,12 @@ def _hw(c):
         torch.backends.cudnn.allow_tf32 = True
         torch.backends.cudnn.benchmark = True
         mem = torch.cuda.get_device_properties(0).total_memory / 1e9
-        if mem >= 40: c.bs, c.seq = 128, 512
-        elif mem >= 20: c.bs, c.seq = 96, 448
-        elif mem >= 10: c.bs, c.seq = 64, 384
-        else: c.bs, c.seq = 32, 256
+        # 2-view contrastive + small specialist heads (cheap)
+        if mem >= 80:   c.bs, c.seq = 256, 512   # RTX Pro 6000 96GB
+        elif mem >= 40: c.bs, c.seq = 160, 512   # H100 / A100 80GB
+        elif mem >= 20: c.bs, c.seq = 96,  448
+        elif mem >= 10: c.bs, c.seq = 64,  384
+        else:           c.bs, c.seq = 32,  256
         logger.info(f"[hw] mem={mem:.1f}GB bs={c.bs} seq={c.seq}")
     return c
 
@@ -372,7 +374,7 @@ def run_exp(cfg, tag):
     enc_ids = {id(p) for p in model.encoder.parameters()}
     head = [p for p in model.parameters() if id(p) not in enc_ids]
     opt = torch.optim.AdamW([{"params": list(model.encoder.parameters()), "lr": cfg.lr_enc},
-                              {"params": head, "lr": cfg.lr_head}], weight_decay=cfg.wd)
+                              {"params": head, "lr": cfg.lr_head}], weight_decay=cfg.wd, fused=True)
     sch = get_cosine_schedule_with_warmup(opt, max(1, int(total * cfg.warmup)), total)
     scaler = GradScaler()
     best_val, best_state, vh = 0.0, None, []
