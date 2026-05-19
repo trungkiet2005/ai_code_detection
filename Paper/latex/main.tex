@@ -80,15 +80,15 @@ A few years ago, telling whether code was AI-generated was an open
 problem; today it is essentially solved. Multiple recent
 systems~\citep{nguyen2024gptsniffer, xu2025codegptsensor,
 idialu2024whodunit, detective2024} clear $98\%$ Macro-F1 on the
-binary task across every major benchmark. But once we shift the
-question from \emph{whether} to \emph{which}, that is, which model out of six
-or twelve produced this snippet. The field has nothing to be proud
-of. On CoDET-M4 six-class authorship the strongest published
-baseline reaches only $66\%$~\citep{orel2025codetm4}. On the harder
+binary task across every major benchmark.
+But the moment we change the question from \emph{whether} to
+\emph{which}, asking which of six or twelve generators wrote a given
+snippet, the field has nothing to be proud of.
+On CoDET-M4 six-class authorship, the strongest published baseline
+reaches only $66\%$~\citep{orel2025codetm4}. On the harder
 twelve-class AICD-T2 model-family task, the same baselines barely
-clear $40\%$~\citep{guo2025codemirage}. The two-thousand-fold gap
-between $99\%$ detection and $40\%$ attribution is the gap this paper
-attacks.
+clear $40\%$~\citep{guo2025codemirage}. The gap between near-perfect
+detection and mid-forties attribution is the gap this paper attacks.
 
 \paragraph{The error pattern tells us what is wrong.} We trained the
 strongest published baseline on CoDET-M4 and asked a simple question:
@@ -116,20 +116,22 @@ deployment reality (a new generator released every month, dozens of
 labeled examples available), the data is too thin to recover the
 structure that cross-entropy discarded.
 
-\paragraph{Two facts we get to use.} The first is the tree itself.
-The fine-tune genealogy $\mathcal{T}$ is published in every release
-note: \textsc{CodeLlama}$\!\rightarrow\!$\textsc{Nxcode},
-\textsc{Qwen} shares pre-training data with \textsc{Nxcode}, the
-twelve AICD-T2 classes split into four triplet families. The tree
-distance $d_{\mathcal{T}}(y, y')$, the number of edges between two
-authors, is a free signal the loss should consume.
-The second is invariance. For a fixed prompt and a fixed model,
-sampling at temperature $0.2$ and at temperature $0.9$ produces
-visibly different code but the \emph{same} author. Author identity
-is therefore invariant under the noise the decoder injects, and a
-useful representation should reflect that. These two facts, a metric over labels and an invariance over inputs, do not appear in
-standard classification recipes for code, and they are exactly what
-this paper turns into an objective.
+\paragraph{Two facts we get to use.} The first fact is that the
+family tree is free. Every model release note tells us the parent:
+\textsc{CodeLlama}$\!\rightarrow\!$\textsc{Nxcode}, \textsc{Qwen}
+shares pre-training data with \textsc{Nxcode}, the twelve AICD-T2
+labels split into four triplet families. From this we get a tree
+distance $d_{\mathcal{T}}(y, y')$, a non-negative integer that says
+how many fine-tune edges separate any two authors. It is the metric
+structure that flat cross-entropy threw away.
+
+The second fact is invariance. Fix a prompt and fix a model;
+sample its decoder at temperature $0.2$ and again at $0.9$. The two
+outputs look very different. They have the same author. A
+representation of authorship should therefore be invariant under
+the noise the decoder injects at sampling time. This is an
+invariance \emph{over inputs}, complementary to the metric structure
+\emph{over labels} that the family tree gives us.
 
 \paragraph{What \method does.} The recipe is short. For every code
 snippet $x$ in a mini-batch we produce a view $x'$ by an on-the-fly
@@ -146,24 +148,26 @@ error analysis said it should: on siblings.
 Two ideas, one loss term, no new hyperparameters beyond $\gamma$. We
 will show that this is enough.
 
-\paragraph{What we find.} \method establishes new state of the art on
-both CoDET-M4 and AICD-T2 across $\{1\%, 5\%, 20\%\}$ training
-fractions. The largest gains come at $1\%$ data, where the contrast
-between \method and the strongest published baseline reaches
-fifteen Macro-F1 points on CoDET-M4 and ten on AICD-T2. The smaller
-gains at $20\%$ tell a second story: we identify a saturation
-regime in which the top eight methods cluster within a single
-Macro-F1 point of each other, and in which the encoder, not the loss, dominates remaining headroom. Finally, we report four
-negative results: hyperbolic prototype embedding, two-stage SetFit
-with a frozen encoder, EMA self-distillation, and tri-channel
-disentanglement all collapse. Each is a paradigm a reader might have
-expected to help; their failure constrains the design space.
+\paragraph{What we find.} \method sets new state of the art on both
+CoDET-M4 and AICD-T2 across $\{1\%, 5\%, 20\%\}$ training fractions.
+The widest gap opens at $1\%$ data, the regime that matches what a
+practitioner actually faces when a new generator appears: fifteen
+Macro-F1 points over the strongest published baseline on CoDET-M4,
+ten on AICD-T2. The smaller gains at $20\%$ tell a complementary
+story. We identify a saturation regime in which the top eight
+methods cluster within a single Macro-F1 point of each other and
+the encoder, not the loss, dominates remaining headroom. Finally,
+we report four negative results. Hyperbolic prototype embedding,
+two-stage SetFit with a frozen encoder, EMA self-distillation, and
+tri-channel disentanglement all collapse. Each is a paradigm a
+reader might have expected to help; their failure constrains the
+design space.
 
-\paragraph{Why this matters.} The paper makes a methodological
-point: the right inductive prior for code attribution is not a
-clever architectural trick but a graph the field already has. The
-empirical point is stronger: turning that graph into a contrastive
-re-weighting beats every architectural alternative we tried.
+\paragraph{Why this matters.} The empirical point is that the right
+inductive prior for code attribution beats every architectural
+alternative we tried. The methodological point is stronger. That
+prior was never an architecture choice. It was a graph the field
+already had.
 
 %======================================================================
 \section{Related Work}
@@ -726,11 +730,11 @@ $2.5\%$. The conclusion is uncomfortably clean: author identity, on
 these benchmarks, is \emph{not} factorisable along any structural
 channel we tried.
 
-Taken together, these four failures argue for the same thing: the
+Four very different failure modes point at the same conclusion. The
 right way to inject hierarchy into a code-attribution loss is the
-simplest one we found, a multiplicative weight on the SupCon
-negatives. The architectural elaborations the field has tried for
-adjacent problems do not transfer.
+simplest thing we found: a single multiplicative weight on the
+SupCon negatives. The architectural elaborations the field has
+tried for adjacent problems do not transfer to this one.
 
 %======================================================================
 \section{Where the wins land}
@@ -750,10 +754,10 @@ larger per family because the family structure is richer (four
 triplets vs.\ one sibling pair). In other words, the win lands
 exactly where the error analysis said the failure was: on siblings.
 
-This is what we hoped to see. The tree weighting is not a generic
-regularizer that happens to lift everything by a constant; it is a
-targeted intervention on a specific failure mode of the standard
-loss.
+This is what we hoped to find. The tree weighting is not a generic
+regularizer that lifts everything by a constant. It is a targeted
+intervention on the specific failure mode that motivated the paper
+in the first place.
 
 %======================================================================
 \section{Discussion}
@@ -796,18 +800,20 @@ signal among many.
 \label{sec:conclusion}
 %======================================================================
 
-We presented \method, a contrastive objective that re-weights
-supervised contrastive negatives by their distance in the LLM
-fine-tune family tree and pairs each anchor with a view augmentation
-modeled on decoder-temperature noise. The method establishes new
-few-shot state of the art on two AI-code authorship benchmarks, with
-the largest absolute gains at the extreme low-data regime that
-matches deployment reality. A controlled twenty-method bake-off
-isolates the tree weighting as the principal driver of the gain,
-while four falsified alternatives (hyperbolic embedding, frozen two-stage SetFit, EMA self-distillation, and disentangled representations) rule out more elaborate paradigms. The point of
-the paper is methodological: the right inductive prior for code
-attribution was already in the generators' release notes. Writing it
-into the loss is the rest of the work.
+Cross-entropy on flat labels has been the bottleneck for AI-code
+authorship attribution for years. \method removes it by handing the
+loss two pieces of information the field already has but has not
+been using: the fine-tune family tree of the generators, and the
+invariance of author identity under decoder noise. The result is
+new few-shot state of the art on two benchmarks, with the widest
+gaps at the low-data regime where practitioners actually live. A
+controlled twenty-method bake-off isolates the tree weighting as
+the principal driver of the gain, and four falsified alternatives
+rule out more elaborate paradigms.
+The methodological takeaway is the part we want to leave with the
+reader. The right inductive prior for code attribution was never an
+architectural choice. It was a graph in the generators' release
+notes. Writing it into the loss is the rest of the work.
 
 \bibliography{custom}
 
