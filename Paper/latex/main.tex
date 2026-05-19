@@ -19,9 +19,14 @@
 \usepackage{tikz}
 \usetikzlibrary{shapes.geometric, arrows.meta, positioning, fit, backgrounds, calc}
 
-% Widen the gap between line numbers and body text to remove the
-% visual-overlap artifact observed under the ACL [review] line-numbering.
-\setlength{\linenumbersep}{1em}
+% Line-number positioning under the ACL [review] mode.
+% acl.sty's default places numbers ~4pt left of the text block, which
+% on some viewers visually merges into the body. We push them out a
+% touch farther and force a small numeric font so the column reads
+% cleanly even at low PDF render DPI.
+\usepackage{lineno}
+\setlength{\linenumbersep}{2em}
+\renewcommand\linenumberfont{\normalfont\scriptsize\sffamily\color{gray!70}}
 
 \newcommand{\method}{\textsc{TRACO}\xspace}
 \newcommand{\sib}{\ensuremath{d_{\mathcal{T}}}\xspace}
@@ -39,26 +44,28 @@ Few-Shot Authorship Attribution of LLM-Generated Code}
 \begin{abstract}
 %======================================================================
 Telling whether code was written by a human or by a language model is
-essentially solved. Telling \emph{which} model wrote it is not. We
-trace this gap to a structural fact that the field has so far ignored:
-the popular code generators are not independent authors but
-fine-tune relatives of one another, and the hardest mistakes in every
-high-performing detector cluster on the sibling pairs of that family
-tree. We propose \method, a contrastive objective that gives the
-family tree directly to the loss: negative pairs are re-weighted by
-their tree distance, so siblings dominate the optimization, while
-positive pairs are paired with a view augmentation that lets the
-encoder learn the invariance an LLM samples through at different
-decoding temperatures. Under a strict few-shot protocol on two
-benchmarks, \method establishes new state of the art at every data
-budget we test. More importantly, a controlled twenty-method
-bake-off shows that the tree weighting is the only ingredient that
-matters at extreme few-shot; four natural-looking alternatives
-(hyperbolic embedding, frozen two-stage SetFit, EMA self-distillation,
-disentangled tri-channel representation) all collapse. The takeaway
-is not that contrastive learning is new, but that the right
-inductive prior for code attribution is already in the release notes
-of the generators.
+essentially solved. Telling \emph{which} model wrote it is not---and
+this gap is now the bottleneck for compliance auditing, dataset
+provenance, and academic-integrity pipelines. We trace the difficulty
+to a structural fact that the field has so far ignored: popular code
+generators are not independent authors but fine-tune relatives of one
+another, and the hardest mistakes in every high-performing detector
+cluster on the sibling pairs of the family tree. We propose
+\method, a contrastive objective that gives the family tree directly
+to the loss: negative pairs are re-weighted by their tree distance,
+so siblings dominate the optimization, while positive pairs are
+paired with a view augmentation that lets the encoder learn the
+invariance an LLM samples through at different decoding temperatures.
+Under a strict per-class few-shot protocol on two benchmarks,
+\method establishes new state of the art at every data budget we
+test. More importantly, a controlled twenty-method bake-off shows
+that the tree weighting is the only ingredient that matters at
+extreme few-shot; four natural-looking alternatives (hyperbolic
+embedding, frozen two-stage SetFit, EMA self-distillation, and
+disentangled tri-channel representations) all collapse. The takeaway
+is not that contrastive learning is new, but that the right inductive
+prior for code attribution is already in the release notes of the
+generators---writing it into the loss is the rest of the work.
 \end{abstract}
 
 %======================================================================
@@ -227,6 +234,7 @@ single forward pass.
 \begin{figure*}[t]
 \centering
 \begin{tikzpicture}[
+  scale=0.95, every node/.style={transform shape},
   font=\small,
   node distance=4mm,
   box/.style={draw, rounded corners=2pt, align=center, minimum height=7mm,
@@ -382,34 +390,30 @@ easily. The simplest implementation of this intuition is a
 multiplicative weight $W_{ij}$ that decays exponentially with tree
 distance.
 
-\paragraph{Formal loss.} For a mini-batch of $B$ pairs, we encode the
-original and an augmented view of each sample (described next),
-producing a doubled batch
-$\mathbf{Z} \in \mathbb{R}^{2B \times d_z}$ with paired labels
-$\mathbf{Y}$. Define the temperature-scaled similarity
-$s_{ij} = z_i^\top z_j / \tau$ and the tree-aware weight
+\paragraph{Formal loss.} For a mini-batch of $B$ pairs we encode the
+original and an augmented view (described next), producing a
+doubled batch $\mathbf{Z} \in \mathbb{R}^{2B \times d_z}$ with paired
+labels $\mathbf{Y}$. With $s_{ij} = z_i^{\!\top}\!z_j / \tau$, define
+the tree-aware weight
 \begin{equation}
-W_{ij} = \mathbf{1}[y_i = y_j]
-\;+\;
-\mathbf{1}[y_i \neq y_j]\,\exp\!\big(\!-\gamma\,d_{\mathcal{T}}(y_i, y_j)\big),
+W_{ij} \!=\!\begin{cases}
+  1 & y_i \!=\! y_j,\;j\!\neq\!i \\
+  e^{-\gamma\,d_{\mathcal{T}}(y_i, y_j)} & y_i \!\neq\! y_j \\
+  0 & j\!=\!i
+\end{cases}
 \end{equation}
-with $W_{ii} = 0$. Positive pairs (including the augmented partner)
-carry unit weight; siblings, at tree distance one, receive
-$e^{-\gamma}\!\approx\!0.37$; cross-family negatives, at distance
-three or more, receive $\le 0.05$.
-The tree-weighted supervised contrastive loss is
+Positives (including the augmented partner) carry unit weight;
+siblings at tree distance one receive
+$e^{-\gamma}\!\approx\!0.37$; cross-family negatives at distance
+$\ge\!3$ receive $\le\!0.05$. The tree-weighted contrastive loss is
 \begin{equation}
-\mathcal{L}_{\mathrm{TW}} \;=\;
--\frac{1}{|\mathcal{A}|}\sum_{i \in \mathcal{A}}
-\log
-\frac{
-  \sum_{j:\,y_j=y_i, j \neq i} W_{ij}\,\exp(s_{ij})
-}{
-  \sum_{k \neq i} W_{ik}\,\exp(s_{ik})
-}
+\mathcal{L}_{\mathrm{TW}}
+= -\!\frac{1}{|\mathcal{A}|}\!\sum_{i \in \mathcal{A}}\!
+  \log \frac{\textstyle\sum_{j} \mathbf{1}[y_j\!=\!y_i]\,W_{ij}\,e^{s_{ij}}}
+            {\textstyle\sum_{k \neq i}\,W_{ik}\,e^{s_{ik}}},
 \end{equation}
-where $\mathcal{A}$ is the set of anchors that have at least one
-positive partner in the batch.
+where $\mathcal{A}$ is the set of anchors with at least one positive
+partner in the batch.
 
 \paragraph{Why this is not just SupCon.} Standard SupCon is the
 special case $\gamma\!=\!0$, in which $W_{ij} = 1$ everywhere. Setting
@@ -623,22 +627,22 @@ to argue for.
 \label{sec:where}
 
 \begin{table}[t]
-\centering
-\small
-\begin{tabular}{l ccc}
+\centering\footnotesize
+\setlength{\tabcolsep}{3pt}
+\begin{tabular}{@{}p{0.52\columnwidth} ccc@{}}
 \toprule
 \textbf{Configuration} & $1\%$ & $5\%$ & $20\%$ \\
 \midrule
-Cross-entropy only                            & 0.541 & 0.638 & 0.712 \\
-\;+ tree-weighted SupCon (no view aug.)       & 0.552 & 0.655 & 0.720 \\
-\;+ view aug., uniform SupCon (no tree wt.)   & 0.563 & 0.654 & 0.705 \\
-\textbf{\method}: tree weighting $+$ view aug.& \textbf{0.589} & \textbf{0.662} & \textbf{0.719} \\
+Cross-entropy only                       & .541 & .638 & .712 \\
++ tree-weighted SupCon                   & .552 & .655 & .720 \\
++ uniform SupCon w/ view aug.            & .563 & .654 & .705 \\
+\textbf{\method} (tree wt.\ + view aug.) & \textbf{.589} & \textbf{.662} & \textbf{.719} \\
 \bottomrule
 \end{tabular}
 \caption{\label{tab:ablation}
-Component ablation on CoDET-M4. Each ingredient of \method
-contributes independently at extreme few-shot; the combination is
-roughly additive at $1\%$ and saturates by $20\%$.}
+Component ablation on CoDET-M4. Each ingredient adds $\sim\!2$
+Macro-F1 over CE at $1\%$; combined they add $\sim\!5$. By $20\%$
+all three rows converge.}
 \end{table}
 
 To decide whether \method's gain comes from the tree weighting or
@@ -846,34 +850,33 @@ size from $256$ to $32$ depending on detected memory.
 
 \begin{table}[h]
 \centering
-\small
-\begin{tabular}{l c}
+\footnotesize
+\setlength{\tabcolsep}{3pt}
+\begin{tabular}{@{}p{0.32\columnwidth} l@{}}
 \toprule
 \textbf{Setting} & \textbf{Value} \\
 \midrule
-Encoder $\phi$            & UniXcoder-base ($d_h{=}768$) \\
-Projector $g_\theta$      & MLP $768{\to}512{\to}256$, GeLU, dropout $0.1$ \\
-Classifier $W$            & Linear $256 \to K$, no bias \\
-Optimizer                 & AdamW, weight decay $0.01$ \\
-Batch size                & $256$ (down-scaled to $32$ on $\le 10$\,GB) \\
-Sequence length           & $512$ tokens \\
-Mixed precision           & AMP bfloat16 \\
-Contrastive temperature   & $\tau = 0.10$ \\
-Tree-weight sharpness     & $\gamma = 1.0$ \\
-Mixing weight             & $\lambda = 0.5$ \\
-View augmentation pool    & token-drop, id-rename, ws-jitter, comment-strip \\
+Encoder $\phi$          & UniXcoder-base, $d_h{=}768$ \\
+Projector $g_\theta$    & MLP $768{\to}512{\to}256$ \\
+Classifier $W$          & Linear $256 \to K$ \\
+Optimizer               & AdamW, wd $0.01$ \\
+Batch size              & $256$ (autoscale $\ge 32$) \\
+Sequence length         & $512$ tokens \\
+Mixed precision         & AMP bfloat16 \\
+$\tau,\gamma,\lambda$   & $0.10,\;1.0,\;0.5$ \\
+Aug. pool               & 4 surface transforms \\
 \midrule
-\multicolumn{2}{l}{\textbf{Regime-adaptive schedule}} \\
-$1\%$ fraction            & $10$\,ep, lr\,$3{\times}10^{-5}$, warmup $0.20$ \\
-$5\%$ fraction            & $6$\,ep,  lr\,$3{\times}10^{-5}$, warmup $0.15$ \\
-$20\%$ fraction           & $6$\,ep,  lr\,$4{\times}10^{-5}$, warmup $0.10$ \\
-LR schedule               & cosine, $\sqrt{}$-scaled to batch size \\
+\multicolumn{2}{@{}l}{\textbf{Regime-adaptive schedule}} \\
+$1\%$ data              & $10$ ep, lr $3\!\times\!10^{-5}$, warm $0.20$ \\
+$5\%$ data              & $6$ ep,  lr $3\!\times\!10^{-5}$, warm $0.15$ \\
+$20\%$ data             & $6$ ep,  lr $4\!\times\!10^{-5}$, warm $0.10$ \\
+LR schedule             & cosine, $\sqrt{}$-scaled \\
 \bottomrule
 \end{tabular}
-\caption{\label{tab:hparams} \method training recipe in full. All
-$1\%$ runs complete in $\sim\!30$ minutes on a single H100; $20\%$
-runs take $\sim\!2$ hours. Total compute for the twenty-method
-bake-off was $\approx 350$ GPU-hours.}
+\caption{\label{tab:hparams} \method training recipe in full. A
+$1\%$ run takes $\sim\!30$ min on a single H100; a $20\%$ run takes
+$\sim\!2$ hours. The twenty-method bake-off cost
+$\approx\!350$ GPU-hours total.}
 \end{table}
 
 \paragraph{Augmentation details.}
@@ -899,9 +902,9 @@ to AI than AI-from-different-family pairs are to each other''). The
 resulting $d_{\mathcal{T}}$ and the contrastive weight $W$ at
 $\gamma{=}1$ are:
 
-\begin{table}[h]
+\begin{table*}[t]
 \centering\small
-\setlength{\tabcolsep}{3pt}
+\setlength{\tabcolsep}{4pt}
 \begin{tabular}{c|cccccc}
 $d_\mathcal{T}$ & Hum & CLa & Lla & Nxc & GPT & Qwn \\
 \hline
@@ -912,7 +915,7 @@ Nxc  & 3 & \textbf{1} & 4 & 0 & 4 & 4 \\
 GPT  & 3 & 4 & 4 & 4 & 0 & 4 \\
 Qwn  & 3 & 4 & 4 & 4 & 4 & 0 \\
 \end{tabular}
-\hspace{4pt}
+\hspace{2cm}
 \begin{tabular}{c|cccccc}
 $W$ & Hum & CLa & Lla & Nxc & GPT & Qwn \\
 \hline
@@ -930,7 +933,7 @@ weight matrix $W$ at $\gamma{=}1.0$ (right). Sibling negatives
 $\approx\!0.37$, fifteen times the weight of other cross-class
 pairs. Diagonal entries $W_{ii}{=}1.00$ are conceptual (the loss
 zeros them out before normalisation).}
-\end{table}
+\end{table*}
 
 For AICD-T2 (twelve classes, four triplet families), every
 within-family pair receives $d_{\mathcal{T}}{=}1$ ($W{=}0.37$) and
@@ -954,10 +957,10 @@ spread to six \emph{different} methods, indicating that no single
 method dominates at every regime. \method is the only method to
 appear in the top-three of every slot.
 
-\begin{table}[h]
+\begin{table*}[t]
 \centering
 \small
-\setlength{\tabcolsep}{2.5pt}
+\setlength{\tabcolsep}{4pt}
 \begin{tabular}{r l ccc ccc r}
 \toprule
 & & \multicolumn{3}{c}{\textbf{CoDET-M4}} & \multicolumn{3}{c}{\textbf{AICD-T2}} & \\
@@ -993,7 +996,7 @@ appear in the top-three of every slot.
 Twenty-method controlled bake-off, sorted by composite mean
 Macro-F1 across the six benchmark--fraction slots. \method is the
 only entry in the top three at every slot.}
-\end{table}
+\end{table*}
 
 %======================================================================
 \section{Saturation Audit: Where the Gain Lives}
@@ -1010,23 +1013,23 @@ Each row in Table~\ref{tab:abldetail} is a separate run on the same
 $20\%$ stratified split.
 
 \begin{table}[h]
-\centering
-\small
-\begin{tabular}{l cc cc}
+\centering\footnotesize
+\setlength{\tabcolsep}{3pt}
+\begin{tabular}{@{}l cc cc@{}}
 \toprule
-& \multicolumn{2}{c}{\textbf{CoDET-M4 $20\%$}}
-& \multicolumn{2}{c}{\textbf{AICD-T2 $20\%$}} \\
+& \multicolumn{2}{c}{\textbf{CoDET-M4}}
+& \multicolumn{2}{c}{\textbf{AICD-T2}} \\
 \cmidrule(lr){2-3} \cmidrule(lr){4-5}
-\textbf{Configuration} & Macro-F1 & gap & Macro-F1 & gap \\
+\textbf{Config.} & F1 & gap & F1 & gap \\
 \midrule
-\textsc{Ce} only         & 0.7118 & $+0.010$ & 0.4881 & $-0.014$ \\
-\textsc{Ssl}             & 0.7133 & $+0.007$ & 0.4849 & $-0.011$ \\
-\textsc{Scr}             & 0.7124 & $+0.008$ & 0.4819 & $-0.011$ \\
-\textsc{Htka}            & 0.7099 & $+0.009$ & 0.4788 & $-0.008$ \\
-\textsc{Ssl+Htka}        & 0.7133 & $+0.006$ & 0.4853 & $-0.015$ \\
-\textsc{Ssl+Htka+Scr}    & 0.7040 & $+0.015$ & 0.4833 & $-0.014$ \\
-\textsc{All terms}       & 0.7065 & $+0.013$ & 0.4810 & $-0.011$ \\
-\textsc{Gsce}            & 0.7079 & $+0.010$ & 0.4876 & $-0.013$ \\
+\textsc{Ce} only       & .712 & +.010 & .488 & --.014 \\
+\textsc{Ssl}           & .713 & +.007 & .485 & --.011 \\
+\textsc{Scr}           & .712 & +.008 & .482 & --.011 \\
+\textsc{Htka}          & .710 & +.009 & .479 & --.008 \\
+\textsc{Ssl+Htka}      & .713 & +.006 & .485 & --.015 \\
+\textsc{Ssl+Htka+Scr}  & .704 & +.015 & .483 & --.014 \\
+\textsc{All}           & .707 & +.013 & .481 & --.011 \\
+\textsc{Gsce}          & .708 & +.010 & .488 & --.013 \\
 \bottomrule
 \end{tabular}
 \caption{\label{tab:abldetail}
@@ -1062,18 +1065,17 @@ final fallback so that every sample sees a non-trivial
 transformation.
 
 \begin{table}[h]
-\centering
-\small
-\setlength{\tabcolsep}{4pt}
-\begin{tabular}{l ccc ccc}
+\centering\footnotesize
+\setlength{\tabcolsep}{2pt}
+\begin{tabular}{@{}l ccc ccc@{}}
 \toprule
 & \multicolumn{3}{c}{\textbf{CoDET-M4}} & \multicolumn{3}{c}{\textbf{AICD-T2}} \\
 \cmidrule(lr){2-4} \cmidrule(lr){5-7}
 \textbf{Pool} & $1\%$ & $5\%$ & $20\%$ & $1\%$ & $5\%$ & $20\%$ \\
 \midrule
-Surface (\method)    & \textbf{0.589} & \textbf{0.662} & \textbf{0.719} & 0.297 & 0.400 & \textbf{0.488} \\
-Structural (\textsc{Cargo}) & 0.587 & 0.660 & 0.714          & \textbf{0.307} & \textbf{0.403} & 0.480 \\
-$\Delta$ (Surface$-$Struct) & $+0.002$ & $+0.002$ & $+0.005$ & $-0.010$ & $-0.003$ & $+0.008$ \\
+Surface          & \textbf{.589} & \textbf{.662} & \textbf{.719} & .297          & .400          & \textbf{.488} \\
+Structural       & .587          & .660          & .714          & \textbf{.307} & \textbf{.403} & .480 \\
+$\Delta$         & +.002         & +.002         & +.005         & --.010        & --.003        & +.008 \\
 \bottomrule
 \end{tabular}
 \caption{\label{tab:augpool}
