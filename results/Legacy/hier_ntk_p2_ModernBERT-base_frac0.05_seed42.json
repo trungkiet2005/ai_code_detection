@@ -1,0 +1,51 @@
+{
+  "method": "FS-Hier-NTK",
+  "exp_id": "hier_ntk_p2",
+  "regime": "frac=0.0500",
+  "timestamp": "2026-05-10T05:06:23.911562Z",
+  "config": {
+    "benchmark": "codet_m4",
+    "task": "author",
+    "k_shot": 0,
+    "train_fraction": 0.05,
+    "n_classes": 6,
+    "fs_seed": 42,
+    "encoder": "ModernBERT-base",
+    "encoder_path": "/kaggle/input/datasets/chiboiz/ai-detection-encoders/models/ModernBERT-base",
+    "epochs": 3,
+    "batch_size": 128,
+    "max_length": 512,
+    "precision": "bf16",
+    "lr_encoder": 2e-05,
+    "lr_heads": 0.0001,
+    "lambda_ntk": 0.4,
+    "lambda_hier": 0.4
+  },
+  "results": {
+    "test_macro_f1": 0.6306567699632031,
+    "test_weighted_f1": 0.7673676003048011,
+    "test_accuracy": 0.7707146447721179,
+    "val_macro_f1": 0.6722082724336832,
+    "val_test_gap": 0.04155150247048012,
+    "train_steps": 477,
+    "wall_time_s": "306.4",
+    "per_class_f1": {
+      "class_0": 0.9668355786264574,
+      "class_1": 0.6397357243983011,
+      "class_2": 0.6030061892130858,
+      "class_3": 0.738245969443741,
+      "class_4": 0.36384728960134993,
+      "class_5": 0.4722698684962836
+    },
+    "per_lang_f1": {
+      "cpp": 0.6324064962327126,
+      "java": 0.6801075011920283,
+      "python": 0.5897596796843717
+    },
+    "per_source_f1": {
+      "cf": 0.6750794056540174,
+      "gh": 0.4657298439425935,
+      "lc": 0.5417791034424017
+    }
+  }
+}

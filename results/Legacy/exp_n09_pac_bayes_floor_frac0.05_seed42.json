@@ -1,0 +1,56 @@
+{
+  "method": "FS-PACBayes-SampleFloor",
+  "exp_id": "exp_n09_pac_bayes_floor",
+  "regime": "frac=0.0500",
+  "benchmark": "codet_m4",
+  "n_classes": 6,
+  "timestamp": "2026-05-09T18:29:40.695267Z",
+  "config": {
+    "benchmark": "codet_m4",
+    "n_classes": 6,
+    "k_shot": 0,
+    "train_fraction": 0.05,
+    "fs_seed": 42,
+    "encoder": "answerdotai/ModernBERT-base",
+    "epochs": 3,
+    "batch_size": 16,
+    "max_length": 384,
+    "lambda_method": 0.1
+  },
+  "results": {
+    "test_macro_f1": 0.6341434133907661,
+    "test_weighted_f1": 0.7696194436689338,
+    "test_accuracy": 0.7727044235924933,
+    "val_macro_f1": 0.683500115780744,
+    "val_test_gap": 0.04935670238997791,
+    "per_class_f1": {
+      "class_0": 0.9661260435968437,
+      "class_1": 0.6707171131363343,
+      "class_2": 0.5948883075065405,
+      "class_3": 0.7541662913251058,
+      "class_4": 0.29788218956139334,
+      "class_5": 0.5210805352183792
+    },
+    "per_lang_f1": {
+      "cpp": 0.64303751168935,
+      "java": 0.6838149626454845,
+      "python": 0.5892211209767955
+    },
+    "per_source_f1": {
+      "cf": 0.683758329275932,
+      "gh": 0.4723773033876073,
+      "lc": 0.5484131395019605
+    },
+    "train_steps": 3798,
+    "wall_time_s": 2599.29683470726,
+    "lambda_method": 0.1,
+    "train_per_class": {
+      "0": 9852,
+      "1": 2459,
+      "2": 704,
+      "3": 2550,
+      "4": 2215,
+      "5": 2471
+    }
+  }
+}

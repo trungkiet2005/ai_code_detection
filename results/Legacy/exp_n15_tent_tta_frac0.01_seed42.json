@@ -1,0 +1,56 @@
+{
+  "method": "FS-TENT-TTA",
+  "exp_id": "exp_n15_tent_tta",
+  "regime": "frac=0.0100",
+  "benchmark": "codet_m4",
+  "n_classes": 6,
+  "timestamp": "2026-05-09T17:45:02.060857Z",
+  "config": {
+    "benchmark": "codet_m4",
+    "n_classes": 6,
+    "k_shot": 0,
+    "train_fraction": 0.01,
+    "fs_seed": 42,
+    "encoder": "answerdotai/ModernBERT-base",
+    "epochs": 3,
+    "batch_size": 16,
+    "max_length": 384,
+    "lambda_method": 0.0
+  },
+  "results": {
+    "test_macro_f1": 0.5596420724363368,
+    "test_weighted_f1": 0.7203848429498816,
+    "test_accuracy": 0.7244051608579088,
+    "val_macro_f1": 0.5630624242929573,
+    "val_test_gap": 0.003420351856620485,
+    "per_class_f1": {
+      "class_0": 0.9399745097233072,
+      "class_1": 0.5508231925554761,
+      "class_2": 0.4600359804677461,
+      "class_3": 0.666030534351145,
+      "class_4": 0.44587755102040816,
+      "class_5": 0.2951106664999375
+    },
+    "per_lang_f1": {
+      "cpp": 0.5908223125395843,
+      "java": 0.5655102598944979,
+      "python": 0.5112291271931616
+    },
+    "per_source_f1": {
+      "cf": 0.5734809553228641,
+      "gh": 0.38450283880829844,
+      "lc": 0.4686637519835217
+    },
+    "train_steps": 762,
+    "wall_time_s": 888.3712909221649,
+    "lambda_method": 0.0,
+    "train_per_class": {
+      "0": 1970,
+      "1": 492,
+      "2": 141,
+      "3": 510,
+      "4": 443,
+      "5": 494
+    }
+  }
+}

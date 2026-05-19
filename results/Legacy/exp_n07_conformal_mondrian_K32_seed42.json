@@ -1,0 +1,52 @@
+{
+  "method": "FS-ConformalMondrian",
+  "exp_id": "exp_n07_conformal_mondrian",
+  "regime": "K=32",
+  "timestamp": "2026-05-09T16:22:51.220088Z",
+  "config": {
+    "k_shot": 32,
+    "train_fraction": 0.0,
+    "fs_seed": 42,
+    "encoder": "answerdotai/ModernBERT-base",
+    "epochs": 1,
+    "batch_size": 16,
+    "max_length": 384,
+    "lambda_method": 0.5
+  },
+  "results": {
+    "test_macro_f1": 0.18971023043146484,
+    "test_weighted_f1": 0.3358516542946891,
+    "test_accuracy": 0.3113480227882037,
+    "val_macro_f1": 0.2225072714964178,
+    "val_test_gap": 0.03279704106495296,
+    "per_class_f1": {
+      "class_0": 0.5377546733879437,
+      "class_1": 0.2434614588365192,
+      "class_2": 0.09456130377108206,
+      "class_3": 0.0014285714285714286,
+      "class_4": 0.03764152330539627,
+      "class_5": 0.22341385185927634
+    },
+    "per_lang_f1": {
+      "cpp": 0.2204196417796309,
+      "java": 0.10621568007437561,
+      "python": 0.2012203028368856
+    },
+    "per_source_f1": {
+      "cf": 0.20506654072025868,
+      "gh": 0.12968633666667248,
+      "lc": 0.15760831940646702
+    },
+    "train_steps": 12,
+    "wall_time_s": 547.07084441185,
+    "lambda_method": 0.5,
+    "train_per_class": {
+      "0": 32,
+      "1": 32,
+      "2": 32,
+      "3": 32,
+      "4": 32,
+      "5": 32
+    }
+  }
+}

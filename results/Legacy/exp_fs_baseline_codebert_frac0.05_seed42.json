@@ -1,0 +1,51 @@
+{
+  "method": "FS-Baseline-CodeBERT",
+  "exp_id": "exp_fs_baseline_codebert",
+  "regime": "frac=0.0500",
+  "timestamp": "2026-05-09T15:46:03.481362Z",
+  "config": {
+    "benchmark": "codet_m4",
+    "task": "author",
+    "k_shot": 0,
+    "train_fraction": 0.05,
+    "n_classes": 6,
+    "fs_seed": 42,
+    "encoder": "microsoft/codebert-base",
+    "epochs": 3,
+    "batch_size": 16,
+    "max_length": 384,
+    "precision": "fp16",
+    "lr_encoder": 2e-05,
+    "lr_heads": 0.0001,
+    "lambda_ntk": 0.4
+  },
+  "results": {
+    "test_macro_f1": 0.5977098200282663,
+    "test_weighted_f1": 0.7446213693725163,
+    "test_accuracy": 0.7549430294906166,
+    "val_macro_f1": 0.6468766992488301,
+    "val_test_gap": 0.04916687922056373,
+    "train_steps": 3798,
+    "wall_time_s": "1455.4",
+    "loss_kind": "ce",
+    "frozen": 0,
+    "per_class_f1": {
+      "class_0": 0.9594167068239435,
+      "class_1": 0.6197475635085476,
+      "class_2": 0.5631517960602549,
+      "class_3": 0.717969314804402,
+      "class_4": 0.2195697796432319,
+      "class_5": 0.5064037593292178
+    },
+    "per_lang_f1": {
+      "cpp": 0.6159145175508643,
+      "java": 0.6100680323557703,
+      "python": 0.573532487241498
+    },
+    "per_source_f1": {
+      "cf": 0.601587210828248,
+      "gh": 0.437043781073944,
+      "lc": 0.5129374711577493
+    }
+  }
+}

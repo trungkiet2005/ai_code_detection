@@ -1,0 +1,51 @@
+{
+  "method": "FS-HierTree",
+  "exp_id": "exp_fs_inline_hier",
+  "regime": "frac=0.0500",
+  "timestamp": "2026-05-09T16:30:48.231874Z",
+  "config": {
+    "benchmark": "codet_m4",
+    "task": "author",
+    "k_shot": 0,
+    "train_fraction": 0.05,
+    "n_classes": 6,
+    "fs_seed": 42,
+    "encoder": "answerdotai/ModernBERT-base",
+    "epochs": 3,
+    "batch_size": 16,
+    "max_length": 384,
+    "precision": "fp16",
+    "lr_encoder": 2e-05,
+    "lr_heads": 0.0001,
+    "lambda_ntk": 0.4
+  },
+  "results": {
+    "test_macro_f1": 0.6681951129197338,
+    "test_weighted_f1": 0.7921542453121458,
+    "test_accuracy": 0.7960790884718498,
+    "val_macro_f1": 0.6823940467172801,
+    "val_test_gap": 0.014198933797546331,
+    "train_steps": 3798,
+    "wall_time_s": "2389.8",
+    "loss_kind": "hier",
+    "frozen": 0,
+    "per_class_f1": {
+      "class_0": 0.9796885855572357,
+      "class_1": 0.6992595235971094,
+      "class_2": 0.6782744282744283,
+      "class_3": 0.7769566378773038,
+      "class_4": 0.40128244906401905,
+      "class_5": 0.47370905314830547
+    },
+    "per_lang_f1": {
+      "cpp": 0.6619845852987508,
+      "java": 0.7226657006919931,
+      "python": 0.6268698653910237
+    },
+    "per_source_f1": {
+      "cf": 0.730217337335053,
+      "gh": 0.5163223528010775,
+      "lc": 0.5751520358513474
+    }
+  }
+}

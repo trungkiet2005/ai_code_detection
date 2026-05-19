@@ -1,0 +1,1327 @@
+{
+  "rows": [
+    {
+      "method": "FS-Baseline-UniXcoder",
+      "regime": "frac=0.2000",
+      "n_seeds": 2,
+      "test_macro_f1_mean": 0.7028442953713836,
+      "test_macro_f1_std": 0.0,
+      "test_macro_f1_min": 0.7028442953713836,
+      "test_macro_f1_max": 0.7028442953713836,
+      "val_macro_f1_mean": 0.7241544805657555,
+      "val_test_gap_mean": 0.02131018519437189,
+      "files": [
+        "exp_fs_baseline_unixcoder_frac0.2_seed42.json",
+        "exp_fs_baseline_unixcoder_frac0.2_seed42__dup1.json"
+      ]
+    },
+    {
+      "method": "FS-Baseline-UniXcoder",
+      "regime": "frac=0.1000",
+      "n_seeds": 1,
+      "test_macro_f1_mean": 0.6844237421145981,
+      "test_macro_f1_std": 0.0,
+      "test_macro_f1_min": 0.6844237421145981,
+      "test_macro_f1_max": 0.6844237421145981,
+      "val_macro_f1_mean": 0.7299874053549941,
+      "val_test_gap_mean": 0.04556366324039596,
+      "files": [
+        "exp_fs_baseline_unixcoder_frac0.1_seed42.json"
+      ]
+    },
+    {
+      "method": "FS-Hier-NTK",
+      "regime": "frac=0.0500",
+      "n_seeds": 2,
+      "test_macro_f1_mean": 0.6708599644067239,
+      "test_macro_f1_std": 0.0,
+      "test_macro_f1_min": 0.6708599644067239,
+      "test_macro_f1_max": 0.6708599644067239,
+      "val_macro_f1_mean": 0.7041088273640616,
+      "val_test_gap_mean": 0.033248862957337644,
+      "files": [
+        "exp_fs_inline_hier_ntk_frac0.05_seed42.json",
+        "exp_fs_inline_hier_ntk_frac0.05_seed42__dup1.json"
+      ]
+    },
+    {
+      "method": "FS-ConformalMondrian",
+      "regime": "frac=0.0500",
+      "n_seeds": 2,
+      "test_macro_f1_mean": 0.6700638134899668,
+      "test_macro_f1_std": 0.0028667063584158913,
+      "test_macro_f1_min": 0.6680367459842603,
+      "test_macro_f1_max": 0.6720908809956733,
+      "val_macro_f1_mean": 0.7081084634840573,
+      "val_test_gap_mean": 0.03804464999409046,
+      "files": [
+        "exp_n07_conformal_mondrian_frac0.05_seed42.json",
+        "exp_n07_conformal_mondrian_frac0.05_seed42__dup1.json"
+      ]
+    },
+    {
+      "method": "FS-HierTree",
+      "regime": "frac=0.0500",
+      "n_seeds": 2,
+      "test_macro_f1_mean": 0.6681951129197338,
+      "test_macro_f1_std": 0.0,
+      "test_macro_f1_min": 0.6681951129197338,
+      "test_macro_f1_max": 0.6681951129197338,
+      "val_macro_f1_mean": 0.6823940467172801,
+      "val_test_gap_mean": 0.014198933797546331,
+      "files": [
+        "exp_fs_inline_hier_frac0.05_seed42.json",
+        "exp_fs_inline_hier_frac0.05_seed42__dup1.json"
+      ]
+    },
+    {
+      "method": "FS-SlicedWassersteinClass",
+      "regime": "frac=0.0500",
+      "n_seeds": 2,
+      "test_macro_f1_mean": 0.6673853624027769,
+      "test_macro_f1_std": 0.0011307714692369466,
+      "test_macro_f1_min": 0.6665857862289072,
+      "test_macro_f1_max": 0.6681849385766466,
+      "val_macro_f1_mean": 0.7027048242497991,
+      "val_test_gap_mean": 0.03531946184702223,
+      "files": [
+        "exp_n14_sliced_wasserstein_frac0.05_seed42.json",
+        "exp_n14_sliced_wasserstein_frac0.05_seed42__dup1.json"
+      ]
+    },
+    {
+      "method": "FS-FrontDoor-StyleMediator",
+      "regime": "frac=0.0500",
+      "n_seeds": 1,
+      "test_macro_f1_mean": 0.6660974912666372,
+      "test_macro_f1_std": 0.0,
+      "test_macro_f1_min": 0.6660974912666372,
+      "test_macro_f1_max": 0.6660974912666372,
+      "val_macro_f1_mean": 0.7103007074562419,
+      "val_test_gap_mean": 0.044203216189604655,
+      "files": [
+        "exp_n02_frontdoor_style_frac0.05_seed42.json"
+      ]
+    },
+    {
+      "method": "FS-NTKAlign",
+      "regime": "frac=0.0500",
+      "n_seeds": 2,
+      "test_macro_f1_mean": 0.666078922146013,
+      "test_macro_f1_std": 0.0012181240451058855,
+      "test_macro_f1_min": 0.6652175783733922,
+      "test_macro_f1_max": 0.6669402659186338,
+      "val_macro_f1_mean": 0.7016615613869643,
+      "val_test_gap_mean": 0.035582639240951286,
+      "files": [
+        "exp_fs_inline_ntkalign_frac0.05_seed42.json",
+        "exp_fs_inline_ntkalign_frac0.05_seed42__dup1.json"
+      ]
+    },
+    {
+      "method": "FS-VIB",
+      "regime": "frac=0.0500",
+      "n_seeds": 1,
+      "test_macro_f1_mean": 0.6659343159006731,
+      "test_macro_f1_std": 0.0,
+      "test_macro_f1_min": 0.6659343159006731,
+      "test_macro_f1_max": 0.6659343159006731,
+      "val_macro_f1_mean": 0.700606659592263,
+      "val_test_gap_mean": 0.03467234369158989,
+      "files": [
+        "exp_n10_vib_frac0.05_seed42.json"
+      ]
+    },
+    {
+      "method": "FS-VarianceInvariantSource",
+      "regime": "frac=0.0500",
+      "n_seeds": 1,
+      "test_macro_f1_mean": 0.6653548761762941,
+      "test_macro_f1_std": 0.0,
+      "test_macro_f1_min": 0.6653548761762941,
+      "test_macro_f1_max": 0.6653548761762941,
+      "val_macro_f1_mean": 0.6899296089944545,
+      "val_test_gap_mean": 0.024574732818160472,
+      "files": [
+        "exp_n11_vic_source_frac0.05_seed42.json"
+      ]
+    },
+    {
+      "method": "FS-TENT-TTA",
+      "regime": "frac=0.0500",
+      "n_seeds": 1,
+      "test_macro_f1_mean": 0.6650868884186124,
+      "test_macro_f1_std": 0.0,
+      "test_macro_f1_min": 0.6650868884186124,
+      "test_macro_f1_max": 0.6650868884186124,
+      "val_macro_f1_mean": 0.685744687543045,
+      "val_test_gap_mean": 0.020657799124432552,
+      "files": [
+        "exp_n15_tent_tta_frac0.05_seed42.json"
+      ]
+    },
+    {
+      "method": "FS-Focal",
+      "regime": "frac=0.0500",
+      "n_seeds": 3,
+      "test_macro_f1_mean": 0.6616254962152807,
+      "test_macro_f1_std": 0.0,
+      "test_macro_f1_min": 0.6616254962152807,
+      "test_macro_f1_max": 0.6616254962152807,
+      "val_macro_f1_mean": 0.6975079703023765,
+      "val_test_gap_mean": 0.035882474087095884,
+      "files": [
+        "exp_fs_inline_focal_frac0.05_seed42.json",
+        "exp_fs_inline_focal_frac0.05_seed42__dup1.json",
+        "exp_fs_inline_focal_frac0.05_seed42__dup2.json"
+      ]
+    },
+    {
+      "method": "FS-EnergyOOD",
+      "regime": "frac=0.0500",
+      "n_seeds": 1,
+      "test_macro_f1_mean": 0.6550556205756649,
+      "test_macro_f1_std": 0.0,
+      "test_macro_f1_min": 0.6550556205756649,
+      "test_macro_f1_max": 0.6550556205756649,
+      "val_macro_f1_mean": 0.675309975118049,
+      "val_test_gap_mean": 0.020254354542384112,
+      "files": [
+        "exp_n16_energy_ood_frac0.05_seed42.json"
+      ]
+    },
+    {
+      "method": "FS-Baseline-UniXcoder",
+      "regime": "frac=0.0500",
+      "n_seeds": 1,
+      "test_macro_f1_mean": 0.6512126895633352,
+      "test_macro_f1_std": 0.0,
+      "test_macro_f1_min": 0.6512126895633352,
+      "test_macro_f1_max": 0.6512126895633352,
+      "val_macro_f1_mean": 0.6911852766204859,
+      "val_test_gap_mean": 0.03997258705715068,
+      "files": [
+        "exp_fs_baseline_unixcoder_frac0.05_seed42.json"
+      ]
+    },
+    {
+      "method": "FS-DataMapsCurriculum",
+      "regime": "frac=0.0500",
+      "n_seeds": 1,
+      "test_macro_f1_mean": 0.6480958625655693,
+      "test_macro_f1_std": 0.0,
+      "test_macro_f1_min": 0.6480958625655693,
+      "test_macro_f1_max": 0.6480958625655693,
+      "val_macro_f1_mean": 0.6849120454243822,
+      "val_test_gap_mean": 0.03681618285881294,
+      "files": [
+        "exp_n18_datamaps_curriculum_frac0.05_seed42.json"
+      ]
+    },
+    {
+      "method": "FS-TreeWassersteinGenealogy",
+      "regime": "frac=0.0500",
+      "n_seeds": 1,
+      "test_macro_f1_mean": 0.6467080703177065,
+      "test_macro_f1_std": 0.0,
+      "test_macro_f1_min": 0.6467080703177065,
+      "test_macro_f1_max": 0.6467080703177065,
+      "val_macro_f1_mean": 0.6702080945882738,
+      "val_test_gap_mean": 0.0235000242705673,
+      "files": [
+        "exp_n13_tree_wasserstein_frac0.05_seed42.json"
+      ]
+    },
+    {
+      "method": "FS-IRM",
+      "regime": "frac=0.0500",
+      "n_seeds": 1,
+      "test_macro_f1_mean": 0.6429542782246248,
+      "test_macro_f1_std": 0.0,
+      "test_macro_f1_min": 0.6429542782246248,
+      "test_macro_f1_max": 0.6429542782246248,
+      "val_macro_f1_mean": 0.667182679378041,
+      "val_test_gap_mean": 0.02422840115341618,
+      "files": [
+        "exp_n19_irm_frac0.05_seed42.json"
+      ]
+    },
+    {
+      "method": "FS-PACBayes-SampleFloor",
+      "regime": "frac=0.0500",
+      "n_seeds": 1,
+      "test_macro_f1_mean": 0.6341434133907661,
+      "test_macro_f1_std": 0.0,
+      "test_macro_f1_min": 0.6341434133907661,
+      "test_macro_f1_max": 0.6341434133907661,
+      "val_macro_f1_mean": 0.683500115780744,
+      "val_test_gap_mean": 0.04935670238997791,
+      "files": [
+        "exp_n09_pac_bayes_floor_frac0.05_seed42.json"
+      ]
+    },
+    {
+      "method": "FS-SRD-SiblingResidual",
+      "regime": "frac=0.0500",
+      "n_seeds": 2,
+      "test_macro_f1_mean": 0.6202315839060035,
+      "test_macro_f1_std": 0.0,
+      "test_macro_f1_min": 0.6202315839060035,
+      "test_macro_f1_max": 0.6202315839060035,
+      "val_macro_f1_mean": 0.6742157104772198,
+      "val_test_gap_mean": 0.05398412657121632,
+      "files": [
+        "exp_n01_sibling_residual_frac0.05_seed42.json",
+        "exp_n01_sibling_residual_frac0.05_seed42__dup1.json"
+      ]
+    },
+    {
+      "method": "FS-Baseline-CodeBERT",
+      "regime": "frac=0.0500",
+      "n_seeds": 1,
+      "test_macro_f1_mean": 0.5977098200282663,
+      "test_macro_f1_std": 0.0,
+      "test_macro_f1_min": 0.5977098200282663,
+      "test_macro_f1_max": 0.5977098200282663,
+      "val_macro_f1_mean": 0.6468766992488301,
+      "val_test_gap_mean": 0.04916687922056373,
+      "files": [
+        "exp_fs_baseline_codebert_frac0.05_seed42.json"
+      ]
+    },
+    {
+      "method": "FS-Baseline-GraphCodeBERT",
+      "regime": "frac=0.0500",
+      "n_seeds": 1,
+      "test_macro_f1_mean": 0.5950886796800188,
+      "test_macro_f1_std": 0.0,
+      "test_macro_f1_min": 0.5950886796800188,
+      "test_macro_f1_max": 0.5950886796800188,
+      "val_macro_f1_mean": 0.6855995247300886,
+      "val_test_gap_mean": 0.09051084505006979,
+      "files": [
+        "exp_fs_baseline_graphcodebert_frac0.05_seed42.json"
+      ]
+    },
+    {
+      "method": "FS-ConformalMondrian",
+      "regime": "frac=0.0100",
+      "n_seeds": 1,
+      "test_macro_f1_mean": 0.5750449194915157,
+      "test_macro_f1_std": 0.0,
+      "test_macro_f1_min": 0.5750449194915157,
+      "test_macro_f1_max": 0.5750449194915157,
+      "val_macro_f1_mean": 0.5944281109126789,
+      "val_test_gap_mean": 0.01938319142116318,
+      "files": [
+        "exp_n07_conformal_mondrian_frac0.01_seed42.json"
+      ]
+    },
+    {
+      "method": "FS-Baseline-UniXcoder",
+      "regime": "frac=0.0100",
+      "n_seeds": 1,
+      "test_macro_f1_mean": 0.5743908865171923,
+      "test_macro_f1_std": 0.0,
+      "test_macro_f1_min": 0.5743908865171923,
+      "test_macro_f1_max": 0.5743908865171923,
+      "val_macro_f1_mean": 0.5839390309133415,
+      "val_test_gap_mean": 0.00954814439614926,
+      "files": [
+        "exp_fs_baseline_unixcoder_frac0.01_seed42.json"
+      ]
+    },
+    {
+      "method": "FS-SlicedWassersteinClass",
+      "regime": "frac=0.0100",
+      "n_seeds": 1,
+      "test_macro_f1_mean": 0.572912493838692,
+      "test_macro_f1_std": 0.0,
+      "test_macro_f1_min": 0.572912493838692,
+      "test_macro_f1_max": 0.572912493838692,
+      "val_macro_f1_mean": 0.588411631978739,
+      "val_test_gap_mean": 0.015499138140046997,
+      "files": [
+        "exp_n14_sliced_wasserstein_frac0.01_seed42.json"
+      ]
+    },
+    {
+      "method": "FS-VarianceInvariantSource",
+      "regime": "frac=0.0100",
+      "n_seeds": 1,
+      "test_macro_f1_mean": 0.5700858840325148,
+      "test_macro_f1_std": 0.0,
+      "test_macro_f1_min": 0.5700858840325148,
+      "test_macro_f1_max": 0.5700858840325148,
+      "val_macro_f1_mean": 0.576570815267788,
+      "val_test_gap_mean": 0.006484931235273161,
+      "files": [
+        "exp_n11_vic_source_frac0.01_seed42.json"
+      ]
+    },
+    {
+      "method": "FS-NTKAlign",
+      "regime": "frac=0.0100",
+      "n_seeds": 1,
+      "test_macro_f1_mean": 0.5696918970572419,
+      "test_macro_f1_std": 0.0,
+      "test_macro_f1_min": 0.5696918970572419,
+      "test_macro_f1_max": 0.5696918970572419,
+      "val_macro_f1_mean": 0.5614111232250769,
+      "val_test_gap_mean": -0.008280773832164967,
+      "files": [
+        "exp_fs_inline_ntkalign_frac0.01_seed42.json"
+      ]
+    },
+    {
+      "method": "FS-DataMapsCurriculum",
+      "regime": "frac=0.0100",
+      "n_seeds": 1,
+      "test_macro_f1_mean": 0.5669014184332017,
+      "test_macro_f1_std": 0.0,
+      "test_macro_f1_min": 0.5669014184332017,
+      "test_macro_f1_max": 0.5669014184332017,
+      "val_macro_f1_mean": 0.6069966057892071,
+      "val_test_gap_mean": 0.04009518735600537,
+      "files": [
+        "exp_n18_datamaps_curriculum_frac0.01_seed42.json"
+      ]
+    },
+    {
+      "method": "FS-FrontDoor-StyleMediator",
+      "regime": "frac=0.0100",
+      "n_seeds": 1,
+      "test_macro_f1_mean": 0.5658310653047068,
+      "test_macro_f1_std": 0.0,
+      "test_macro_f1_min": 0.5658310653047068,
+      "test_macro_f1_max": 0.5658310653047068,
+      "val_macro_f1_mean": 0.5963153617926085,
+      "val_test_gap_mean": 0.03048429648790163,
+      "files": [
+        "exp_n02_frontdoor_style_frac0.01_seed42.json"
+      ]
+    },
+    {
+      "method": "FS-HierTree",
+      "regime": "frac=0.0100",
+      "n_seeds": 2,
+      "test_macro_f1_mean": 0.5654238891320355,
+      "test_macro_f1_std": 0.0,
+      "test_macro_f1_min": 0.5654238891320355,
+      "test_macro_f1_max": 0.5654238891320355,
+      "val_macro_f1_mean": 0.5971405374217605,
+      "val_test_gap_mean": 0.03171664828972509,
+      "files": [
+        "exp_fs_inline_hier_frac0.01_seed42.json",
+        "exp_fs_inline_hier_frac0.01_seed42__dup1.json"
+      ]
+    },
+    {
+      "method": "FS-SpectralEigengap",
+      "regime": "frac=0.0500",
+      "n_seeds": 1,
+      "test_macro_f1_mean": 0.5644789117748693,
+      "test_macro_f1_std": 0.0,
+      "test_macro_f1_min": 0.5644789117748693,
+      "test_macro_f1_max": 0.5644789117748693,
+      "val_macro_f1_mean": 0.6118963210592664,
+      "val_test_gap_mean": 0.04741740928439708,
+      "files": [
+        "exp_n08_spectral_eigengap_frac0.05_seed42.json"
+      ]
+    },
+    {
+      "method": "FS-VIB",
+      "regime": "frac=0.0100",
+      "n_seeds": 1,
+      "test_macro_f1_mean": 0.5628263748414742,
+      "test_macro_f1_std": 0.0,
+      "test_macro_f1_min": 0.5628263748414742,
+      "test_macro_f1_max": 0.5628263748414742,
+      "val_macro_f1_mean": 0.5763727494374365,
+      "val_test_gap_mean": 0.013546374595962307,
+      "files": [
+        "exp_n10_vib_frac0.01_seed42.json"
+      ]
+    },
+    {
+      "method": "FS-Hier-NTK",
+      "regime": "frac=0.0100",
+      "n_seeds": 2,
+      "test_macro_f1_mean": 0.5608394425796006,
+      "test_macro_f1_std": 0.0,
+      "test_macro_f1_min": 0.5608394425796006,
+      "test_macro_f1_max": 0.5608394425796006,
+      "val_macro_f1_mean": 0.5707724565592777,
+      "val_test_gap_mean": 0.009933013979677052,
+      "files": [
+        "exp_fs_inline_hier_ntk_frac0.01_seed42.json",
+        "exp_fs_inline_hier_ntk_frac0.01_seed42__dup1.json"
+      ]
+    },
+    {
+      "method": "FS-TENT-TTA",
+      "regime": "frac=0.0100",
+      "n_seeds": 1,
+      "test_macro_f1_mean": 0.5596420724363368,
+      "test_macro_f1_std": 0.0,
+      "test_macro_f1_min": 0.5596420724363368,
+      "test_macro_f1_max": 0.5596420724363368,
+      "val_macro_f1_mean": 0.5630624242929573,
+      "val_test_gap_mean": 0.003420351856620485,
+      "files": [
+        "exp_n15_tent_tta_frac0.01_seed42.json"
+      ]
+    },
+    {
+      "method": "FS-PACBayes-SampleFloor",
+      "regime": "frac=0.0100",
+      "n_seeds": 1,
+      "test_macro_f1_mean": 0.5574180214956791,
+      "test_macro_f1_std": 0.0,
+      "test_macro_f1_min": 0.5574180214956791,
+      "test_macro_f1_max": 0.5574180214956791,
+      "val_macro_f1_mean": 0.5848483751930672,
+      "val_test_gap_mean": 0.02743035369738811,
+      "files": [
+        "exp_n09_pac_bayes_floor_frac0.01_seed42.json"
+      ]
+    },
+    {
+      "method": "FS-Focal",
+      "regime": "frac=0.0100",
+      "n_seeds": 3,
+      "test_macro_f1_mean": 0.5565196582169646,
+      "test_macro_f1_std": 0.0,
+      "test_macro_f1_min": 0.5565196582169646,
+      "test_macro_f1_max": 0.5565196582169646,
+      "val_macro_f1_mean": 0.5764921286848415,
+      "val_test_gap_mean": 0.01997247046787687,
+      "files": [
+        "exp_fs_inline_focal_frac0.01_seed42.json",
+        "exp_fs_inline_focal_frac0.01_seed42__dup1.json",
+        "exp_fs_inline_focal_frac0.01_seed42__dup2.json"
+      ]
+    },
+    {
+      "method": "FS-TreeWassersteinGenealogy",
+      "regime": "frac=0.0100",
+      "n_seeds": 1,
+      "test_macro_f1_mean": 0.5425315462778828,
+      "test_macro_f1_std": 0.0,
+      "test_macro_f1_min": 0.5425315462778828,
+      "test_macro_f1_max": 0.5425315462778828,
+      "val_macro_f1_mean": 0.5460473385598358,
+      "val_test_gap_mean": 0.0035157922819529785,
+      "files": [
+        "exp_n13_tree_wasserstein_frac0.01_seed42.json"
+      ]
+    },
+    {
+      "method": "FS-SRD-SiblingResidual",
+      "regime": "frac=0.0100",
+      "n_seeds": 2,
+      "test_macro_f1_mean": 0.5416939340598801,
+      "test_macro_f1_std": 0.0,
+      "test_macro_f1_min": 0.5416939340598801,
+      "test_macro_f1_max": 0.5416939340598801,
+      "val_macro_f1_mean": 0.5783829997768465,
+      "val_test_gap_mean": 0.036689065716966396,
+      "files": [
+        "exp_n01_sibling_residual_frac0.01_seed42.json",
+        "exp_n01_sibling_residual_frac0.01_seed42__dup1.json"
+      ]
+    },
+    {
+      "method": "FS-EnergyOOD",
+      "regime": "frac=0.0100",
+      "n_seeds": 1,
+      "test_macro_f1_mean": 0.5178378465237091,
+      "test_macro_f1_std": 0.0,
+      "test_macro_f1_min": 0.5178378465237091,
+      "test_macro_f1_max": 0.5178378465237091,
+      "val_macro_f1_mean": 0.5240244624897448,
+      "val_test_gap_mean": 0.006186615966035647,
+      "files": [
+        "exp_n16_energy_ood_frac0.01_seed42.json"
+      ]
+    },
+    {
+      "method": "FS-Baseline-GraphCodeBERT",
+      "regime": "frac=0.0100",
+      "n_seeds": 1,
+      "test_macro_f1_mean": 0.5013921408204253,
+      "test_macro_f1_std": 0.0,
+      "test_macro_f1_min": 0.5013921408204253,
+      "test_macro_f1_max": 0.5013921408204253,
+      "val_macro_f1_mean": 0.5760346853662965,
+      "val_test_gap_mean": 0.07464254454587127,
+      "files": [
+        "exp_fs_baseline_graphcodebert_frac0.01_seed42.json"
+      ]
+    },
+    {
+      "method": "FS-Baseline-CodeBERT",
+      "regime": "frac=0.0100",
+      "n_seeds": 1,
+      "test_macro_f1_mean": 0.5007395175940758,
+      "test_macro_f1_std": 0.0,
+      "test_macro_f1_min": 0.5007395175940758,
+      "test_macro_f1_max": 0.5007395175940758,
+      "val_macro_f1_mean": 0.5830934336112034,
+      "val_test_gap_mean": 0.0823539160171276,
+      "files": [
+        "exp_fs_baseline_codebert_frac0.01_seed42.json"
+      ]
+    },
+    {
+      "method": "FS-SpectralEigengap",
+      "regime": "frac=0.0100",
+      "n_seeds": 1,
+      "test_macro_f1_mean": 0.48220649017498324,
+      "test_macro_f1_std": 0.0,
+      "test_macro_f1_min": 0.48220649017498324,
+      "test_macro_f1_max": 0.48220649017498324,
+      "val_macro_f1_mean": 0.5039168508917657,
+      "val_test_gap_mean": 0.021710360716782506,
+      "files": [
+        "exp_n08_spectral_eigengap_frac0.01_seed42.json"
+      ]
+    },
+    {
+      "method": "FS-IRM",
+      "regime": "frac=0.0100",
+      "n_seeds": 1,
+      "test_macro_f1_mean": 0.4693453490950132,
+      "test_macro_f1_std": 0.0,
+      "test_macro_f1_min": 0.4693453490950132,
+      "test_macro_f1_max": 0.4693453490950132,
+      "val_macro_f1_mean": 0.483133611431621,
+      "val_test_gap_mean": 0.013788262336607793,
+      "files": [
+        "exp_n19_irm_frac0.01_seed42.json"
+      ]
+    },
+    {
+      "method": "FS-NTKAlign-Frozen",
+      "regime": "frac=0.0500",
+      "n_seeds": 1,
+      "test_macro_f1_mean": 0.4608188126943797,
+      "test_macro_f1_std": 0.0,
+      "test_macro_f1_min": 0.4608188126943797,
+      "test_macro_f1_max": 0.4608188126943797,
+      "val_macro_f1_mean": 0.49474031785113387,
+      "val_test_gap_mean": 0.033921505156754184,
+      "files": [
+        "exp_fs_04_frac0.05_seed42.json"
+      ]
+    },
+    {
+      "method": "FS-SupCon-Frozen",
+      "regime": "frac=0.0500",
+      "n_seeds": 1,
+      "test_macro_f1_mean": 0.4607442797875585,
+      "test_macro_f1_std": 0.0,
+      "test_macro_f1_min": 0.4607442797875585,
+      "test_macro_f1_max": 0.4607442797875585,
+      "val_macro_f1_mean": 0.49474031785113387,
+      "val_test_gap_mean": 0.03399603806357537,
+      "files": [
+        "exp_fs_05_frac0.05_seed42.json"
+      ]
+    },
+    {
+      "method": "Test",
+      "regime": "K=128",
+      "n_seeds": 1,
+      "test_macro_f1_mean": 0.42,
+      "test_macro_f1_std": 0.0,
+      "test_macro_f1_min": 0.42,
+      "test_macro_f1_max": 0.42,
+      "val_macro_f1_mean": 0.0,
+      "val_test_gap_mean": 0.0,
+      "files": [
+        "exp_fs_99_K128_seed42.json"
+      ]
+    },
+    {
+      "method": "FS-SupCon-Frozen",
+      "regime": "frac=0.0100",
+      "n_seeds": 1,
+      "test_macro_f1_mean": 0.4037525834091911,
+      "test_macro_f1_std": 0.0,
+      "test_macro_f1_min": 0.4037525834091911,
+      "test_macro_f1_max": 0.4037525834091911,
+      "val_macro_f1_mean": 0.4220664228393584,
+      "val_test_gap_mean": 0.01831383943016729,
+      "files": [
+        "exp_fs_05_frac0.01_seed42.json"
+      ]
+    },
+    {
+      "method": "FS-NTKAlign-Frozen",
+      "regime": "frac=0.0100",
+      "n_seeds": 1,
+      "test_macro_f1_mean": 0.4037299555365947,
+      "test_macro_f1_std": 0.0,
+      "test_macro_f1_min": 0.4037299555365947,
+      "test_macro_f1_max": 0.4037299555365947,
+      "val_macro_f1_mean": 0.42199968500115365,
+      "val_test_gap_mean": 0.01826972946455896,
+      "files": [
+        "exp_fs_04_frac0.01_seed42.json"
+      ]
+    },
+    {
+      "method": "FS-Focal",
+      "regime": "K=128",
+      "n_seeds": 3,
+      "test_macro_f1_mean": 0.3748696667362803,
+      "test_macro_f1_std": 0.0,
+      "test_macro_f1_min": 0.3748696667362803,
+      "test_macro_f1_max": 0.3748696667362803,
+      "val_macro_f1_mean": 0.3377962119477438,
+      "val_test_gap_mean": -0.03707345478853652,
+      "files": [
+        "exp_fs_inline_focal_K128_seed42.json",
+        "exp_fs_inline_focal_K128_seed42__dup1.json",
+        "exp_fs_inline_focal_K128_seed42__dup2.json"
+      ]
+    },
+    {
+      "method": "FS-Baseline-UniXcoder",
+      "regime": "K=128",
+      "n_seeds": 1,
+      "test_macro_f1_mean": 0.37265061998608845,
+      "test_macro_f1_std": 0.0,
+      "test_macro_f1_min": 0.37265061998608845,
+      "test_macro_f1_max": 0.37265061998608845,
+      "val_macro_f1_mean": 0.3967564534231201,
+      "val_test_gap_mean": 0.024105833437031654,
+      "files": [
+        "exp_fs_baseline_unixcoder_K128_seed42.json"
+      ]
+    },
+    {
+      "method": "FS-VIB",
+      "regime": "K=128",
+      "n_seeds": 1,
+      "test_macro_f1_mean": 0.35098526328943325,
+      "test_macro_f1_std": 0.0,
+      "test_macro_f1_min": 0.35098526328943325,
+      "test_macro_f1_max": 0.35098526328943325,
+      "val_macro_f1_mean": 0.3487227825965206,
+      "val_test_gap_mean": -0.0022624806929126273,
+      "files": [
+        "exp_n10_vib_K128_seed42.json"
+      ]
+    },
+    {
+      "method": "FS-HierTree",
+      "regime": "K=128",
+      "n_seeds": 2,
+      "test_macro_f1_mean": 0.3492104345072891,
+      "test_macro_f1_std": 0.0,
+      "test_macro_f1_min": 0.3492104345072891,
+      "test_macro_f1_max": 0.3492104345072891,
+      "val_macro_f1_mean": 0.30887003329079493,
+      "val_test_gap_mean": -0.04034040121649418,
+      "files": [
+        "exp_fs_inline_hier_K128_seed42.json",
+        "exp_fs_inline_hier_K128_seed42__dup1.json"
+      ]
+    },
+    {
+      "method": "FS-SlicedWassersteinClass",
+      "regime": "K=128",
+      "n_seeds": 1,
+      "test_macro_f1_mean": 0.34532674433553034,
+      "test_macro_f1_std": 0.0,
+      "test_macro_f1_min": 0.34532674433553034,
+      "test_macro_f1_max": 0.34532674433553034,
+      "val_macro_f1_mean": 0.3353594231825124,
+      "val_test_gap_mean": -0.00996732115301796,
+      "files": [
+        "exp_n14_sliced_wasserstein_K128_seed42.json"
+      ]
+    },
+    {
+      "method": "FS-DataMapsCurriculum",
+      "regime": "K=128",
+      "n_seeds": 1,
+      "test_macro_f1_mean": 0.339653010089454,
+      "test_macro_f1_std": 0.0,
+      "test_macro_f1_min": 0.339653010089454,
+      "test_macro_f1_max": 0.339653010089454,
+      "val_macro_f1_mean": 0.31186392917559064,
+      "val_test_gap_mean": -0.02778908091386334,
+      "files": [
+        "exp_n18_datamaps_curriculum_K128_seed42.json"
+      ]
+    },
+    {
+      "method": "FS-FrontDoor-StyleMediator",
+      "regime": "K=128",
+      "n_seeds": 1,
+      "test_macro_f1_mean": 0.33730037418053765,
+      "test_macro_f1_std": 0.0,
+      "test_macro_f1_min": 0.33730037418053765,
+      "test_macro_f1_max": 0.33730037418053765,
+      "val_macro_f1_mean": 0.30520688593526213,
+      "val_test_gap_mean": -0.032093488245275525,
+      "files": [
+        "exp_n02_frontdoor_style_K128_seed42.json"
+      ]
+    },
+    {
+      "method": "FS-ConformalMondrian",
+      "regime": "K=128",
+      "n_seeds": 1,
+      "test_macro_f1_mean": 0.33381231788862004,
+      "test_macro_f1_std": 0.0,
+      "test_macro_f1_min": 0.33381231788862004,
+      "test_macro_f1_max": 0.33381231788862004,
+      "val_macro_f1_mean": 0.3244458828431178,
+      "val_test_gap_mean": -0.00936643504550222,
+      "files": [
+        "exp_n07_conformal_mondrian_K128_seed42.json"
+      ]
+    },
+    {
+      "method": "FS-TENT-TTA",
+      "regime": "K=128",
+      "n_seeds": 1,
+      "test_macro_f1_mean": 0.3176224949683772,
+      "test_macro_f1_std": 0.0,
+      "test_macro_f1_min": 0.3176224949683772,
+      "test_macro_f1_max": 0.3176224949683772,
+      "val_macro_f1_mean": 0.30250802828022916,
+      "val_test_gap_mean": -0.015114466688148032,
+      "files": [
+        "exp_n15_tent_tta_K128_seed42.json"
+      ]
+    },
+    {
+      "method": "FS-TreeWassersteinGenealogy",
+      "regime": "K=128",
+      "n_seeds": 1,
+      "test_macro_f1_mean": 0.31649346239526716,
+      "test_macro_f1_std": 0.0,
+      "test_macro_f1_min": 0.31649346239526716,
+      "test_macro_f1_max": 0.31649346239526716,
+      "val_macro_f1_mean": 0.2833890420369433,
+      "val_test_gap_mean": -0.03310442035832384,
+      "files": [
+        "exp_n13_tree_wasserstein_K128_seed42.json"
+      ]
+    },
+    {
+      "method": "FS-IRM",
+      "regime": "K=128",
+      "n_seeds": 1,
+      "test_macro_f1_mean": 0.31597819486399975,
+      "test_macro_f1_std": 0.0,
+      "test_macro_f1_min": 0.31597819486399975,
+      "test_macro_f1_max": 0.31597819486399975,
+      "val_macro_f1_mean": 0.31628135020984954,
+      "val_test_gap_mean": 0.00030315534584979265,
+      "files": [
+        "exp_n19_irm_K128_seed42.json"
+      ]
+    },
+    {
+      "method": "FS-SRD-SiblingResidual",
+      "regime": "K=128",
+      "n_seeds": 2,
+      "test_macro_f1_mean": 0.31304259322503425,
+      "test_macro_f1_std": 0.0,
+      "test_macro_f1_min": 0.31304259322503425,
+      "test_macro_f1_max": 0.31304259322503425,
+      "val_macro_f1_mean": 0.30176266426405,
+      "val_test_gap_mean": -0.011279928960984231,
+      "files": [
+        "exp_n01_sibling_residual_K128_seed42.json",
+        "exp_n01_sibling_residual_K128_seed42__dup1.json"
+      ]
+    },
+    {
+      "method": "FS-PACBayes-SampleFloor",
+      "regime": "K=128",
+      "n_seeds": 1,
+      "test_macro_f1_mean": 0.29296403668233123,
+      "test_macro_f1_std": 0.0,
+      "test_macro_f1_min": 0.29296403668233123,
+      "test_macro_f1_max": 0.29296403668233123,
+      "val_macro_f1_mean": 0.32213977699381674,
+      "val_test_gap_mean": 0.02917574031148551,
+      "files": [
+        "exp_n09_pac_bayes_floor_K128_seed42.json"
+      ]
+    },
+    {
+      "method": "FS-NTKAlign",
+      "regime": "K=128",
+      "n_seeds": 1,
+      "test_macro_f1_mean": 0.29293091813103433,
+      "test_macro_f1_std": 0.0,
+      "test_macro_f1_min": 0.29293091813103433,
+      "test_macro_f1_max": 0.29293091813103433,
+      "val_macro_f1_mean": 0.3348133127629409,
+      "val_test_gap_mean": 0.04188239463190657,
+      "files": [
+        "exp_fs_inline_ntkalign_K128_seed42.json"
+      ]
+    },
+    {
+      "method": "FS-VarianceInvariantSource",
+      "regime": "K=128",
+      "n_seeds": 1,
+      "test_macro_f1_mean": 0.2847981361912945,
+      "test_macro_f1_std": 0.0,
+      "test_macro_f1_min": 0.2847981361912945,
+      "test_macro_f1_max": 0.2847981361912945,
+      "val_macro_f1_mean": 0.3118245386051492,
+      "val_test_gap_mean": 0.027026402413854678,
+      "files": [
+        "exp_n11_vic_source_K128_seed42.json"
+      ]
+    },
+    {
+      "method": "FS-Hier-NTK",
+      "regime": "K=128",
+      "n_seeds": 2,
+      "test_macro_f1_mean": 0.2774795557659907,
+      "test_macro_f1_std": 0.0,
+      "test_macro_f1_min": 0.2774795557659907,
+      "test_macro_f1_max": 0.2774795557659907,
+      "val_macro_f1_mean": 0.31390384287887124,
+      "val_test_gap_mean": 0.03642428711288054,
+      "files": [
+        "exp_fs_inline_hier_ntk_K128_seed42.json",
+        "exp_fs_inline_hier_ntk_K128_seed42__dup1.json"
+      ]
+    },
+    {
+      "method": "FS-Baseline-CodeBERT",
+      "regime": "K=128",
+      "n_seeds": 1,
+      "test_macro_f1_mean": 0.26511070923083285,
+      "test_macro_f1_std": 0.0,
+      "test_macro_f1_min": 0.26511070923083285,
+      "test_macro_f1_max": 0.26511070923083285,
+      "val_macro_f1_mean": 0.2946231586779963,
+      "val_test_gap_mean": 0.02951244944716347,
+      "files": [
+        "exp_fs_baseline_codebert_K128_seed42.json"
+      ]
+    },
+    {
+      "method": "FS-EnergyOOD",
+      "regime": "K=128",
+      "n_seeds": 1,
+      "test_macro_f1_mean": 0.24039092127534986,
+      "test_macro_f1_std": 0.0,
+      "test_macro_f1_min": 0.24039092127534986,
+      "test_macro_f1_max": 0.24039092127534986,
+      "val_macro_f1_mean": 0.2946423533258384,
+      "val_test_gap_mean": 0.05425143205048852,
+      "files": [
+        "exp_n16_energy_ood_K128_seed42.json"
+      ]
+    },
+    {
+      "method": "FS-SpectralEigengap",
+      "regime": "K=128",
+      "n_seeds": 1,
+      "test_macro_f1_mean": 0.23309082062197173,
+      "test_macro_f1_std": 0.0,
+      "test_macro_f1_min": 0.23309082062197173,
+      "test_macro_f1_max": 0.23309082062197173,
+      "val_macro_f1_mean": 0.2181425154213794,
+      "val_test_gap_mean": -0.014948305200592316,
+      "files": [
+        "exp_n08_spectral_eigengap_K128_seed42.json"
+      ]
+    },
+    {
+      "method": "FS-Baseline-GraphCodeBERT",
+      "regime": "K=128",
+      "n_seeds": 1,
+      "test_macro_f1_mean": 0.2191208203268287,
+      "test_macro_f1_std": 0.0,
+      "test_macro_f1_min": 0.2191208203268287,
+      "test_macro_f1_max": 0.2191208203268287,
+      "val_macro_f1_mean": 0.30590354103501366,
+      "val_test_gap_mean": 0.08678272070818496,
+      "files": [
+        "exp_fs_baseline_graphcodebert_K128_seed42.json"
+      ]
+    },
+    {
+      "method": "FS-TreeWassersteinGenealogy",
+      "regime": "K=32",
+      "n_seeds": 1,
+      "test_macro_f1_mean": 0.1907440899960456,
+      "test_macro_f1_std": 0.0,
+      "test_macro_f1_min": 0.1907440899960456,
+      "test_macro_f1_max": 0.1907440899960456,
+      "val_macro_f1_mean": 0.20393553568424294,
+      "val_test_gap_mean": 0.013191445688197329,
+      "files": [
+        "exp_n13_tree_wasserstein_K32_seed42.json"
+      ]
+    },
+    {
+      "method": "FS-Prototypical",
+      "regime": "frac=0.0500",
+      "n_seeds": 1,
+      "test_macro_f1_mean": 0.19036848887686206,
+      "test_macro_f1_std": 0.0,
+      "test_macro_f1_min": 0.19036848887686206,
+      "test_macro_f1_max": 0.19036848887686206,
+      "val_macro_f1_mean": 0.22738355556283432,
+      "val_test_gap_mean": 0.037015066685972264,
+      "files": [
+        "exp_n17_prototypical_frac0.05_seed42.json"
+      ]
+    },
+    {
+      "method": "FS-ConformalMondrian",
+      "regime": "K=32",
+      "n_seeds": 1,
+      "test_macro_f1_mean": 0.18971023043146484,
+      "test_macro_f1_std": 0.0,
+      "test_macro_f1_min": 0.18971023043146484,
+      "test_macro_f1_max": 0.18971023043146484,
+      "val_macro_f1_mean": 0.2225072714964178,
+      "val_test_gap_mean": 0.03279704106495296,
+      "files": [
+        "exp_n07_conformal_mondrian_K32_seed42.json"
+      ]
+    },
+    {
+      "method": "FS-SRD-SiblingResidual",
+      "regime": "K=32",
+      "n_seeds": 2,
+      "test_macro_f1_mean": 0.18944935618713898,
+      "test_macro_f1_std": 0.0,
+      "test_macro_f1_min": 0.18944935618713898,
+      "test_macro_f1_max": 0.18944935618713898,
+      "val_macro_f1_mean": 0.19492798836547365,
+      "val_test_gap_mean": 0.005478632178334664,
+      "files": [
+        "exp_n01_sibling_residual_K32_seed42.json",
+        "exp_n01_sibling_residual_K32_seed42__dup1.json"
+      ]
+    },
+    {
+      "method": "FS-NTKAlign",
+      "regime": "K=32",
+      "n_seeds": 1,
+      "test_macro_f1_mean": 0.18306102803281402,
+      "test_macro_f1_std": 0.0,
+      "test_macro_f1_min": 0.18306102803281402,
+      "test_macro_f1_max": 0.18306102803281402,
+      "val_macro_f1_mean": 0.22799706893828434,
+      "val_test_gap_mean": 0.04493604090547032,
+      "files": [
+        "exp_fs_inline_ntkalign_K32_seed42.json"
+      ]
+    },
+    {
+      "method": "FS-DataMapsCurriculum",
+      "regime": "K=32",
+      "n_seeds": 1,
+      "test_macro_f1_mean": 0.18120184627235558,
+      "test_macro_f1_std": 0.0,
+      "test_macro_f1_min": 0.18120184627235558,
+      "test_macro_f1_max": 0.18120184627235558,
+      "val_macro_f1_mean": 0.22257034856354896,
+      "val_test_gap_mean": 0.041368502291193376,
+      "files": [
+        "exp_n18_datamaps_curriculum_K32_seed42.json"
+      ]
+    },
+    {
+      "method": "FS-VIB",
+      "regime": "K=32",
+      "n_seeds": 1,
+      "test_macro_f1_mean": 0.1802813048861253,
+      "test_macro_f1_std": 0.0,
+      "test_macro_f1_min": 0.1802813048861253,
+      "test_macro_f1_max": 0.1802813048861253,
+      "val_macro_f1_mean": 0.22293408076314158,
+      "val_test_gap_mean": 0.0426527758770163,
+      "files": [
+        "exp_n10_vib_K32_seed42.json"
+      ]
+    },
+    {
+      "method": "FS-PACBayes-SampleFloor",
+      "regime": "K=32",
+      "n_seeds": 1,
+      "test_macro_f1_mean": 0.17532929535727493,
+      "test_macro_f1_std": 0.0,
+      "test_macro_f1_min": 0.17532929535727493,
+      "test_macro_f1_max": 0.17532929535727493,
+      "val_macro_f1_mean": 0.23879452323377556,
+      "val_test_gap_mean": 0.06346522787650064,
+      "files": [
+        "exp_n09_pac_bayes_floor_K32_seed42.json"
+      ]
+    },
+    {
+      "method": "FS-VarianceInvariantSource",
+      "regime": "K=32",
+      "n_seeds": 1,
+      "test_macro_f1_mean": 0.16346715546725454,
+      "test_macro_f1_std": 0.0,
+      "test_macro_f1_min": 0.16346715546725454,
+      "test_macro_f1_max": 0.16346715546725454,
+      "val_macro_f1_mean": 0.21810175608190305,
+      "val_test_gap_mean": 0.054634600614648504,
+      "files": [
+        "exp_n11_vic_source_K32_seed42.json"
+      ]
+    },
+    {
+      "method": "FS-SpectralEigengap",
+      "regime": "K=32",
+      "n_seeds": 1,
+      "test_macro_f1_mean": 0.15218791063669054,
+      "test_macro_f1_std": 0.0,
+      "test_macro_f1_min": 0.15218791063669054,
+      "test_macro_f1_max": 0.15218791063669054,
+      "val_macro_f1_mean": 0.1675943613521511,
+      "val_test_gap_mean": 0.015406450715460568,
+      "files": [
+        "exp_n08_spectral_eigengap_K32_seed42.json"
+      ]
+    },
+    {
+      "method": "FS-SlicedWassersteinClass",
+      "regime": "K=32",
+      "n_seeds": 1,
+      "test_macro_f1_mean": 0.149852580215625,
+      "test_macro_f1_std": 0.0,
+      "test_macro_f1_min": 0.149852580215625,
+      "test_macro_f1_max": 0.149852580215625,
+      "val_macro_f1_mean": 0.19228062445698169,
+      "val_test_gap_mean": 0.04242804424135668,
+      "files": [
+        "exp_n14_sliced_wasserstein_K32_seed42.json"
+      ]
+    },
+    {
+      "method": "FS-SupCon-Frozen",
+      "regime": "K=128",
+      "n_seeds": 1,
+      "test_macro_f1_mean": 0.14930724211651392,
+      "test_macro_f1_std": 0.0,
+      "test_macro_f1_min": 0.14930724211651392,
+      "test_macro_f1_max": 0.14930724211651392,
+      "val_macro_f1_mean": 0.25219888412124164,
+      "val_test_gap_mean": 0.10289164200472772,
+      "files": [
+        "exp_fs_05_K128_seed42.json"
+      ]
+    },
+    {
+      "method": "FS-FrontDoor-StyleMediator",
+      "regime": "K=32",
+      "n_seeds": 1,
+      "test_macro_f1_mean": 0.14838327199717177,
+      "test_macro_f1_std": 0.0,
+      "test_macro_f1_min": 0.14838327199717177,
+      "test_macro_f1_max": 0.14838327199717177,
+      "val_macro_f1_mean": 0.22597872244829897,
+      "val_test_gap_mean": 0.0775954504511272,
+      "files": [
+        "exp_n02_frontdoor_style_K32_seed42.json"
+      ]
+    },
+    {
+      "method": "FS-NTKAlign-Frozen",
+      "regime": "K=128",
+      "n_seeds": 1,
+      "test_macro_f1_mean": 0.14788896065885113,
+      "test_macro_f1_std": 0.0,
+      "test_macro_f1_min": 0.14788896065885113,
+      "test_macro_f1_max": 0.14788896065885113,
+      "val_macro_f1_mean": 0.24645854927545066,
+      "val_test_gap_mean": 0.09856958861659953,
+      "files": [
+        "exp_fs_04_K128_seed42.json"
+      ]
+    },
+    {
+      "method": "FS-TENT-TTA",
+      "regime": "K=32",
+      "n_seeds": 1,
+      "test_macro_f1_mean": 0.1409369617129692,
+      "test_macro_f1_std": 0.0,
+      "test_macro_f1_min": 0.1409369617129692,
+      "test_macro_f1_max": 0.1409369617129692,
+      "val_macro_f1_mean": 0.2089112746741136,
+      "val_test_gap_mean": 0.0679743129611444,
+      "files": [
+        "exp_n15_tent_tta_K32_seed42.json"
+      ]
+    },
+    {
+      "method": "FS-NTKAlign-Frozen",
+      "regime": "K=32",
+      "n_seeds": 1,
+      "test_macro_f1_mean": 0.13475017801443182,
+      "test_macro_f1_std": 0.0,
+      "test_macro_f1_min": 0.13475017801443182,
+      "test_macro_f1_max": 0.13475017801443182,
+      "val_macro_f1_mean": 0.1337563202444896,
+      "val_test_gap_mean": -0.000993857769942208,
+      "files": [
+        "exp_fs_04_K32_seed42.json"
+      ]
+    },
+    {
+      "method": "FS-SupCon-Frozen",
+      "regime": "K=32",
+      "n_seeds": 1,
+      "test_macro_f1_mean": 0.13465347517652523,
+      "test_macro_f1_std": 0.0,
+      "test_macro_f1_min": 0.13465347517652523,
+      "test_macro_f1_max": 0.13465347517652523,
+      "val_macro_f1_mean": 0.1337563202444896,
+      "val_test_gap_mean": -0.0008971549320356265,
+      "files": [
+        "exp_fs_05_K32_seed42.json"
+      ]
+    },
+    {
+      "method": "FS-Prototypical",
+      "regime": "frac=0.0100",
+      "n_seeds": 1,
+      "test_macro_f1_mean": 0.12241250642754946,
+      "test_macro_f1_std": 0.0,
+      "test_macro_f1_min": 0.12241250642754946,
+      "test_macro_f1_max": 0.12241250642754946,
+      "val_macro_f1_mean": 0.1536614124225977,
+      "val_test_gap_mean": 0.031248905995048246,
+      "files": [
+        "exp_n17_prototypical_frac0.01_seed42.json"
+      ]
+    },
+    {
+      "method": "FS-IRM",
+      "regime": "K=32",
+      "n_seeds": 1,
+      "test_macro_f1_mean": 0.1186410451244387,
+      "test_macro_f1_std": 0.0,
+      "test_macro_f1_min": 0.1186410451244387,
+      "test_macro_f1_max": 0.1186410451244387,
+      "val_macro_f1_mean": 0.16249706295723187,
+      "val_test_gap_mean": 0.04385601783279318,
+      "files": [
+        "exp_n19_irm_K32_seed42.json"
+      ]
+    },
+    {
+      "method": "FS-EnergyOOD",
+      "regime": "K=32",
+      "n_seeds": 1,
+      "test_macro_f1_mean": 0.10688071227522489,
+      "test_macro_f1_std": 0.0,
+      "test_macro_f1_min": 0.10688071227522489,
+      "test_macro_f1_max": 0.10688071227522489,
+      "val_macro_f1_mean": 0.14327111230838632,
+      "val_test_gap_mean": 0.036390400033161435,
+      "files": [
+        "exp_n16_energy_ood_K32_seed42.json"
+      ]
+    },
+    {
+      "method": "FS-ETF-FrozenSimplex",
+      "regime": "frac=0.0500",
+      "n_seeds": 1,
+      "test_macro_f1_mean": 0.08588464276174086,
+      "test_macro_f1_std": 0.0,
+      "test_macro_f1_min": 0.08588464276174086,
+      "test_macro_f1_max": 0.08588464276174086,
+      "val_macro_f1_mean": 0.10202843244768185,
+      "val_test_gap_mean": 0.01614378968594099,
+      "files": [
+        "exp_n04_etf_simplex_frac0.05_seed42.json"
+      ]
+    },
+    {
+      "method": "FS-Prototypical",
+      "regime": "K=128",
+      "n_seeds": 1,
+      "test_macro_f1_mean": 0.06828992285408106,
+      "test_macro_f1_std": 0.0,
+      "test_macro_f1_min": 0.06828992285408106,
+      "test_macro_f1_max": 0.06828992285408106,
+      "val_macro_f1_mean": 0.07411829363048876,
+      "val_test_gap_mean": 0.005828370776407701,
+      "files": [
+        "exp_n17_prototypical_K128_seed42.json"
+      ]
+    },
+    {
+      "method": "FS-ETF-FrozenSimplex",
+      "regime": "frac=0.0100",
+      "n_seeds": 1,
+      "test_macro_f1_mean": 0.049092907912360824,
+      "test_macro_f1_std": 0.0,
+      "test_macro_f1_min": 0.049092907912360824,
+      "test_macro_f1_max": 0.049092907912360824,
+      "val_macro_f1_mean": 0.062288576632838925,
+      "val_test_gap_mean": 0.013195668720478101,
+      "files": [
+        "exp_n04_etf_simplex_frac0.01_seed42.json"
+      ]
+    },
+    {
+      "method": "FS-ETF-FrozenSimplex",
+      "regime": "K=128",
+      "n_seeds": 1,
+      "test_macro_f1_mean": 0.03392094519594378,
+      "test_macro_f1_std": 0.0,
+      "test_macro_f1_min": 0.03392094519594378,
+      "test_macro_f1_max": 0.03392094519594378,
+      "val_macro_f1_mean": 0.047619047619047616,
+      "val_test_gap_mean": 0.013698102423103833,
+      "files": [
+        "exp_n04_etf_simplex_K128_seed42.json"
+      ]
+    },
+    {
+      "method": "FS-ETF-FrozenSimplex",
+      "regime": "K=32",
+      "n_seeds": 1,
+      "test_macro_f1_mean": 0.03391595015459101,
+      "test_macro_f1_std": 0.0,
+      "test_macro_f1_min": 0.03391595015459101,
+      "test_macro_f1_max": 0.03391595015459101,
+      "val_macro_f1_mean": 0.047619047619047616,
+      "val_test_gap_mean": 0.01370309746445661,
+      "files": [
+        "exp_n04_etf_simplex_K32_seed42.json"
+      ]
+    },
+    {
+      "method": "FS-Prototypical",
+      "regime": "K=32",
+      "n_seeds": 1,
+      "test_macro_f1_mean": 0.03391159278492762,
+      "test_macro_f1_std": 0.0,
+      "test_macro_f1_min": 0.03391159278492762,
+      "test_macro_f1_max": 0.03391159278492762,
+      "val_macro_f1_mean": 0.047619047619047616,
+      "val_test_gap_mean": 0.013707454834119996,
+      "files": [
+        "exp_n17_prototypical_K32_seed42.json"
+      ]
+    }
+  ],
+  "n_runs": 113
+}

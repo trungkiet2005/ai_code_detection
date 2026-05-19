@@ -1,0 +1,56 @@
+{
+  "method": "FS-TreeWassersteinGenealogy",
+  "exp_id": "exp_n13_tree_wasserstein",
+  "regime": "K=32",
+  "benchmark": "codet_m4",
+  "n_classes": 6,
+  "timestamp": "2026-05-09T17:16:58.939189Z",
+  "config": {
+    "benchmark": "codet_m4",
+    "n_classes": 6,
+    "k_shot": 32,
+    "train_fraction": 0.0,
+    "fs_seed": 42,
+    "encoder": "answerdotai/ModernBERT-base",
+    "epochs": 1,
+    "batch_size": 16,
+    "max_length": 384,
+    "lambda_method": 0.4
+  },
+  "results": {
+    "test_macro_f1": 0.1907440899960456,
+    "test_weighted_f1": 0.3677981554759311,
+    "test_accuracy": 0.3375712131367292,
+    "val_macro_f1": 0.20393553568424294,
+    "val_test_gap": 0.013191445688197329,
+    "per_class_f1": {
+      "class_0": 0.6165847607233169,
+      "class_1": 0.18766161802733652,
+      "class_2": 0.10350868411832424,
+      "class_3": 0.005571030640668524,
+      "class_4": 0.037585084344480615,
+      "class_5": 0.19355336212214683
+    },
+    "per_lang_f1": {
+      "cpp": 0.19635788142837796,
+      "java": 0.1307735326620716,
+      "python": 0.1975449044295278
+    },
+    "per_source_f1": {
+      "cf": 0.19513228472107177,
+      "gh": 0.16544460395956798,
+      "lc": 0.1265625223190593
+    },
+    "train_steps": 12,
+    "wall_time_s": 481.2073714733124,
+    "lambda_method": 0.4,
+    "train_per_class": {
+      "0": 32,
+      "1": 32,
+      "2": 32,
+      "3": 32,
+      "4": 32,
+      "5": 32
+    }
+  }
+}

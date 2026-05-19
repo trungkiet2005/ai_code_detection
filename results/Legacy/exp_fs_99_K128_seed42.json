@@ -1,0 +1,25 @@
+{
+  "method": "Test",
+  "exp_id": "exp_fs_99",
+  "regime": "K=128",
+  "timestamp": "2026-05-09T11:59:15.487973Z",
+  "config": {
+    "benchmark": "codet_m4",
+    "task": "author",
+    "k_shot": 128,
+    "train_fraction": 0.0,
+    "n_classes": 6,
+    "fs_seed": 42,
+    "encoder": "answerdotai/ModernBERT-base",
+    "epochs": 1,
+    "batch_size": 16,
+    "max_length": 384,
+    "precision": "fp16",
+    "lr_encoder": 2e-05,
+    "lr_heads": 0.0001,
+    "lambda_ntk": 0.4
+  },
+  "results": {
+    "test_macro_f1": 0.42
+  }
+}

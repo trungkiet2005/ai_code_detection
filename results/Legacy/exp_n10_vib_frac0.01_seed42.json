@@ -1,0 +1,52 @@
+{
+  "method": "FS-VIB",
+  "exp_id": "exp_n10_vib",
+  "regime": "frac=0.0100",
+  "timestamp": "2026-05-09T16:53:05.518770Z",
+  "config": {
+    "k_shot": 0,
+    "train_fraction": 0.01,
+    "fs_seed": 42,
+    "encoder": "answerdotai/ModernBERT-base",
+    "epochs": 3,
+    "batch_size": 16,
+    "max_length": 384,
+    "lambda_method": 0.01
+  },
+  "results": {
+    "test_macro_f1": 0.5628263748414742,
+    "test_weighted_f1": 0.723007446408378,
+    "test_accuracy": 0.7230437332439679,
+    "val_macro_f1": 0.5763727494374365,
+    "val_test_gap": 0.013546374595962307,
+    "per_class_f1": {
+      "class_0": 0.9405038117335102,
+      "class_1": 0.5546939147887966,
+      "class_2": 0.45393794749403343,
+      "class_3": 0.6737024221453287,
+      "class_4": 0.41841004184100417,
+      "class_5": 0.3357101110461718
+    },
+    "per_lang_f1": {
+      "cpp": 0.5819983570496101,
+      "java": 0.5825854288090783,
+      "python": 0.520540973876156
+    },
+    "per_source_f1": {
+      "cf": 0.5880862818896458,
+      "gh": 0.3941777332471401,
+      "lc": 0.47132081797953834
+    },
+    "train_steps": 762,
+    "wall_time_s": 1008.8454895019531,
+    "lambda_method": 0.01,
+    "train_per_class": {
+      "0": 1970,
+      "1": 492,
+      "2": 141,
+      "3": 510,
+      "4": 443,
+      "5": 494
+    }
+  }
+}

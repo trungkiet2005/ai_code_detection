@@ -1,0 +1,52 @@
+{
+  "method": "FS-SpectralEigengap",
+  "exp_id": "exp_n08_spectral_eigengap",
+  "regime": "K=128",
+  "timestamp": "2026-05-09T16:31:55.733065Z",
+  "config": {
+    "k_shot": 128,
+    "train_fraction": 0.0,
+    "fs_seed": 42,
+    "encoder": "answerdotai/ModernBERT-base",
+    "epochs": 1,
+    "batch_size": 16,
+    "max_length": 384,
+    "lambda_method": 0.1
+  },
+  "results": {
+    "test_macro_f1": 0.23309082062197173,
+    "test_weighted_f1": 0.4107725697380006,
+    "test_accuracy": 0.3992124664879357,
+    "val_macro_f1": 0.2181425154213794,
+    "val_test_gap": -0.014948305200592316,
+    "per_class_f1": {
+      "class_0": 0.6439775644072631,
+      "class_1": 0.1978021978021978,
+      "class_2": 0.059937995177402684,
+      "class_3": 0.29460828120345545,
+      "class_4": 0.006802721088435374,
+      "class_5": 0.195416164053076
+    },
+    "per_lang_f1": {
+      "cpp": 0.23576876707774155,
+      "java": 0.2128292949038765,
+      "python": 0.21534859666256556
+    },
+    "per_source_f1": {
+      "cf": 0.2299330485310788,
+      "gh": 0.15894084595751284,
+      "lc": 0.18637421427219206
+    },
+    "train_steps": 48,
+    "wall_time_s": 517.5097539424896,
+    "lambda_method": 0.1,
+    "train_per_class": {
+      "0": 128,
+      "1": 128,
+      "2": 128,
+      "3": 128,
+      "4": 128,
+      "5": 128
+    }
+  }
+}

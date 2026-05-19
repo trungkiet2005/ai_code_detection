@@ -1,0 +1,51 @@
+{
+  "method": "FS-Baseline-UniXcoder",
+  "exp_id": "exp_fs_baseline_unixcoder",
+  "regime": "frac=0.0100",
+  "timestamp": "2026-05-09T15:23:47.471291Z",
+  "config": {
+    "benchmark": "codet_m4",
+    "task": "author",
+    "k_shot": 0,
+    "train_fraction": 0.01,
+    "n_classes": 6,
+    "fs_seed": 42,
+    "encoder": "microsoft/unixcoder-base",
+    "epochs": 3,
+    "batch_size": 16,
+    "max_length": 384,
+    "precision": "fp16",
+    "lr_encoder": 2e-05,
+    "lr_heads": 0.0001,
+    "lambda_ntk": 0.4
+  },
+  "results": {
+    "test_macro_f1": 0.5743908865171923,
+    "test_weighted_f1": 0.7296439213544152,
+    "test_accuracy": 0.7281962131367292,
+    "val_macro_f1": 0.5839390309133415,
+    "val_test_gap": 0.00954814439614926,
+    "train_steps": 762,
+    "wall_time_s": "492.1",
+    "loss_kind": "ce",
+    "frozen": 0,
+    "per_class_f1": {
+      "class_0": 0.9437395659432387,
+      "class_1": 0.5668325630998934,
+      "class_2": 0.4816247582205029,
+      "class_3": 0.6841351419664673,
+      "class_4": 0.3664302600472813,
+      "class_5": 0.40358302982577027
+    },
+    "per_lang_f1": {
+      "cpp": 0.5755477179302302,
+      "java": 0.6092152155824359,
+      "python": 0.5404963106155138
+    },
+    "per_source_f1": {
+      "cf": 0.6143309699999437,
+      "gh": 0.4086902247087783,
+      "lc": 0.4919114345563018
+    }
+  }
+}

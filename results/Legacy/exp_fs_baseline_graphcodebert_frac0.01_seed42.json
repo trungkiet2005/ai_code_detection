@@ -1,0 +1,51 @@
+{
+  "method": "FS-Baseline-GraphCodeBERT",
+  "exp_id": "exp_fs_baseline_graphcodebert",
+  "regime": "frac=0.0100",
+  "timestamp": "2026-05-09T15:23:18.404975Z",
+  "config": {
+    "benchmark": "codet_m4",
+    "task": "author",
+    "k_shot": 0,
+    "train_fraction": 0.01,
+    "n_classes": 6,
+    "fs_seed": 42,
+    "encoder": "microsoft/graphcodebert-base",
+    "epochs": 3,
+    "batch_size": 16,
+    "max_length": 384,
+    "precision": "fp16",
+    "lr_encoder": 2e-05,
+    "lr_heads": 0.0001,
+    "lambda_ntk": 0.4
+  },
+  "results": {
+    "test_macro_f1": 0.5013921408204253,
+    "test_weighted_f1": 0.6733007184399296,
+    "test_accuracy": 0.6598525469168901,
+    "val_macro_f1": 0.5760346853662965,
+    "val_test_gap": 0.07464254454587127,
+    "train_steps": 762,
+    "wall_time_s": "551.6",
+    "loss_kind": "ce",
+    "frozen": 0,
+    "per_class_f1": {
+      "class_0": 0.8935668874761037,
+      "class_1": 0.4981365330424507,
+      "class_2": 0.30401883302505467,
+      "class_3": 0.6091147494507052,
+      "class_4": 0.2563438073642155,
+      "class_5": 0.447172034564022
+    },
+    "per_lang_f1": {
+      "cpp": 0.5191818170553448,
+      "java": 0.5097984757548678,
+      "python": 0.48549263194911213
+    },
+    "per_source_f1": {
+      "cf": 0.4561995936122685,
+      "gh": 0.3329909479440282,
+      "lc": 0.44190296146644625
+    }
+  }
+}

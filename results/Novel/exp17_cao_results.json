@@ -1,0 +1,898 @@
+[
+  {
+    "tag": "exp17_cao_ModernBERT-base_codet_m4_fixed72",
+    "encoder": "ModernBERT-base",
+    "benchmark": "codet_m4",
+    "task": "author",
+    "n_classes": 6,
+    "total_train_samples": 72,
+    "train_samples_per_class": 12,
+    "batch_size": 256,
+    "seq_length": 512,
+    "epochs": 3,
+    "lr_encoder": 2e-05,
+    "lr_head": 0.0001,
+    "temp": 0.07,
+    "lam_cao": 0.5,
+    "macro_f1": 0.11322,
+    "weighted_f1": 0.349419,
+    "accuracy": 0.514368,
+    "delta_vs_paper": -0.55008,
+    "paper_baseline": 0.6633,
+    "per_class_f1": [
+      0.679317,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "per_class_precision": [
+      0.514368,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "per_class_recall": [
+      1.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "confusion_matrix": [
+      [
+        24558,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        5226,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        1760,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        5409,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        5537,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        5254,
+        0,
+        0,
+        0,
+        0,
+        0
+      ]
+    ],
+    "pred_distribution": {
+      "0": 47744
+    },
+    "label_distribution": {
+      "0": 24558,
+      "2": 1760,
+      "1": 5226,
+      "5": 5254,
+      "4": 5537,
+      "3": 5409
+    },
+    "train_history": [
+      {
+        "epoch": 1,
+        "loss": -374529.90625,
+        "ce_loss": 1.816908,
+        "cao_loss": -749063.4375,
+        "macro_f1": 0.047619
+      },
+      {
+        "epoch": 2,
+        "loss": NaN,
+        "ce_loss": NaN,
+        "cao_loss": -749063.5,
+        "macro_f1": 0.047619
+      },
+      {
+        "epoch": 3,
+        "loss": NaN,
+        "ce_loss": NaN,
+        "cao_loss": -749063.4375,
+        "macro_f1": 0.047619
+      }
+    ],
+    "val_history": [
+      {
+        "epoch": 1,
+        "macro_f1": 0.11327,
+        "weighted_f1": 0.349814,
+        "accuracy": 0.514718
+      },
+      {
+        "epoch": 2,
+        "macro_f1": 0.11327,
+        "weighted_f1": 0.349814,
+        "accuracy": 0.514718
+      },
+      {
+        "epoch": 3,
+        "macro_f1": 0.11327,
+        "weighted_f1": 0.349814,
+        "accuracy": 0.514718
+      }
+    ],
+    "wall_time_seconds": 336.9,
+    "gpu_memory_gb": 44.54,
+    "timestamp": "2026-05-12 08:31:25"
+  },
+  {
+    "tag": "exp17_cao_ModernBERT-base_aicd_t2_fixed72",
+    "encoder": "ModernBERT-base",
+    "benchmark": "aicd_t2",
+    "task": "t2",
+    "n_classes": 12,
+    "total_train_samples": 72,
+    "train_samples_per_class": 6,
+    "batch_size": 256,
+    "seq_length": 512,
+    "epochs": 3,
+    "lr_encoder": 2e-05,
+    "lr_head": 0.0001,
+    "temp": 0.07,
+    "lam_cao": 0.5,
+    "macro_f1": 0.068545,
+    "weighted_f1": 0.574612,
+    "accuracy": 0.698578,
+    "delta_vs_paper": -0.594755,
+    "paper_baseline": 0.6633,
+    "per_class_f1": [
+      0.822545,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "per_class_precision": [
+      0.698578,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "per_class_recall": [
+      1.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "confusion_matrix": [
+      [
+        77626,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        1416,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        3665,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        1226,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        618,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        2400,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        2757,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        4504,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        2090,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        1932,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        11791,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        1095,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ]
+    ],
+    "pred_distribution": {
+      "0": 111120
+    },
+    "label_distribution": {
+      "1": 1416,
+      "6": 2757,
+      "10": 11791,
+      "0": 77626,
+      "7": 4504,
+      "2": 3665,
+      "3": 1226,
+      "9": 1932,
+      "8": 2090,
+      "5": 2400,
+      "11": 1095,
+      "4": 618
+    },
+    "train_history": [
+      {
+        "epoch": 1,
+        "loss": -306973.03125,
+        "ce_loss": 2.524943,
+        "cao_loss": -613951.125,
+        "macro_f1": 0.012821
+      },
+      {
+        "epoch": 2,
+        "loss": NaN,
+        "ce_loss": NaN,
+        "cao_loss": -613951.125,
+        "macro_f1": 0.012821
+      },
+      {
+        "epoch": 3,
+        "loss": NaN,
+        "ce_loss": NaN,
+        "cao_loss": -613951.125,
+        "macro_f1": 0.012821
+      }
+    ],
+    "val_history": [
+      {
+        "epoch": 1,
+        "macro_f1": 0.068526,
+        "weighted_f1": 0.574165,
+        "accuracy": 0.698236
+      },
+      {
+        "epoch": 2,
+        "macro_f1": 0.068526,
+        "weighted_f1": 0.574165,
+        "accuracy": 0.698236
+      },
+      {
+        "epoch": 3,
+        "macro_f1": 0.068526,
+        "weighted_f1": 0.574165,
+        "accuracy": 0.698236
+      }
+    ],
+    "wall_time_seconds": 636.1,
+    "gpu_memory_gb": 44.44,
+    "timestamp": "2026-05-12 08:42:02"
+  },
+  {
+    "tag": "exp17_cao_unixcoder-base_codet_m4_fixed72",
+    "encoder": "unixcoder-base",
+    "benchmark": "codet_m4",
+    "task": "author",
+    "n_classes": 6,
+    "total_train_samples": 72,
+    "train_samples_per_class": 12,
+    "batch_size": 256,
+    "seq_length": 512,
+    "epochs": 3,
+    "lr_encoder": 2e-05,
+    "lr_head": 0.0001,
+    "temp": 0.07,
+    "lam_cao": 0.5,
+    "macro_f1": 0.11322,
+    "weighted_f1": 0.349419,
+    "accuracy": 0.514368,
+    "delta_vs_paper": -0.55008,
+    "paper_baseline": 0.6633,
+    "per_class_f1": [
+      0.679317,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "per_class_precision": [
+      0.514368,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "per_class_recall": [
+      1.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "confusion_matrix": [
+      [
+        24558,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        5226,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        1760,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        5409,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        5537,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        5254,
+        0,
+        0,
+        0,
+        0,
+        0
+      ]
+    ],
+    "pred_distribution": {
+      "0": 47744
+    },
+    "label_distribution": {
+      "0": 24558,
+      "2": 1760,
+      "1": 5226,
+      "5": 5254,
+      "4": 5537,
+      "3": 5409
+    },
+    "train_history": [
+      {
+        "epoch": 1,
+        "loss": -752.986511,
+        "ce_loss": 1.846381,
+        "cao_loss": -1509.665771,
+        "macro_f1": 0.047619
+      },
+      {
+        "epoch": 2,
+        "loss": NaN,
+        "ce_loss": NaN,
+        "cao_loss": -1574.681519,
+        "macro_f1": 0.047619
+      },
+      {
+        "epoch": 3,
+        "loss": NaN,
+        "ce_loss": NaN,
+        "cao_loss": -1523.025635,
+        "macro_f1": 0.047619
+      }
+    ],
+    "val_history": [
+      {
+        "epoch": 1,
+        "macro_f1": 0.11327,
+        "weighted_f1": 0.349814,
+        "accuracy": 0.514718
+      },
+      {
+        "epoch": 2,
+        "macro_f1": 0.11327,
+        "weighted_f1": 0.349814,
+        "accuracy": 0.514718
+      },
+      {
+        "epoch": 3,
+        "macro_f1": 0.11327,
+        "weighted_f1": 0.349814,
+        "accuracy": 0.514718
+      }
+    ],
+    "wall_time_seconds": 174.8,
+    "gpu_memory_gb": 31.13,
+    "timestamp": "2026-05-12 08:44:57"
+  },
+  {
+    "tag": "exp17_cao_unixcoder-base_aicd_t2_fixed72",
+    "encoder": "unixcoder-base",
+    "benchmark": "aicd_t2",
+    "task": "t2",
+    "n_classes": 12,
+    "total_train_samples": 72,
+    "train_samples_per_class": 6,
+    "batch_size": 256,
+    "seq_length": 512,
+    "epochs": 3,
+    "lr_encoder": 2e-05,
+    "lr_head": 0.0001,
+    "temp": 0.07,
+    "lam_cao": 0.5,
+    "macro_f1": 0.068545,
+    "weighted_f1": 0.574612,
+    "accuracy": 0.698578,
+    "delta_vs_paper": -0.594755,
+    "paper_baseline": 0.6633,
+    "per_class_f1": [
+      0.822545,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "per_class_precision": [
+      0.698578,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "per_class_recall": [
+      1.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "confusion_matrix": [
+      [
+        77626,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        1416,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        3665,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        1226,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        618,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        2400,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        2757,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        4504,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        2090,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        1932,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        11791,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        1095,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ]
+    ],
+    "pred_distribution": {
+      "0": 111120
+    },
+    "label_distribution": {
+      "1": 1416,
+      "6": 2757,
+      "10": 11791,
+      "0": 77626,
+      "7": 4504,
+      "2": 3665,
+      "3": 1226,
+      "9": 1932,
+      "8": 2090,
+      "5": 2400,
+      "11": 1095,
+      "4": 618
+    },
+    "train_history": [
+      {
+        "epoch": 1,
+        "loss": -577.147583,
+        "ce_loss": 2.504571,
+        "cao_loss": -1159.304321,
+        "macro_f1": 0.012821
+      },
+      {
+        "epoch": 2,
+        "loss": NaN,
+        "ce_loss": NaN,
+        "cao_loss": -984.641602,
+        "macro_f1": 0.012821
+      },
+      {
+        "epoch": 3,
+        "loss": NaN,
+        "ce_loss": NaN,
+        "cao_loss": -1113.119751,
+        "macro_f1": 0.012821
+      }
+    ],
+    "val_history": [
+      {
+        "epoch": 1,
+        "macro_f1": 0.068526,
+        "weighted_f1": 0.574165,
+        "accuracy": 0.698236
+      },
+      {
+        "epoch": 2,
+        "macro_f1": 0.068526,
+        "weighted_f1": 0.574165,
+        "accuracy": 0.698236
+      },
+      {
+        "epoch": 3,
+        "macro_f1": 0.068526,
+        "weighted_f1": 0.574165,
+        "accuracy": 0.698236
+      }
+    ],
+    "wall_time_seconds": 307.5,
+    "gpu_memory_gb": 31.13,
+    "timestamp": "2026-05-12 08:50:05"
+  }
+]

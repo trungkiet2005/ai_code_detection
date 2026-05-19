@@ -1,0 +1,52 @@
+{
+  "method": "FS-NTKAlign",
+  "exp_id": "exp_fs_inline_ntkalign",
+  "regime": "K=128",
+  "timestamp": "2026-05-09T13:10:42.483833Z",
+  "config": {
+    "benchmark": "codet_m4",
+    "task": "author",
+    "k_shot": 128,
+    "train_fraction": 0.0,
+    "n_classes": 6,
+    "fs_seed": 42,
+    "encoder": "answerdotai/ModernBERT-base",
+    "epochs": 1,
+    "batch_size": 16,
+    "max_length": 384,
+    "precision": "fp16",
+    "lr_encoder": 2e-05,
+    "lr_heads": 0.0001,
+    "lambda_ntk": 0.4
+  },
+  "results": {
+    "test_macro_f1": 0.29293091813103433,
+    "test_weighted_f1": 0.4731201725821294,
+    "test_accuracy": 0.42644101876675605,
+    "val_macro_f1": 0.3348133127629409,
+    "val_test_gap": 0.04188239463190657,
+    "train_steps": 48,
+    "wall_time_s": "521.0",
+    "loss_kind": "ntk",
+    "frozen": 0,
+    "per_class_f1": {
+      "class_0": 0.7125831076089633,
+      "class_1": 0.14316087880935507,
+      "class_2": 0.15150661785412559,
+      "class_3": 0.2853385930309007,
+      "class_4": 0.3100215292728662,
+      "class_5": 0.15497478220999542
+    },
+    "per_lang_f1": {
+      "cpp": 0.30857852666416624,
+      "java": 0.27410861599006675,
+      "python": 0.2702104650148583
+    },
+    "per_source_f1": {
+      "cf": 0.23997723641946347,
+      "gh": 0.1802502592626536,
+      "lc": 0.20265440140964416
+    },
+    "lambda_ntk": 0.4
+  }
+}
