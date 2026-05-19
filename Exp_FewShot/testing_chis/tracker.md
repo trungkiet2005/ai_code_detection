@@ -367,16 +367,75 @@ candidate of Round 4.
 | `exp79_mage.py` | MAGE | Genealogy-conditioned mixup: pair sampling ∝ exp(-γ·d_tree) | S1 | extends Zhang 2018 mixup with label-tree-conditioned sampler |
 | `exp80_tracod.py` | TRACOD | TRACO + EMA teacher self-distillation (DINO-style centered targets) under code augmentation views | S7+stability | extends DINO arXiv:2104.14294 with supervised CE + TRACO augmentations |
 
-Status: **all 4 file scaffolded, pending Kaggle run.**
+### CoDET-M4 — Macro-F1 (Round 5)
 
-### Expected targets
+| Method | 1% | 5% | 20% | val-test gap @ 20% |
+|:--|:-:|:-:|:-:|:-:|
+| CASCADE (exp78) | 0.5462 | 0.6434 | 0.7146 | +0.0064 |
+| CRONOS (exp77) | 0.5351 | 0.6456 | 0.7115 | +0.0121 |
+| MAGE (exp79) | 0.5395 | 0.6430 | 0.7106 | +0.0132 |
+| **TRACOD** (exp80) ❌ | **0.3706** | 0.4485 | **0.4029** | +0.0057 |
 
-| File | CoDET 20% target | AICD 20% target | Few-shot 1% target |
-|:--|:-:|:-:|:-:|
-| exp77_cronos | 0.72+ | 0.49+ | aux-regularizes all slots |
-| exp78_cascade | 0.72 (sparse tree) | **0.50+** (4×3 hierarchy explicit) | family-acc decomposition |
-| exp79_mage | low-n boost | sibling-conf drop | strong at 1%/5% |
-| exp80_tracod | 0.73+ (push TRACO ceiling) | 0.49+ | TRACO stabilized |
+### AICD-T2 — Macro-F1 (Round 5)
+
+| Method | 1% | 5% | 20% | val-test gap @ 20% |
+|:--|:-:|:-:|:-:|:-:|
+| CRONOS (exp77) | 0.2940 | 0.3908 | 0.4790 | −0.0078 |
+| CASCADE (exp78) | 0.2846 | 0.3778 | 0.4764 | −0.0124 |
+| MAGE (exp79) | 0.2937 | 0.3914 | 0.4758 | −0.0061 |
+| **TRACOD** (exp80) ❌ | **0.1861** | 0.2125 | **0.1937** | −0.0011 |
+
+### Round 5 falsifier readouts
+
+| Method | Falsifier | Verdict |
+|:--|:--|:--|
+| CRONOS (exp77) | aux convergence stable; CE+aux ~ band ceiling | 🟡 aux co-training regularizes but does not break ceiling |
+| **CASCADE** (exp78) | `family_acc = 0.85 AICD / 0.84 CoDET`, `sib_cond_acc = 0.88-0.98` | 🔥 **KEY FINDING: family is the bottleneck, NOT sibling** |
+| MAGE (exp79) | sib_pair_frac 0.04 (CoDET) / 0.10 (AICD) — sampler IS tree-conditioned | 🟡 sib-conf-rate unchanged → tree-mixup doesn't repair confusion |
+| TRACOD (exp80) | view_cos 0.93, ts_agree variable 0.66-0.98 | ❌ **catastrophic collapse**: DINO-distill destabilizes supervised CE; λ_distill=0.3 too aggressive |
+
+### 🔥 Round 5 KEY FINDING — family-bottleneck refutes genealogy-prior thesis
+
+CASCADE (exp78) decomposes accuracy:
+- `family_acc` (4-way on AICD, 5-way effective on CoDET): **0.77–0.89**
+- `sibling_cond_acc | true_family` (3-way on AICD, ≤2-way on CoDET): **0.88–0.98**
+- `joint_acc` (full n-way): 0.55–0.71
+
+The encoder is GOOD at sibling discrimination when given the family hint. Failure is at FAMILY level
+(cross-family confusion 10–22%). All 30 prior methods that weighted negatives by `exp(-γ · d_tree)`
+(LASCL/TKL/TRACO/TOURN/SCR/GSCE/RACO/...) assumed siblings are hard. **The evidence refutes this**.
+
+**Paper §5 finding:** *cross-family confusion is the bottleneck of unixcoder-base AI-code attribution at
+the few-shot regime; sibling discrimination is solved once family is known.*
+
+### Round 5 verdict
+
+- **TRACO (exp76) remains hero** — 4 synthesis attempts did NOT exceed it
+- **CASCADE finding** is a paper-worthy negative thesis result
+- **TRACOD** is catastrophic — kept as a negative example for §5 (DINO + supervised CE incompatible at λ_distill = 0.3)
+
+---
+
+## 🚀 Round 6 — CASCADE-grounded methods (exp81–exp83, 2026-05-19)
+
+> **Motivation:** CASCADE refutes tree-prior on sibling negatives. Round 6 builds methods that ALIGN with
+> the empirical bottleneck rather than the prior tree weighting.
+
+| File | Method | Object | CASCADE alignment |
+|:--|:--|:--|:--|
+| `exp81_confuse.py` | CONFUSE | EMA confusion matrix replaces `exp(-γ·d_tree)` as hard-negative weight in TRACO supcon; cold-start = tree prior, EMA adapts | replaces static tree prior with data-driven adaptive weighting |
+| `exp82_fars.py` | FARS | TRACO + EMA family centroids + hinge-margin repulsion across cross-family centroid pairs | targets the cross-family bottleneck explicitly via centroid margin |
+| `exp83_prog.py` | PROG | 3-phase curriculum: P1 family-CE → P2 class-CE → P3 + TRACO supcon | training-schedule curriculum aligned to label-tree granularity |
+
+Status: **all 3 file scaffolded, pending Kaggle run.**
+
+### Expected targets (honest, no overclaim)
+
+| File | CoDET 20% | AICD 20% | Risk |
+|:--|:-:|:-:|:--|
+| exp81_confuse | TRACO +0.005-0.015 if data ≠ tree prior | +0.005-0.02 (AICD-T2 family bottleneck) | confusion matrix degenerate if encoder confusion correlates with tree |
+| exp82_fars | minor (CoDET sparse tree) | +0.005-0.02 (4 families = clean margin) | margin tuning sensitive |
+| exp83_prog | curriculum may not help if encoder pretrained sufficient | family-acc benefits from family-only pretrain | phase boundary tuning
 
 
 
