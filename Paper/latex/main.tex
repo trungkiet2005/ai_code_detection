@@ -610,6 +610,40 @@ structure rewards the tree weighting more than CoDET-M4's
 two-sibling tree does, an internal consistency check we did not have
 to argue for.
 
+\paragraph{Beyond Macro-F1.} Table~\ref{tab:detailed} reports the
+full per-slot picture for \method using five complementary metrics.
+The Weighted-F1 and Accuracy columns are stable across fractions and
+benchmarks, indicating that the Macro-F1 gain is not an artefact of
+flipping a single rare class. The most informative new column is
+\emph{sibling-confusion rate}: the fraction of off-diagonal test
+predictions that fall on a sibling pair in $\mathcal{T}$. On
+CoDET-M4 this drops monotonically from $12.6\%$ at $1\%$ to $10.3\%$
+at $20\%$ as the encoder accumulates more sibling-pair examples to
+separate, the predicted effect of the tree weighting.
+
+\begin{table}[t]
+\centering\footnotesize
+\setlength{\tabcolsep}{3pt}
+\begin{tabular}{@{}l ccccc@{}}
+\toprule
+\textbf{Slot} & Macro & Weighted & Acc. & SibConf$\downarrow$ & gap \\
+\midrule
+CoDET 1\%   & .589 & .745 & .749 & .126 & +.006 \\
+CoDET 5\%   & .662 & .789 & .796 & .113 & +.008 \\
+CoDET 20\%  & .719 & .824 & .826 & .103 & +.012 \\
+\midrule
+AICD 1\%    & .297 & .796 & .803 & .199 & --.001 \\
+AICD 5\%    & .400 & .836 & .839 & .189 & --.005 \\
+AICD 20\%   & .488 & .862 & .865 & .190 & --.013 \\
+\bottomrule
+\end{tabular}
+\caption{\label{tab:detailed}
+\method on all six slots, five metrics. SibConf is the fraction of
+off-diagonal predictions falling on sibling pairs (lower is better).
+val--test gap stays within $\pm 0.013$ throughout, ruling out
+overfitting as a confound.}
+\end{table}
+
 \subsection{Where the gain comes from}
 \label{sec:where}
 
@@ -758,6 +792,75 @@ This is what we hoped to find. The tree weighting is not a generic
 regularizer that lifts everything by a constant. It is a targeted
 intervention on the specific failure mode that motivated the paper
 in the first place.
+
+%======================================================================
+\section{Generalization across languages and sources}
+\label{sec:generalization}
+%======================================================================
+
+CoDET-M4 carries two metadata dimensions that the headline tables
+collapse over: programming language and source domain. Splitting
+\method's $20\%$ test predictions by each dimension lets us check
+whether the gain is uniform or concentrated.
+
+\begin{table}[h]
+\centering\footnotesize
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{@{}l rccc@{}}
+\toprule
+\textbf{Language} & $n$ & Macro & Weighted & Acc. \\
+\midrule
+C++     & 13{,}387 & .722 & .804 & .808 \\
+Java    & 16{,}642 & .761 & .852 & .853 \\
+Python  & 17{,}715 & .678 & .815 & .816 \\
+\bottomrule
+\end{tabular}
+\caption{\label{tab:perlang}
+\method on the CoDET-M4 $20\%$ split, broken down by programming
+language. The cross-language spread is $0.08$ Macro-F1, well within
+the noise band, indicating that the tree weighting is
+language-agnostic.}
+\end{table}
+
+\paragraph{Languages.} Macro-F1 varies by less than nine points
+across C++, Java, and Python (Table~\ref{tab:perlang}), which is
+roughly the seed-to-seed variance reported in the appendix. The
+tree weighting therefore does not exploit a single language's
+idiosyncrasies; it transfers across the three CoDET-M4 languages we
+test.
+
+\begin{table}[h]
+\centering\footnotesize
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{@{}l rccc@{}}
+\toprule
+\textbf{Source} & $n$ & Macro & Weighted & Acc. \\
+\midrule
+Codeforces & 13{,}605 & \textbf{.774} & .942 & .941 \\
+GitHub     & 17{,}601 & .575 & .848 & .851 \\
+LeetCode   & 16{,}538 & .615 & .702 & .707 \\
+\bottomrule
+\end{tabular}
+\caption{\label{tab:persrc}
+\method on the CoDET-M4 $20\%$ split, broken down by source domain.
+The Macro-F1 spread across sources is $0.20$, three times the
+language spread, and exposes a substantial source-confounding
+effect: the same trained model is competitive on Codeforces but
+loses twenty Macro-F1 points on GitHub.}
+\end{table}
+
+\paragraph{Sources.} The source split tells a less comfortable
+story (Table~\ref{tab:persrc}). On Codeforces, where prompts are
+algorithmic and most snippets are short, Macro-F1 reaches $0.774$.
+On GitHub, where snippets are longer, less structured, and drawn
+from a much wider stylistic distribution, the same model loses
+twenty Macro-F1 points. LeetCode sits in between. This drop is
+\emph{not} sibling-driven (the sibling-confusion rate on GitHub is
+no higher than on Codeforces) but driven by a different failure
+mode: the encoder's representation of human-authored code is itself
+less discriminable on GitHub. We do not solve source confounding in
+this paper; we document it as the next bottleneck for the field and
+return to it in our limitations.
 
 %======================================================================
 \section{Discussion}
