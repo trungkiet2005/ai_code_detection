@@ -282,22 +282,47 @@ single forward pass.
 % =========================================================
 % RIGHT PANEL: doubled batch + tree-weighted SupCon
 % =========================================================
-\node[draw, rounded corners=2pt, fill=purple!10, align=center, minimum width=22mm,
-      minimum height=22mm,
-      label={[font=\scriptsize]above:Doubled batch $[z;z']$ similarity}]
+\node[draw, rounded corners=2pt, fill=white, align=center, minimum width=24mm,
+      minimum height=24mm,
+      label={[font=\scriptsize]above:Tree weight $W_{ij}\!=\!e^{-\gamma\,d_{\mathcal{T}}}$ on $\{$Hum,GPT,Lla,CLa,Nxc,Qwn$\}$}]
   (mat) at (12.4,1.4) {};
-\node[font=\scriptsize, red!60!black, anchor=south]
-   at ([yshift=-12mm]mat.north) {$W_{ij}\!=\!e^{-\gamma d_{\mathcal{T}}}$};
 
-% Draw a 4x4 mini heatmap with sibling weights highlighted
-\foreach \i in {0,1,2,3} {
-  \foreach \j in {0,1,2,3} {
-    \pgfmathsetmacro{\v}{int(\i==\j ? 0 : (mod(\i+\j,3)==0 ? 90 : 30))}
-    \fill[purple!\v]
-      ($(mat.south west) + (0.13+\i*0.45,0.13+\j*0.45)$)
-      rectangle ++(0.42,0.42);
+% Deterministic 6x6 heatmap of W_ij for CoDET-M4 family tree.
+% Class indices match the code: 0=Hum, 1=CLa(sib), 2=Lla, 3=Nxc(sib), 4=GPT, 5=Qwn.
+% Sibling edge (1,3) -> W = e^{-1} = 0.37  (darkest non-diagonal)
+% Human-vs-AI default tree distance = 3 -> W = e^{-3} = 0.05  (light)
+% Other AI-AI default distance = 4 -> W = e^{-4} = 0.02  (very light)
+% Diagonal = positives (white-bordered)
+\def\Wval#1#2{%
+  \ifnum#1=#2 0\else                    % diagonal: positive (no negative weight)
+    \ifnum#1=1 \ifnum#2=3 70\else
+      \ifnum#1=0 5\else
+        \ifnum#2=0 5\else 12\fi\fi\fi\else
+    \ifnum#1=3 \ifnum#2=1 70\else
+      \ifnum#1=0 5\else
+        \ifnum#2=0 5\else 12\fi\fi\fi\else
+    \ifnum#1=0 5\else
+      \ifnum#2=0 5\else 12\fi\fi\fi\fi\fi
+}
+\foreach \i in {0,1,2,3,4,5} {
+  \foreach \j in {0,1,2,3,4,5} {
+    \pgfmathtruncatemacro{\sib}{(\i==1 && \j==3) || (\i==3 && \j==1) ? 1 : 0}
+    \pgfmathtruncatemacro{\diag}{\i==\j ? 1 : 0}
+    \pgfmathtruncatemacro{\hum}{(\i==0 && \j!=0) || (\j==0 && \i!=0) ? 1 : 0}
+    \pgfmathsetmacro{\v}{ifthenelse(\diag==1, 0,
+                          ifthenelse(\sib==1, 75,
+                          ifthenelse(\hum==1, 18, 8)))}
+    \pgfmathtruncatemacro{\vint}{\v}
+    \fill[red!\vint]
+      ($(mat.south west) + (0.18+\i*0.32,0.18+\j*0.32)$)
+      rectangle ++(0.30,0.30);
   }
 }
+% Highlight sibling cells (1,3) and (3,1)
+\draw[red, very thick]
+  ($(mat.south west) + (0.18+1*0.32, 0.18+3*0.32)$) rectangle ++(0.30,0.30);
+\draw[red, very thick]
+  ($(mat.south west) + (0.18+3*0.32, 0.18+1*0.32)$) rectangle ++(0.30,0.30);
 
 \node[loss, fill=red!15] (tw) at (12.4,2.85) {$\mathcal{L}_{\mathrm{TW}}$\\\scriptsize tree-weighted SupCon};
 \draw[ar] (z1.east) to[bend left=10] (mat.north west);
@@ -414,11 +439,45 @@ $T(x)$ through the same encoder to obtain $z'$ and pair $z'$ with
 $z$ in the doubled batch above; the classifier head sees only the
 original view to keep label semantics anchored.
 
-The choice of pool is deliberately mundane. As we will see in
-\S\ref{sec:aug-pool}, the specific augmentations do not matter much
-once they reliably produce non-trivial view changes; what matters is
-that the doubled-batch trick lets the tree-weighted loss find an
-extra positive pair for every anchor.
+\begin{figure}[t]
+\centering\small
+\fbox{\begin{minipage}{0.95\columnwidth}
+\textbf{Original $x$:}\\[2pt]
+\texttt{def add(a, b):\\
+\hphantom{xx}\# inclusive sum\\
+\hphantom{xx}total = a + b\\
+\hphantom{xx}return total}\\[6pt]
+
+\textbf{Token-dropout} $T_1(x)$:\\[1pt]
+\texttt{def add(a,\,b): \# \hphantom{ii}sum\\
+\hphantom{xx}\hphantom{tt} = a + b; return total}\\[6pt]
+
+\textbf{Identifier-rename} $T_2(x)$:\\[1pt]
+\texttt{def v0(a, b): \# inclusive v1\\
+\hphantom{xx}v1 = a + b; return v1}\\[6pt]
+
+\textbf{Whitespace-jitter} $T_3(x)$:\\[1pt]
+\texttt{def add(a , b ): \# inclusive sum\\
+\hphantom{xx}total = a + b ; return total}\\[6pt]
+
+\textbf{Comment-strip} $T_4(x)$:\\[1pt]
+\texttt{def add(a, b):\\
+\hphantom{xx}total = a + b; return total}
+\end{minipage}}
+\caption{\label{fig:aug-example}
+Worked example: a single snippet under each of the four S7-grounded
+augmentations. All four preserve the function the program computes
+(\texttt{a+b}); each perturbs a different surface property the
+encoder might otherwise latch onto (token presence, identifier
+choice, formatting, comment text).}
+\end{figure}
+
+Figure~\ref{fig:aug-example} walks through the four transforms on
+one toy snippet. The choice of pool is deliberately mundane. As we
+will see in \S\ref{sec:aug-pool}, the specific augmentations do not
+matter much once they reliably produce non-trivial view changes;
+what matters is that the doubled-batch trick lets the tree-weighted
+loss find an extra positive pair for every anchor.
 
 \subsection{Full objective and training recipe}
 \label{sec:method-train}
@@ -439,6 +498,41 @@ epochs at $1\%$, six at $5\%$, six at $20\%$, with a cosine schedule
 and square-root-scaled learning rate. AMP bfloat16; batch size
 $256$; sequence length $512$. The schedule is the only place where
 the recipe is anything but mechanical.
+
+\paragraph{One training step in pseudocode.} The whole recipe fits
+in twelve lines:
+
+\begin{figure}[h]
+\small
+\fbox{\begin{minipage}{0.95\columnwidth}
+\begin{tabbing}
+\textbf{Input}:\,batch $\{(x_i, y_i)\}_{i=1}^B$, encoder $\phi$, head $W$,\\
+\hspace{0.5cm} aug.\ pool $\mathcal{T}_{\!\mathrm{aug}}$, tree distance \sib, $\gamma, \tau, \lambda$\\[4pt]
+\textbf{1}\ \=\textbf{for}\, $i = 1\dots B$\,\textbf{do}\\
+\textbf{2}\ \>\hspace{0.4cm}$T \sim \mathrm{Uniform}(\mathcal{T}_{\!\mathrm{aug}})$;\quad $x_i' \leftarrow T(x_i)$\\
+\textbf{3}\ \>\hspace{0.4cm}$z_i \leftarrow z(x_i)$;\hspace{0.6cm} $z_i' \leftarrow z(x_i')$ \hspace{0.4cm}\emph{// shared $\phi$, $g_\theta$}\\
+\textbf{4}\ \>\hspace{0.4cm}$\ell_i \leftarrow W z_i$ \hspace{2.3cm}\emph{// CE on $z_i$ only}\\
+\textbf{5}\ \=\textbf{end for}\\[3pt]
+\textbf{6}\ \>$\mathbf{Z}\,\leftarrow\,[z_1,\,z_1',\,\dots,\,z_B,\,z_B']\in\mathbb{R}^{2B\times d_z}$\\
+\textbf{7}\ \>$\mathbf{Y}\,\leftarrow\,[y_1,\,y_1,\,\dots,\,y_B,\,y_B]$\\
+\textbf{8}\ \>$s_{ij}\,\leftarrow\,z_i^{\top}z_j/\tau$,\quad $W_{ij}\,\leftarrow\,$Eq.\,(1) using \sib\\
+\textbf{9}\ \>$\mathcal{L}_{\mathrm{TW}} \leftarrow\,$Eq.\,(2) on $(\mathbf{Z},\mathbf{Y},W)$\\
+\textbf{10}\,\>$\mathcal{L}_{\mathrm{CE}} \leftarrow\,\frac{1}{B}\sum_{i} \mathrm{CE}(\ell_i, y_i)$\\
+\textbf{11}\,\>$\mathcal{L} \leftarrow \mathcal{L}_{\mathrm{CE}} + \lambda\, \mathcal{L}_{\mathrm{TW}}$\\
+\textbf{12}\,\>back-prop $\nabla\mathcal{L}$; AdamW step on $(\phi, g_\theta, W)$
+\end{tabbing}
+\end{minipage}}
+\caption{\label{fig:alg}\method one training step. The doubled batch
+construction (lines 6--7) is what couples the augmentation
+distribution to the tree-weighted contrastive loss; without
+augmentation, line 7 would have only $B$ rows and the augmentation
+positives in Eq.\,(2) would disappear.}
+\end{figure}
+
+The implementation is intentionally minimalist---no momentum
+encoder, no separate teacher network, no asymmetric branches. The
+encoder, the projector, and the classifier head are jointly
+optimised end-to-end with a single AdamW step per mini-batch.
 
 %======================================================================
 \section{Experiments}
@@ -792,6 +886,59 @@ $0.15$. \emph{Comment-strip} removes all single-line and block
 comments. All four are semantic-preserving for execution semantics
 of the target languages and produce mild
 ($\mathrm{cos}(z, z')\!\approx\!0.93$--$0.99$) view shifts.
+
+\paragraph{Concrete tree-distance matrices.} We
+list, for completeness, the exact distance matrices used in our
+runs. CoDET-M4 has six classes
+$\{$\textsc{Hum}, \textsc{CLa}, \textsc{Lla}, \textsc{Nxc},
+\textsc{GPT}, \textsc{Qwn}$\}$, indexed $\{0,1,2,3,4,5\}$, with the
+single sibling edge \textsc{CLa}\,$\leftrightarrow$\,\textsc{Nxc}.
+Disconnected vertices receive default distance $4$; human-vs-AI
+pairs receive a special default of $3$ (codifying ``human is closer
+to AI than AI-from-different-family pairs are to each other''). The
+resulting $d_{\mathcal{T}}$ and the contrastive weight $W$ at
+$\gamma{=}1$ are:
+
+\begin{table}[h]
+\centering\small
+\setlength{\tabcolsep}{3pt}
+\begin{tabular}{c|cccccc}
+$d_\mathcal{T}$ & Hum & CLa & Lla & Nxc & GPT & Qwn \\
+\hline
+Hum  & 0 & 3 & 3 & 3 & 3 & 3 \\
+CLa  & 3 & 0 & 4 & \textbf{1} & 4 & 4 \\
+Lla  & 3 & 4 & 0 & 4 & 4 & 4 \\
+Nxc  & 3 & \textbf{1} & 4 & 0 & 4 & 4 \\
+GPT  & 3 & 4 & 4 & 4 & 0 & 4 \\
+Qwn  & 3 & 4 & 4 & 4 & 4 & 0 \\
+\end{tabular}
+\hspace{4pt}
+\begin{tabular}{c|cccccc}
+$W$ & Hum & CLa & Lla & Nxc & GPT & Qwn \\
+\hline
+Hum  & 1.00 & .05 & .05 & .05 & .05 & .05 \\
+CLa  & .05  & 1.00 & .02 & \textbf{.37} & .02 & .02 \\
+Lla  & .05  & .02 & 1.00 & .02 & .02 & .02 \\
+Nxc  & .05  & \textbf{.37} & .02 & 1.00 & .02 & .02 \\
+GPT  & .05  & .02 & .02 & .02 & 1.00 & .02 \\
+Qwn  & .05  & .02 & .02 & .02 & .02 & 1.00 \\
+\end{tabular}
+\caption{\label{tab:wmat}
+CoDET-M4 tree distance $d_{\mathcal{T}}$ (left) and contrastive
+weight matrix $W$ at $\gamma{=}1.0$ (right). Sibling negatives
+\textsc{CLa}\,$\leftrightarrow$\,\textsc{Nxc} (bold) receive
+$\approx\!0.37$, fifteen times the weight of other cross-class
+pairs. Diagonal entries $W_{ii}{=}1.00$ are conceptual (the loss
+zeros them out before normalisation).}
+\end{table}
+
+For AICD-T2 (twelve classes, four triplet families), every
+within-family pair receives $d_{\mathcal{T}}{=}1$ ($W{=}0.37$) and
+every cross-family pair receives $d_{\mathcal{T}}{=}4$ ($W{=}0.02$),
+giving a much sharper sibling-versus-stranger contrast than
+CoDET-M4 has. This is one of two reasons why \method's lead over
+baselines is larger on AICD-T2: the family structure rewards the
+weighting more.
 
 %======================================================================
 \section{Full Twenty-Method Bake-off}
