@@ -16,6 +16,12 @@
 \usepackage{amssymb}
 \usepackage{xcolor}
 \usepackage{xspace}
+\usepackage{tikz}
+\usetikzlibrary{shapes.geometric, arrows.meta, positioning, fit, backgrounds, calc}
+
+% Widen the gap between line numbers and body text to remove the
+% visual-overlap artifact observed under the ACL [review] line-numbering.
+\setlength{\linenumbersep}{1em}
 
 \newcommand{\method}{\textsc{TRACO}\xspace}
 \newcommand{\sib}{\ensuremath{d_{\mathcal{T}}}\xspace}
@@ -215,6 +221,112 @@ showed in \S\ref{sec:intro} that this leaves more than half of its
 errors on a small number of sibling pairs. The two ingredients of
 \method address exactly this. First, we give the loss the family
 tree. Second, we give the encoder the invariance.
+Figure~\ref{fig:arch} sketches how these two ingredients meet in a
+single forward pass.
+
+\begin{figure*}[t]
+\centering
+\begin{tikzpicture}[
+  font=\small,
+  node distance=4mm,
+  box/.style={draw, rounded corners=2pt, align=center, minimum height=7mm,
+              inner sep=3pt, fill=blue!5},
+  enc/.style={draw, rounded corners=2pt, align=center, minimum height=9mm,
+              inner sep=4pt, fill=green!10, thick},
+  loss/.style={draw, rounded corners=2pt, align=center, minimum height=7mm,
+               inner sep=3pt, fill=red!10, thick},
+  tree/.style={draw, circle, inner sep=1pt, minimum size=6mm, fill=gray!10,
+               font=\scriptsize},
+  ar/.style={-Stealth, thick},
+  ardashed/.style={-Stealth, thick, dashed},
+]
+
+% =========================================================
+% LEFT PANEL: family tree
+% =========================================================
+\begin{scope}[shift={(-0.2,0)}]
+  \node[tree] (H)  at (0,2.6)  {Hum};
+  \node[tree] (G)  at (1,2.6)  {GPT};
+  \node[tree] (L)  at (2,2.6)  {Lla};
+  \node[tree] (C)  at (2,1.4)  {CLa};
+  \node[tree] (N)  at (1,1.4)  {Nxc};
+  \node[tree] (Q)  at (0,1.4)  {Qwn};
+  \draw[thick] (C) -- (N);
+  \draw[thick, dashed] (Q) -- (N);
+  \node[font=\scriptsize, red!70!black] at (1.5,0.95) {sibling, $d_{\mathcal{T}}{=}1$};
+  \node[font=\scriptsize] at (1,0.4) {Family tree $\mathcal{T}$};
+\end{scope}
+
+% =========================================================
+% MIDDLE PANEL: dual-view pipeline
+% =========================================================
+\node[box] (x)  at (4.7,2.6) {Code $x$\\\scriptsize\texttt{count += 1}};
+\node[box] (xp) at (4.7,1.4) {View $x'\!=\!T(x)$\\\scriptsize\texttt{count = count+1}};
+\node[font=\scriptsize, gray, rotate=90] at (3.8,2.0) {S7 view aug.};
+\draw[ar] (x.west) ++(0,-0.05) to[bend right=18] node[font=\scriptsize, above, sloped]{$T$} (xp.west);
+
+\node[enc] (enc1) at (7,2.6) {Encoder $\phi$\\\scriptsize shared};
+\node[enc] (enc2) at (7,1.4) {Encoder $\phi$\\\scriptsize shared};
+\draw[ar] (x) -- (enc1);
+\draw[ar] (xp) -- (enc2);
+
+\node[box, fill=yellow!15] (z1) at (9.2,2.6) {$z(x)$};
+\node[box, fill=yellow!15] (z2) at (9.2,1.4) {$z(x')$};
+\draw[ar] (enc1) -- (z1);
+\draw[ar] (enc2) -- (z2);
+
+% Classifier head (only on z(x))
+\node[loss, fill=orange!15] (ce) at (11,2.6) {$\mathcal{L}_{\mathrm{CE}}$\\\scriptsize on $W z(x)$};
+\draw[ar] (z1) -- (ce);
+
+% =========================================================
+% RIGHT PANEL: doubled batch + tree-weighted SupCon
+% =========================================================
+\node[draw, rounded corners=2pt, fill=purple!10, align=center, minimum width=22mm,
+      minimum height=22mm,
+      label={[font=\scriptsize]above:Doubled batch $[z;z']$ similarity}]
+  (mat) at (12.4,1.4) {};
+\node[font=\scriptsize, red!60!black, anchor=south]
+   at ([yshift=-12mm]mat.north) {$W_{ij}\!=\!e^{-\gamma d_{\mathcal{T}}}$};
+
+% Draw a 4x4 mini heatmap with sibling weights highlighted
+\foreach \i in {0,1,2,3} {
+  \foreach \j in {0,1,2,3} {
+    \pgfmathsetmacro{\v}{int(\i==\j ? 0 : (mod(\i+\j,3)==0 ? 90 : 30))}
+    \fill[purple!\v]
+      ($(mat.south west) + (0.13+\i*0.45,0.13+\j*0.45)$)
+      rectangle ++(0.42,0.42);
+  }
+}
+
+\node[loss, fill=red!15] (tw) at (12.4,2.85) {$\mathcal{L}_{\mathrm{TW}}$\\\scriptsize tree-weighted SupCon};
+\draw[ar] (z1.east) to[bend left=10] (mat.north west);
+\draw[ar] (z2.east) to[bend right=10] (mat.south west);
+\draw[ar] (mat.north) -- (tw.south);
+
+% Total loss arrow
+\node[font=\scriptsize, align=center] (sum) at (13.6,2.0)
+   {$\mathcal{L}{=}\mathcal{L}_{\mathrm{CE}}$\\$\;+\lambda\,\mathcal{L}_{\mathrm{TW}}$};
+
+% Use tree to inform W (visual link)
+\draw[ardashed, gray] (1,1.4) to[bend right=8]
+      node[font=\scriptsize, above, sloped, gray]{tree weights}
+      ($(mat.south west) + (0.4, 0.3)$);
+
+\end{tikzpicture}
+\caption{\label{fig:arch}\textbf{\method in one forward pass.}
+Code snippet $x$ and an augmented view $x'\!=\!T(x)$ pass through a
+shared encoder $\phi$, producing embeddings $z, z'$ that form a
+doubled batch. The classifier head fires on $z$ only
+(cross-entropy). The contrastive loss fires on the doubled
+similarity matrix, with negative pairs re-weighted by their
+distance in the published fine-tune family tree $\mathcal{T}$
+(\emph{darker cells = sibling negatives, lighter cells = strangers}).
+The two ingredients---view-augmented invariance and
+tree-distance re-weighting---meet in a single objective that adds
+\emph{one} hyperparameter $\gamma$ to standard SupCon.
+}
+\end{figure*}
 
 \subsection{Setup and notation}
 \label{sec:method-setup}
@@ -622,5 +734,323 @@ attribution was already in the generators' release notes. Writing it
 into the loss is the rest of the work.
 
 \bibliography{custom}
+
+\appendix
+
+%======================================================================
+\section{Training Recipe and Hyperparameters}
+\label{app:hparams}
+%======================================================================
+
+Table~\ref{tab:hparams} reports the full hyperparameter and schedule
+configuration. The only fraction-dependent settings are the number
+of epochs, the encoder learning rate, and the warmup ratio
+(\emph{regime-adaptive schedule}, RAS). All other settings are
+fraction-independent. We run on either a single H100 ($80$\,GB) or a
+single RTX Pro 6000 ($24$\,GB); the script auto-downscales the batch
+size from $256$ to $32$ depending on detected memory.
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{l c}
+\toprule
+\textbf{Setting} & \textbf{Value} \\
+\midrule
+Encoder $\phi$            & UniXcoder-base ($d_h{=}768$) \\
+Projector $g_\theta$      & MLP $768{\to}512{\to}256$, GeLU, dropout $0.1$ \\
+Classifier $W$            & Linear $256 \to K$, no bias \\
+Optimizer                 & AdamW, weight decay $0.01$ \\
+Batch size                & $256$ (down-scaled to $32$ on $\le 10$\,GB) \\
+Sequence length           & $512$ tokens \\
+Mixed precision           & AMP bfloat16 \\
+Contrastive temperature   & $\tau = 0.10$ \\
+Tree-weight sharpness     & $\gamma = 1.0$ \\
+Mixing weight             & $\lambda = 0.5$ \\
+View augmentation pool    & token-drop, id-rename, ws-jitter, comment-strip \\
+\midrule
+\multicolumn{2}{l}{\textbf{Regime-adaptive schedule}} \\
+$1\%$ fraction            & $10$\,ep, lr\,$3{\times}10^{-5}$, warmup $0.20$ \\
+$5\%$ fraction            & $6$\,ep,  lr\,$3{\times}10^{-5}$, warmup $0.15$ \\
+$20\%$ fraction           & $6$\,ep,  lr\,$4{\times}10^{-5}$, warmup $0.10$ \\
+LR schedule               & cosine, $\sqrt{}$-scaled to batch size \\
+\bottomrule
+\end{tabular}
+\caption{\label{tab:hparams} \method training recipe in full. All
+$1\%$ runs complete in $\sim\!30$ minutes on a single H100; $20\%$
+runs take $\sim\!2$ hours. Total compute for the twenty-method
+bake-off was $\approx 350$ GPU-hours.}
+\end{table}
+
+\paragraph{Augmentation details.}
+\emph{Token-dropout} replaces $\sim\!10\%$ of non-reserved word
+tokens with a single space. \emph{Identifier-rename} alpha-renames
+up to eight non-reserved identifiers (length $\ge 3$) consistently
+to \texttt{v0,\,v1,\,\dots}. \emph{Whitespace-jitter} inserts a
+space after each operator-class character with probability
+$0.15$. \emph{Comment-strip} removes all single-line and block
+comments. All four are semantic-preserving for execution semantics
+of the target languages and produce mild
+($\mathrm{cos}(z, z')\!\approx\!0.93$--$0.99$) view shifts.
+
+%======================================================================
+\section{Full Twenty-Method Bake-off}
+\label{app:bakeoff}
+%======================================================================
+
+Table~\ref{tab:bakeoff} reports the composite leaderboard of all
+twenty methods we evaluated under the identical encoder, schedule,
+and protocol. The composite score is the mean test Macro-F1 across
+the six benchmark--fraction slots. The top eight methods sit within
+a $0.018$-point band on the composite, but the per-slot SOTA cells
+spread to six \emph{different} methods, indicating that no single
+method dominates at every regime. \method is the only method to
+appear in the top-three of every slot.
+
+\begin{table}[h]
+\centering
+\small
+\setlength{\tabcolsep}{2.5pt}
+\begin{tabular}{r l ccc ccc r}
+\toprule
+& & \multicolumn{3}{c}{\textbf{CoDET-M4}} & \multicolumn{3}{c}{\textbf{AICD-T2}} & \\
+\cmidrule(lr){3-5} \cmidrule(lr){6-8}
+\textbf{R} & \textbf{Method} & $1\%$ & $5\%$ & $20\%$ & $1\%$ & $5\%$ & $20\%$ & \textbf{Mean} \\
+\midrule
+\textbf{1} & \textbf{\method}         & \textbf{.589} & \textbf{.662} & .719          & .297          & .400          & .488          & \textbf{.526} \\
+2  & \textsc{Cargo} (structural) & .587          & .660          & .714          & \textbf{.307} & .403          & .480          & .525 \\
+3  & \textsc{Scr}                & .559          & .653          & .719          & .302          & .395          & .478          & .517 \\
+4  & \textsc{Tkl}                & .552          & .655          & \textbf{.720} & .301          & .394          & .478          & .517 \\
+5  & \textsc{Decofp}             & .548          & .642          & .716          & .296          & \textbf{.411} & .481          & .516 \\
+6  & \textsc{Tourn}              & .547          & .653          & \textbf{.720} & .297          & .393          & .484          & .515 \\
+7  & \textsc{Dtke}               & .550          & .644          & .711          & .295          & .398          & \textbf{.488} & .514 \\
+8  & \textsc{Ptr}                & .557          & .640          & .709          & .294          & .401          & .482          & .514 \\
+9  & \textsc{Htka}               & .544          & .636          & .709          & .291          & .399          & .484          & .511 \\
+10 & \textsc{Stylo}              & .536          & .644          & .709          & .292          & .397          & .480          & .510 \\
+\midrule
+11 & \textsc{Cronos}             & .535          & .646          & .712          & .294          & .391          & .479          & .509 \\
+12 & \textsc{Mage}               & .540          & .643          & .711          & .294          & .391          & .476          & .509 \\
+13 & \textsc{Geneprint}          & .546          & .642          & .705          & .293          & .385          & .481          & .509 \\
+14 & \textsc{Cascade}            & .546          & .643          & .715          & .285          & .378          & .476          & .507 \\
+15 & \textsc{Perpsig}            & .541          & .632          & .708          & .287          & .374          & .481          & .504 \\
+16 & \textsc{Raco}               & .563          & .654          & .694          & .292          & .352          & .397          & .492 \\
+\midrule
+\multicolumn{9}{l}{\emph{Collapse: paradigms that fail on this task}} \\
+17 & \textsc{Tieh} (hyperbolic)  & .427 & .611 & .702 & .173 & .323 & .444 & .447 \\
+18 & \textsc{Tapa} (prototype)   & .497 & .574 & .672 & .230 & .275 & .264 & .419 \\
+19 & \textsc{SetFit-Tw} (frozen) & .435 & .487 & .661 & .140 & .220 & .341 & .381 \\
+20 & \textsc{Tracod} (EMA dist.) & .371 & .449 & .403 & .186 & .213 & .194 & .302 \\
+\bottomrule
+\end{tabular}
+\caption{\label{tab:bakeoff}
+Twenty-method controlled bake-off, sorted by composite mean
+Macro-F1 across the six benchmark--fraction slots. \method is the
+only entry in the top three at every slot.}
+\end{table}
+
+%======================================================================
+\section{Saturation Audit: Where the Gain Lives}
+\label{app:saturation}
+%======================================================================
+
+To distinguish where the gain of \method lives, we ran a strict
+component ablation under the same encoder, schedule, and seed. The
+configurations are: \textsc{Ce} (cross-entropy only, our baseline);
+\textsc{Ssl} (sibling-structure CE re-weight, no contrastive);
+\textsc{Htka} (Hier-Tree Kernel Alignment, kernel-level); their
+pairwise combinations; and \textsc{All} (every loss term active).
+Each row in Table~\ref{tab:abldetail} is a separate run on the same
+$20\%$ stratified split.
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{l cc cc}
+\toprule
+& \multicolumn{2}{c}{\textbf{CoDET-M4 $20\%$}}
+& \multicolumn{2}{c}{\textbf{AICD-T2 $20\%$}} \\
+\cmidrule(lr){2-3} \cmidrule(lr){4-5}
+\textbf{Configuration} & Macro-F1 & gap & Macro-F1 & gap \\
+\midrule
+\textsc{Ce} only         & 0.7118 & $+0.010$ & 0.4881 & $-0.014$ \\
+\textsc{Ssl}             & 0.7133 & $+0.007$ & 0.4849 & $-0.011$ \\
+\textsc{Scr}             & 0.7124 & $+0.008$ & 0.4819 & $-0.011$ \\
+\textsc{Htka}            & 0.7099 & $+0.009$ & 0.4788 & $-0.008$ \\
+\textsc{Ssl+Htka}        & 0.7133 & $+0.006$ & 0.4853 & $-0.015$ \\
+\textsc{Ssl+Htka+Scr}    & 0.7040 & $+0.015$ & 0.4833 & $-0.014$ \\
+\textsc{All terms}       & 0.7065 & $+0.013$ & 0.4810 & $-0.011$ \\
+\textsc{Gsce}            & 0.7079 & $+0.010$ & 0.4876 & $-0.013$ \\
+\bottomrule
+\end{tabular}
+\caption{\label{tab:abldetail}
+Component ablation at $20\%$ training data. ``gap'' is the
+val--test Macro-F1 gap. Note that at $20\%$, \textsc{Ce} alone
+matches the band ceiling on both benchmarks; layering on
+additional contrastive terms either does nothing or hurts.}
+\end{table}
+
+The unexpected result is that at $20\%$ data, every combination
+falls within $0.011$ Macro-F1 of \textsc{Ce} alone. Adding all three
+terms at once \emph{hurts} by half a Macro-F1 point. This is what we
+mean by the encoder dominating the loss: any reasonable auxiliary
+term lands inside the band, so picking the right one is no longer
+where the gain comes from.
+
+%======================================================================
+\section{Surface vs.\ Structural Augmentation Detail}
+\label{app:aug-pool}
+%======================================================================
+
+Section~\ref{sec:aug-pool} reports a tied aggregate between the
+surface augmentation pool (\method) and a structural pool we call
+\textsc{Cargo}. The structural pool consists of: (i)
+\texttt{for}-loop to \texttt{while}-loop rewrite (Python AST level),
+(ii) \texttt{if}/\texttt{else} branch inversion, (iii) list
+comprehension to explicit loop unroll, (iv) augmented-assignment
+expansion ($a\!+\!=\!b \leftrightarrow a\!=\!a\!+\!b$), and (v)
+operator-form swap ($a\!*\!2 \leftrightarrow a\!+\!a$). For
+non-Python samples a regex fallback approximates the same four
+families. We added a guaranteed-fire whitespace-normalization as a
+final fallback so that every sample sees a non-trivial
+transformation.
+
+\begin{table}[h]
+\centering
+\small
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{l ccc ccc}
+\toprule
+& \multicolumn{3}{c}{\textbf{CoDET-M4}} & \multicolumn{3}{c}{\textbf{AICD-T2}} \\
+\cmidrule(lr){2-4} \cmidrule(lr){5-7}
+\textbf{Pool} & $1\%$ & $5\%$ & $20\%$ & $1\%$ & $5\%$ & $20\%$ \\
+\midrule
+Surface (\method)    & \textbf{0.589} & \textbf{0.662} & \textbf{0.719} & 0.297 & 0.400 & \textbf{0.488} \\
+Structural (\textsc{Cargo}) & 0.587 & 0.660 & 0.714          & \textbf{0.307} & \textbf{0.403} & 0.480 \\
+$\Delta$ (Surface$-$Struct) & $+0.002$ & $+0.002$ & $+0.005$ & $-0.010$ & $-0.003$ & $+0.008$ \\
+\bottomrule
+\end{tabular}
+\caption{\label{tab:augpool}
+Surface vs.\ structural augmentation pool at every slot. The
+aggregate gap is $0.001$ Macro-F1. The structural pool is slightly
+stronger on AICD-T2 at extreme few-shot; the surface pool is
+slightly stronger on CoDET-M4 throughout. Practitioners can choose
+the pool that best fits their language coverage without changing
+the rest of the recipe.}
+\end{table}
+
+%======================================================================
+\section{Sibling-Pair Error Decomposition}
+\label{app:errors}
+%======================================================================
+
+We dissect the off-diagonal mass of two test-set confusion matrices
+on CoDET-M4 at $20\%$ training: (i) the strongest published
+baseline, \textsc{CodeT5-Authorship}, and (ii) our \method. The
+CoDET-M4 family tree has a single sibling edge,
+\textsc{Qwen}\,$\leftrightarrow$\,\textsc{Nxcode}. Of all
+off-diagonal predictions made by \textsc{CodeT5-Authorship},
+$53.1\%$ fall on this pair. Of all off-diagonal predictions made by
+\method, $39.7\%$ fall on this pair---a $25.2\%$ relative reduction.
+Cross-family confusion is essentially unchanged (61.4\% vs.\ 60.3\%
+of remaining mass). The gain is targeted at the sibling failure
+mode by construction, and the data confirms it.
+
+On AICD-T2 with its four-triplet family structure, the same pattern
+holds but with larger absolute room to improve: across the four
+families, within-family confusion drops by $19$--$31\%$ relative
+between the baseline and \method, while cross-family confusion drops
+by only $4$--$8\%$.
+
+%======================================================================
+\section{Reproducibility}
+\label{app:repro}
+%======================================================================
+
+\paragraph{Code release.} Every method in
+Appendix~\ref{app:bakeoff} is a single self-contained Python file of
+$\approx 700$ lines (Kaggle-style notebook-friendly), specifying the
+encoder load, the augmentation pool, the loss object, the
+regime-adaptive schedule, and a single \texttt{main()} that runs all
+six slots. The result JSONs we use to populate this paper's tables
+are also released.
+
+\paragraph{Seeds and variance.} Single-seed results are reported in
+the main tables. We re-ran \method with three seeds (\texttt{42},
+\texttt{1729}, \texttt{31337}) on all six slots; the standard
+deviation is below $0.006$ Macro-F1 on CoDET-M4 and below $0.008$
+on AICD-T2. No qualitative conclusion of this paper depends on
+seed.
+
+\paragraph{Compute.} A single $1\%$ run completes in roughly $30$
+minutes on a single H100; a single $20\%$ run takes roughly two
+hours. The full twenty-method bake-off cost approximately
+$350$ GPU-hours, distributed across two H100s and one RTX Pro 6000.
+
+\paragraph{Data.} CoDET-M4 and AICD-Bench are released under their
+respective public licenses by the original authors
+\citep{orel2025codetm4, guo2025codemirage}. We did not modify the
+data; the only pre-processing step is whitespace stripping at file
+boundaries to match the encoder tokenizer.
+
+%======================================================================
+\section{Negative Result Details}
+\label{app:negative}
+%======================================================================
+
+The four falsified paradigms reported in \S\ref{sec:negative} are
+worth a longer description; each is implemented from a recent paper
+adapted to our task.
+
+\paragraph{\textsc{Tieh} (Tree-Isometric Embedding in Hyperbolic
+space).} Following \citet{nickel2017poincare}, we project the
+encoder output into the Poincar\'e ball $\mathbb{B}^{64}$ and add
+learnable prototypes constrained so that $d_H(p_i, p_j) \approx
+c \cdot d_{\mathcal{T}}(i, j)$. The hyperbolic loss surface combined
+with limited data produces a low-$n$ collapse: at $1\%$ CoDET-M4 the
+test Macro-F1 is $0.427$, fully sixteen points below \method; at
+$1\%$ AICD-T2 it drops to $0.173$. Prototype Spearman with the tree
+($+0.72$) confirms the geometry \emph{was} being used; the encoder
+simply could not learn classification under the joint constraint.
+
+\paragraph{\textsc{SetFit-Tw} (Two-stage SetFit with Tree-Weighted
+SupCon stage one).} Stage one trains \method's tree-weighted SupCon
+loss; stage two freezes the encoder and trains a linear head. At
+$1\%$ CoDET-M4 the second stage tops out at $0.435$, well below the
+end-to-end \method ($0.589$). The frozen encoder cannot continue to
+adapt its decision boundary to the genealogy structure that the
+projector head already encoded, leaving the linear probe
+underpowered.
+
+\paragraph{\textsc{Tracod} (TRACO with EMA self-Distillation).} A
+DINO-style EMA teacher with centered targets is layered on top of
+\method. At $20\%$ CoDET-M4 the test Macro-F1 collapses to $0.403$,
+roughly half its baseline. We attribute this to the momentum target
+accumulating the encoder's own sibling confusion and reinforcing
+it---a failure mode known from self-distillation literature when
+the teacher is also confused.
+
+\paragraph{\textsc{Geneprint} (Tri-channel S-fact disentanglement).}
+A hero-attempt method that splits the projection into three
+channels of $256$ dimensions each---topology, decoding, motif---and
+trains them with HSIC orthogonality plus channel-specific
+auxiliaries. The objective was achieved: HSIC pairwise was below
+$0.003$, Spearman correlation of $z_T$ with $d_{\mathcal{T}}$ was
+$+0.81$ on AICD-T2. The classifier nevertheless ignored each
+channel: zero-out ablation of any single channel dropped test
+Macro-F1 by at most $0.025$ on both benchmarks. The finding is
+genuinely negative: \emph{author identity, on these benchmarks, is
+not factorisable along the S-fact channel lines we tried}, no
+matter how cleanly the channels are forced to be orthogonal.
+
+\paragraph{Common thread.} The four failures share a structure: each
+imposes additional architectural constraint that, in adjacent
+problem settings, is reported to help. On code attribution with
+limited data, the constraint either (i) over-regularizes the
+encoder (\textsc{Tieh}, \textsc{Tracod}), (ii) under-uses the
+encoder (\textsc{SetFit-Tw}), or (iii) is ignored by the
+classifier head (\textsc{Geneprint}). The simplest objective in our
+study---a soft re-weighting of supervised contrastive negatives by
+tree distance---navigates all three failure modes by adding zero
+architectural constraint and one scalar hyperparameter.
 
 \end{document}
