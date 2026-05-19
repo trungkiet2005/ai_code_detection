@@ -177,6 +177,9 @@ Diversity finds the hero and populates §4 baselines. Paper is single-method (§
 | `exp78_cascade` | **CASCADE** Hierarchical family-then-sibling decoding: `p(y=k) = p(family) · p(sibling\|family)` | S1 | extends hierarchical softmax to LLM-genealogy attribution |
 | `exp79_mage` | **MAGE** Genealogy-conditioned mixup: pair sampling ∝ exp(-γ·d_tree) → sibling-heavy embedding-mixup | S1 | extends mixup with label-tree-conditioned sampler |
 | `exp80_tracod` | **TRACOD** TRACO + EMA teacher self-distillation (DINO-style centered targets) under code augmentation views | S7+stability | extends DINO arXiv:2104.14294 with supervised CE and TRACO augmentations |
+| `exp81_confuse` | **CONFUSE** EMA confusion matrix replaces tree prior as hard-negative weight in TRACO supcon | CASCADE-grounded | data-driven adaptation of LASCL/TRACO with cold-start tree prior |
+| `exp82_fars` | **FARS** TRACO + EMA family centroids with hinge-margin repulsion across cross-family pairs | CASCADE family-bottleneck | extends ArcFace/CenterLoss to label-tree FAMILIES |
+| `exp83_prog` | **PROG** 3-phase curriculum: P1 family-CE → P2 class-CE → P3 + TRACO supcon | CASCADE curriculum | curriculum learning (Bengio 2009) with label-tree granularity |
 
 **Killed (chưa run, generic ML):** `exp64_dgk` (kernel-alignment trùng HTKA), `exp73_srcbdoor` (trùng CIE/CFT/HETE), `exp75_humclust` (chỉ K-means trên human). **GENEPRINT exp71 / TIEH exp72: falsifier failed (run completed), kept as analysis evidence in §5.**
 
