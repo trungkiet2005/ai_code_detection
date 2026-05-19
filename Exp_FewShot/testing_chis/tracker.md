@@ -2,6 +2,46 @@
 
 ---
 
+## 🎯 HERO LOCKED: TRACO (exp76) — 2026-05-19
+
+> **Decision:** TRACO is the §3 spotlight method for the EMNLP 2026 paper.
+> Locked after the user's "chốt TRACO" on 2026-05-19. All other methods
+> in the tracker are recategorised as §4 baselines or §5 ablation evidence.
+
+### Why TRACO won the hero slot
+
+1. **Composite #1** across 6 benchmark-fraction slots
+   (mean Macro-F1 = 0.5256, computed over both CoDET-M4 and AICD-T2).
+2. **Per-slot SOTA** at CoDET-M4 1% (0.589) and CoDET-M4 5% (0.662);
+   top-3 at every remaining slot.
+3. **Two structural facts in one loss** that no prior code-attribution
+   work combined: S1 (fine-tune genealogy gives a tree distance over
+   labels) and S7 (decoder temperature gives a view-invariance over
+   inputs).
+4. **Strongest falsifier panel** of any candidate:
+   `view_cos = 0.97` (S7 invariance learned), sibling confusion drops
+   by 25% relative on CoDET-M4 (S1 weighting fires on the failure mode).
+5. **Four falsified alternatives** (TIEH hyperbolic, SETFIT-TW frozen,
+   TRACOD EMA-distill, GENEPRINT tri-channel) constrain the design space
+   and give the paper its negative-results section.
+
+### Role of the rest of the tracker
+
+| Method | Role in paper |
+|:--|:--|
+| **TRACO** (exp76) | §3 spotlight, hero method |
+| **TKL** (exp63) | §5 ablation: "tree-weighting alone, no view aug" |
+| **CARGO** (exp81/84) | §5 ablation: "structural pool, same Δ" → augmentation pool is secondary |
+| **TOURN** (exp67) | §4 baseline: pair-margin variant of tree weighting |
+| **DTKE** (exp66) | §4 baseline: kernel formulation, SOTA AICD 20% |
+| **DECOFP** (exp70) | §4 baseline: decoding-signal paradigm, SOTA AICD 5% |
+| **SCR** (exp62) | §4 baseline: sibling regulariser |
+| **HTKA / PTR / STYLO / PERPSIG / RACO / CASCADE / MAGE / GENEPRINT / CRONOS** | §5 component ablation, drop-out rows |
+| **TIEH / TAPA / SETFIT-TW / TRACOD** | §5 "what does not work" (negative results) |
+| **CARGO family v2 (exp85-89)** | post-submission round (not in main paper) |
+
+---
+
 ## 🏆 Master Leaderboard (LIVE, 2026-05-19)
 
 > **Setup:** `unixcoder-base`, regime-adaptive schedule (1%→10ep, 5%→6ep, 20%→6ep), AMP bf16, bs=256, seq=512.

@@ -34,7 +34,7 @@ Apply to every task unless explicitly overridden. Bias: caution over speed on no
 
 - **Venue:** EMNLP 2026 Main (long, 8 pages). Aim: Oral.
 - **Deadline:** ~2026-05-26.
-- **Strategy:** Single-method hero in §3, family-diverse baselines in §4, ablation in §5. Hero NOT locked — chosen after ablation + diversity round.
+- **Strategy:** Single-method hero in §3, family-diverse baselines in §4, ablation in §5. **HERO LOCKED 2026-05-19: TRACO (exp76)** after user "chốt". Composite #1 mean Macro-F1 = 0.5256 across 6 slots, SOTA CoDET 1%/5%, combines S1+S7. All other methods relegated to §4 baselines or §5 ablation.
 
 ### 0.1 Frozen operational protocol (NOT design space)
 
@@ -183,7 +183,7 @@ Diversity finds the hero and populates §4 baselines. Paper is single-method (§
 
 **Killed (chưa run, generic ML):** `exp64_dgk` (kernel-alignment trùng HTKA), `exp73_srcbdoor` (trùng CIE/CFT/HETE), `exp75_humclust` (chỉ K-means trên human). **GENEPRINT exp71 / TIEH exp72: falsifier failed (run completed), kept as analysis evidence in §5.**
 
-**Hero-locking gate:** chỉ chốt khi user nói **"chốt"**. Trước đó: mọi method = candidate.
+**Hero-locking gate:** ~~chỉ chốt khi user nói "chốt"~~ **LOCKED 2026-05-19: TRACO (exp76)**. Tất cả new method từ giờ đi vào §5 ablation hoặc §4 baseline, không thay thế hero. Để pivot hero, user phải explicit nói "đổi hero" hoặc "unlock".
 
 ---
 
@@ -227,7 +227,7 @@ legacy/                             ← archived
 - Don't revert AMP to fp16+GradScaler on RTX Pro 6000.
 - Don't quote AICD numbers from exp1–17 (T1-binary bug).
 - Don't add experiments to `Exp_Climb/`, `Exp_CodeDet/`, `Exp_DM/` (frozen).
-- Don't declare "hero method" until user says **"chốt"**.
+- ~~Don't declare "hero method" until user says "chốt".~~ **Hero LOCKED 2026-05-19: TRACO (exp76).** Don't propose alternative heroes unless user says "đổi hero" or "unlock".
 - Don't propose generic ML — every method must cite ≥ 1 S-fact.
 - Always report val_test_gap.
 
