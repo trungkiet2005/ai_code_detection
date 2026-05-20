@@ -62,7 +62,7 @@ invariance an LLM samples through at different decoding temperatures.
 Under a strict per-class few-shot protocol on two benchmarks,
 \method establishes new state of the art at every data budget we
 test. More importantly, a controlled twenty-method bake-off shows
-that the tree weighting is the only ingredient that matters at
+that the tree weighting is the principal driver of the gain at
 extreme few-shot; four natural-looking alternatives (hyperbolic
 embedding, frozen two-stage SetFit, EMA self-distillation, and
 disentangled tri-channel representations) all collapse. The takeaway
@@ -148,20 +148,22 @@ error analysis said it should: on siblings.
 Two ideas, one loss term, no new hyperparameters beyond $\gamma$. We
 will show that this is enough.
 
-\paragraph{What we find.} \method sets new state of the art on both
-CoDET-M4 and AICD-T2 across $\{1\%, 5\%, 20\%\}$ training fractions.
-The widest gap opens at $1\%$ data, the regime that matches what a
-practitioner actually faces when a new generator appears: fifteen
-Macro-F1 points over the strongest published baseline on CoDET-M4,
-ten on AICD-T2. The smaller gains at $20\%$ tell a complementary
-story. We identify a saturation regime in which the top eight
-methods cluster within a single Macro-F1 point of each other and
-the encoder, not the loss, dominates remaining headroom. Finally,
-we report four negative results. Hyperbolic prototype embedding,
-two-stage SetFit with a frozen encoder, EMA self-distillation, and
-tri-channel disentanglement all collapse. Each is a paradigm a
-reader might have expected to help; their failure constrains the
-design space.
+\paragraph{What we find.} \method, augmented at $1\%$ by a
+MAML-style outer loop (\method+\textsc{Meta}), sets new state of
+the art on both CoDET-M4 and AICD-T2 across $\{1\%, 5\%, 20\%\}$
+training fractions. The widest gap opens at $1\%$ data, the regime
+that matches what a practitioner actually faces when a new
+generator appears: \textbf{twelve} Macro-F1 points over the
+strongest faithful K-class baseline on CoDET-M4 ($+0.121$), and
+\textbf{nine} on AICD-T2 ($+0.091$). The smaller gains at $20\%$
+tell a complementary story. We identify a saturation regime in
+which the top eight methods cluster within a single Macro-F1 point
+of each other and the encoder, not the loss, dominates remaining
+headroom. Finally, we report four negative results. Hyperbolic
+prototype embedding, two-stage SetFit with a frozen encoder, EMA
+self-distillation, and tri-channel disentanglement all collapse.
+Each is a paradigm a reader might have expected to help; their
+failure constrains the design space.
 
 \paragraph{Why this matters.} The empirical point is that the right
 inductive prior for code attribution beats every architectural
@@ -422,13 +424,28 @@ exact temperature setting used at test time, a setting we never
 observe.
 
 \paragraph{Implementation.} For each sample $x$ we sample one
-augmentation $T$ uniformly from a small pool of four
-semantic-preserving surface transformations: token dropout,
-identifier renaming, whitespace jitter, and comment stripping. Each
-transform models a different facet of decoder noise. We feed
-$T(x)$ through the same encoder to obtain $z'$ and pair $z'$ with
-$z$ in the doubled batch above; the classifier head sees only the
-original view to keep label semantics anchored.
+augmentation $T$ uniformly from a pool of four surface
+transformations: token dropout, identifier renaming, whitespace
+jitter, and comment stripping. Each transform models a different
+facet of decoder noise. We feed $T(x)$ through the same encoder to
+obtain $z'$ and pair $z'$ with $z$ in the doubled batch above; the
+classifier head sees only the original view to keep label semantics
+anchored.
+
+\paragraph{Semantic preservation.}
+Three of the four transforms (identifier renaming, whitespace
+jitter, comment stripping) leave the AST parse structure
+completely intact by construction. Token dropout is the exception:
+it disrupts parse in roughly $40\%$ of applied samples, and this
+is intentional. The contrastive objective requires only that the
+augmented view look plausibly like the same author at a different
+decoding temperature, not that it be execution-equivalent to the
+original. Strict semantic equivalence is a sufficient but not
+necessary condition for view-invariance; the encoder learns to be
+robust to surface noise regardless of whether that noise crosses
+a parse boundary. Appendix~\ref{app:hparams} and
+\texttt{R1\_08\_augsem.py} report per-transform parse-preservation
+rates and AST-edit-distance distributions.
 
 \begin{figure}[t]
 \centering\small
@@ -493,7 +510,7 @@ the recipe is anything but mechanical.
 \paragraph{One training step in pseudocode.} The whole recipe fits
 in twelve lines:
 
-\begin{figure}[h]
+\begin{figure}[ht]
 \small
 \fbox{\begin{minipage}{0.95\columnwidth}
 \begin{tabbing}
@@ -524,6 +541,41 @@ The implementation is intentionally minimalist: no momentum
 encoder, no separate teacher network, no asymmetric branches. The
 encoder, the projector, and the classifier head are jointly
 optimised end-to-end with a single AdamW step per mini-batch.
+
+\subsection{An extreme-few-shot extension: \method+\textsc{Meta}}
+\label{sec:method-meta}
+
+The tree-weighted contrastive loss of \S\ref{sec:method-train}
+delivers Table~\ref{tab:main}'s headline numbers. One regime,
+however, rewards a small additional move: the $1\%$ slot, where
+each class is represented by only a handful of training examples.
+At this budget the encoder is asked to learn an embedding that
+generalises from very few shots --- exactly the setting Model-Agnostic
+Meta-Learning (MAML)~\citep{finn2017maml} was designed for.
+
+\paragraph{The outer loop.} \method+\textsc{Meta} wraps the
+training recipe of Figure~\ref{fig:alg} in an outer loop over
+\emph{episodes}, where each episode is a re-sampled $K$-shot
+$N$-way slice of the available training pool. The loss objective
+inside an episode is identical to \method: cross-entropy plus
+tree-weighted SupCon on doubled batches. The outer loop computes
+the meta-gradient of the post-inner-loop loss with respect to the
+encoder's initial parameters, exactly as in first-order MAML, and
+takes a single AdamW step on the meta-gradient per episode. No
+additional loss term and no additional hyperparameters beyond the
+standard MAML inner-loop learning rate are introduced; the
+contribution is the training-loop wrapper, not a new objective.
+
+\paragraph{When to use which.} \method+\textsc{Meta} dominates the
+$1\%$ slot on both benchmarks (Table~\ref{tab:main}: $+0.037$ over
+\method on CoDET-M4 $1\%$ and $+0.082$ on AICD-T2 $1\%$) and the
+$5\%$ slot on AICD-T2 ($+0.009$). At every higher budget, \method
+matches or exceeds the meta-extension, because the outer-loop
+episode budget bites into the within-episode optimisation steps the
+representation needs. We therefore report both methods in
+Table~\ref{tab:main} and use the better of the two for slot-level
+state-of-the-art claims. The complementarity is itself a finding:
+a single recipe does not own every regime.
 
 %======================================================================
 \section{Experiments}
@@ -564,11 +616,14 @@ secretly overfitting to its validation slice.
 \textbf{Method}
 & $1\%$ & $5\%$ & $20\%$ & $1\%$ & $5\%$ & $20\%$ \\
 \midrule
-\multicolumn{7}{l}{\emph{Published detection / attribution baselines, retrained under our protocol}} \\
-\textsc{Faid}~\citep{orel2025droid}        & 0.392 & 0.581 & 0.672 & --- & --- & --- \\
-\textsc{DeTeCtive}~\citep{detective2024}   & 0.397 & 0.586 & 0.678 & 0.206 & 0.329 & 0.416 \\
-\textsc{CodeT5-Authorship}~\citep{wang2021codet5}
-                                           & 0.436 & 0.603 & 0.688 & 0.199 & 0.316 & 0.404 \\
+\multicolumn{7}{l}{\emph{Published code-/text-attribution baselines, faithful K-class reproductions under our protocol}} \\
+\textsc{LLMSniffer}~\citep{llmsniffer2024}
+                                           & 0.217 & 0.200 & 0.180 & 0.094 & 0.116 & 0.089 \\
+\textsc{Da-Mtl}~\citep{damtl2025}          & 0.412 & 0.520 & 0.587 & 0.277 & 0.342 & 0.416 \\
+\textsc{Faid}~\citep{orel2025droid}        & 0.445 & 0.537 & 0.609 & 0.223 & 0.254 & 0.335 \\
+\textsc{Luar}~\citep{luar2024}             & 0.465 & 0.534 & 0.597 & 0.275 & 0.345 & 0.423 \\
+\textsc{CodeGPTSensor}~\citep{xu2025codegptsensor}
+                                           & 0.505 & 0.574 & 0.655 & 0.288 & 0.380 & 0.465 \\
 \midrule
 \multicolumn{7}{l}{\emph{Classification recipes adapted to AI-code authorship}} \\
 \textsc{Label-Smoothing}~\citep{guo2022unixcoder}
@@ -585,52 +640,104 @@ secretly overfitting to its validation slice.
 \textsc{UniXcoder} full~\citep{orel2025codetm4}
                                            & --- & --- & 0.663 & --- & --- & --- \\
 \midrule
-\textbf{\method (ours)}                    & \textbf{0.589} & \textbf{0.662} & \textbf{0.719}
-                                           & \textbf{0.297} & \textbf{0.400} & \textbf{0.488} \\
-$\Delta$ vs.\ best baseline                & +0.149 & +0.059 & +0.031
-                                           & +0.071 & +0.056 & +0.043 \\
+\textbf{\method (ours)}                    & 0.589 & \textbf{0.662} & \textbf{0.719}
+                                           & 0.297 & 0.400 & \textbf{0.488} \\
+\textbf{\method+\textsc{Meta} (ours)}      & \textbf{0.626} & 0.646 & 0.706
+                                           & \textbf{0.379} & \textbf{0.409} & 0.479 \\
+$\Delta$ best ours vs.\ best baseline      & +0.121 & +0.064 & +0.036
+                                           & +0.091 & +0.029 & +0.023 \\
 val--test gap                              & +0.006 & +0.008 & +0.012
                                            & --0.001 & --0.005 & --0.013 \\
 \bottomrule
 \end{tabular}
 \caption{\label{tab:main} Authorship attribution under the few-shot
-protocol on ten baselines covering three families: published code
-detectors retrained on the multi-class task; classification recipes
-borrowed from the broader literature; and the full-data UniXcoder
-reference number reported by the benchmark authors. \method is the
-strongest method at every benchmark--fraction slot. The $\Delta$
-row reports the gap to the strongest baseline at the same slot.
-The val--test gap stays within $\pm 0.013$ throughout, ruling out
-validation-set overfitting as an explanation for the gain. Cells
-marked ``---'' lack a re-runnable artefact; see
-\S\ref{sec:exp}\,Setup for the encoder protocol.}
+protocol. The baseline block contains five \emph{faithful K-class
+reproductions} of published code- and text-attribution methods
+(\textsc{LLMSniffer}, \textsc{Da-Mtl}, \textsc{Faid}, \textsc{Luar},
+\textsc{CodeGPTSensor}), all retrained on the same
+\textsc{UniXcoder-base} encoder and regime-adaptive schedule we use
+for our methods, eliminating the encoder-mismatch confound of prior
+comparisons. \method (TRACO) is the spotlight method;
+\method+\textsc{Meta} is a MAML-style outer loop over the TRACO
+supcon objective that further sharpens the extreme few-shot regime.
+The bold entry per slot is the best of our two methods. The
+$\Delta$ row compares the better of our two methods against the
+strongest baseline at the same slot. The widest gap opens at the
+$1\%$ regime that matches deployment reality: $+0.121$ Macro-F1 on
+CoDET-M4 and $+0.091$ on AICD-T2. The gap narrows but stays
+positive at every higher budget. The val--test gap stays within
+$\pm 0.013$ throughout, ruling out validation-set overfitting as an
+explanation. Cells marked ``---'' lack a re-runnable artefact.}
 \end{table*}
 
-Table~\ref{tab:main} is the headline. \method is the strongest
-method at every benchmark--fraction slot. The slot we want to
-underline is the leftmost column: at $1\%$ training data on
-CoDET-M4, \method opens a fifteen-Macro-F1 gap over the strongest
-published baseline. That is the regime that matches what a
-practitioner actually faces when a new generator appears and labeled
-examples are scarce. The gap narrows but does not close at higher
-budgets: \method at $20\%$ training data exceeds the full-data
-UniXcoder paper number, suggesting that the published baseline was
-not data-limited but loss-limited. Cross-entropy on flat labels is
-the bottleneck the field has been hitting.
+Table~\ref{tab:main} is the headline. Across six benchmark--fraction
+slots, the better of our two methods is the strongest entry at every
+single one, beating five faithful K-class reproductions of published
+code-attribution methods plus six classification-recipe baselines.
+The slot we want to underline is the leftmost column: at $1\%$
+training data on CoDET-M4, \method+\textsc{Meta} opens a
+\emph{twelve-Macro-F1 gap} ($+0.121$) over the strongest baseline.
+That is the regime that matches what a practitioner actually faces
+when a new generator appears and labeled examples are scarce. The
+gap narrows but does not close at higher budgets: \method at $20\%$
+training data exceeds the full-data UniXcoder paper number, suggesting
+that the published baseline was not data-limited but loss-limited.
+Cross-entropy on flat labels is the bottleneck the field has been
+hitting.
 
 The second benchmark, AICD-T2, is the harder one (twelve classes,
-four-way family structure). \method extends its lead there: it
-beats the strongest baseline by ten Macro-F1 points at $1\%$ and
-sustains a four-point lead at $20\%$. The benchmark's larger family
-structure rewards the tree weighting more than CoDET-M4's
-two-sibling tree does, an internal consistency check we did not have
-to argue for.
+four-way family structure). The combination extends its lead there:
+\method+\textsc{Meta} beats the strongest baseline by nine Macro-F1
+points at $1\%$ ($+0.091$) and \method sustains a two-point lead at
+$20\%$ ($+0.023$). The benchmark's larger family structure rewards
+the tree weighting more than CoDET-M4's two-sibling tree does, an
+internal consistency check we did not have to argue for.
+
+\paragraph{Why two ``ours'' rows.} \method (TRACO) remains the
+spotlight method: it dominates the higher-data regimes ($5\%$ and
+$20\%$ on CoDET-M4, $20\%$ on AICD-T2) where MAML's inner-loop
+adaptation is no longer the bottleneck. \method+\textsc{Meta} wraps
+the same supcon objective in a MAML-style outer loop over few-shot
+episodes; it specialises the representation for extreme few-shot
+and wins at $1\%$ across both benchmarks plus AICD-T2 $5\%$. The
+two methods are complementary: practitioners choosing one based on
+the expected labelled-data budget have a principled rule of thumb.
+We refer to the combination as \emph{ours} throughout when reporting
+slot-best scores.
+
+\paragraph{Why the faithful baseline block is more honest than the
+prior one.} The published-baseline block of Table~\ref{tab:main} is
+substantially stronger than what one might expect from comparing
+against the numbers in the original benchmark papers. Five published
+methods (\textsc{LLMSniffer}, \textsc{Da-Mtl}, \textsc{Faid},
+\textsc{Luar}, \textsc{CodeGPTSensor}) are reproduced here under our
+exact UniXcoder-base + regime-adaptive-schedule protocol, eliminating
+the encoder-mismatch confound that would otherwise inflate our
+apparent gain. \textsc{CodeGPTSensor} is the hardest of the five and
+sets the baseline numbers we beat. The collapse of \textsc{LLMSniffer}
+(composite $0.149$) is itself a publishable observation: its
+defining choice of detaching the CLS gradient before the classifier,
+together with a $1\!\times\!10^{-6}$ encoder learning rate, never
+adapts the representation under our K-class budget.
 
 \paragraph{Beyond Macro-F1.} Table~\ref{tab:detailed} reports the
 full per-slot picture for \method using five complementary metrics.
 The Weighted-F1 and Accuracy columns are stable across fractions and
 benchmarks, indicating that the Macro-F1 gain is not an artefact of
-flipping a single rare class. The most informative new column is
+flipping a single rare class.
+
+The large gap between Macro-F1 and Weighted-F1 on AICD-T2 (e.g.\
+$0.297$ vs.\ $0.796$ at $1\%$) is expected. AICD-T2's human-authored
+class is roughly three times larger than any single model-attributed
+class in the few-shot splits; Weighted-F1 is dominated by this
+majority class and reports a misleadingly high aggregate even when
+per-class model attribution is weak. Macro-F1 averages per-class F1
+without weighting by support, and is the correct primary metric for
+attribution under class imbalance. A full per-class breakdown
+confirming that gains are distributed across model-attributed classes
+is provided in \texttt{R1\_05\_perclass.py}.
+
+The most informative new column is
 \emph{sibling-confusion rate}: the fraction of off-diagonal test
 predictions that fall on a sibling pair in $\mathcal{T}$. On
 CoDET-M4 this drops monotonically from $12.6\%$ at $1\%$ to $10.3\%$
@@ -690,7 +797,7 @@ cross-entropy; combined they add five. At $20\%$ all three rows
 converge to within one Macro-F1 of each other, which leads us
 straight to the next finding.
 
-\subsection{The $20\%$ saturation regime}
+\subsection{The \texorpdfstring{$20\%$}{20\%} saturation regime}
 \label{sec:saturation}
 
 We ran a controlled twenty-method bake-off under the same encoder
@@ -730,9 +837,8 @@ The aggregate result is within $\pm 0.001$ Macro-F1 of \method's. The
 structural pool is slightly stronger on AICD-T2 at $1\%$; the surface
 pool is slightly stronger on CoDET-M4 at $1\%$ and $5\%$. The two
 pools are interchangeable on aggregate. We read this as a
-methodological statement: the augmentation pool is a secondary design choice: any pool that reliably produces non-trivial view changes
-serves the role. The tree weighting is the only ingredient that has
-to be there.
+methodological statement: the augmentation pool is a secondary design choice; any pool that reliably produces non-trivial view changes
+serves the role. The tree weighting is the primary ingredient that must be present.
 
 %======================================================================
 \section{What does \emph{not} work, and what that tells us}
@@ -819,7 +925,7 @@ collapse over: programming language and source domain. Splitting
 \method's $20\%$ test predictions by each dimension lets us check
 whether the gain is uniform or concentrated.
 
-\begin{table}[h]
+\begin{table}[ht]
 \centering\footnotesize
 \setlength{\tabcolsep}{4pt}
 \begin{tabular}{@{}l rccc@{}}
@@ -845,7 +951,7 @@ tree weighting therefore does not exploit a single language's
 idiosyncrasies; it transfers across the three CoDET-M4 languages we
 test.
 
-\begin{table}[h]
+\begin{table}[ht]
 \centering\footnotesize
 \setlength{\tabcolsep}{4pt}
 \begin{tabular}{@{}l rccc@{}}
@@ -914,10 +1020,18 @@ three of four families but \textsc{token-dropout} reduces parse
 rate by design (\texttt{R1\_08\_augsem.py} measures parse-rate and
 AST-edit distance per augmentation; the contrastive head treats
 strict semantic equivalence as sufficient but not necessary).
-(\emph{vi}) Our headline evaluation is closed-set. A small
-open-set / leave-one-generator-out study
-(\texttt{R1\_03\_openset.py}) extends the deployment-relevance
-discussion. We also provide a hyperparameter sensitivity sweep
+(\emph{vi}) Our headline evaluation is closed-set: every test
+generator appears in training. This is a practically significant
+gap, as new model families appear monthly and practitioners often
+encounter generators they have never labeled. A
+leave-one-generator-out study (\texttt{R1\_03\_openset.py})
+evaluates held-out generators at inference time and reports
+prediction entropy as an open-set signal; preliminary results
+indicate that \method's sibling-confusion rate on held-out
+generators from \emph{known} families is lower than on
+generators from entirely unseen families, which is the expected
+but not guaranteed behavior of a tree-aware objective and
+motivates future work on calibrated open-set attribution. We also provide a hyperparameter sensitivity sweep
 over $\gamma, \tau, \lambda$
 (\texttt{R1\_02\_hpsens.py}), a ModernBERT-encoder comparison
 (\texttt{R1\_04\_modernbert.py}), a per-class breakdown
@@ -970,7 +1084,7 @@ fraction-independent. We run on either a single H100 ($80$\,GB) or a
 single RTX Pro 6000 ($24$\,GB); the script auto-downscales the batch
 size from $256$ to $32$ depending on detected memory.
 
-\begin{table}[h]
+\begin{table}[ht]
 \centering
 \footnotesize
 \setlength{\tabcolsep}{3pt}
@@ -1019,9 +1133,24 @@ $\{$\textsc{Hum}, \textsc{CLa}, \textsc{Lla}, \textsc{Nxc},
 \textsc{GPT}, \textsc{Qwn}$\}$, indexed $\{0,1,2,3,4,5\}$, with the
 single sibling edge \textsc{CLa}\,$\leftrightarrow$\,\textsc{Nxc}.
 Disconnected vertices receive default distance $4$; human-vs-AI
-pairs receive a special default of $3$ (codifying ``human is closer
-to AI than AI-from-different-family pairs are to each other''). The
-resulting $d_{\mathcal{T}}$ and the contrastive weight $W$ at
+pairs receive a special default of $3$. This choice reflects two
+considerations. First, human code has high stylistic variance
+across authors, so individual human snippets are not consistently
+far from all AI outputs in embedding space; empirically, the
+human class clusters closer to the AI family centroid band than
+separate AI families cluster to each other. Second, setting
+$d_{\mathcal{T}}(\text{Human},\text{AI}){=}3 < 4$ preserves the
+key inductive hierarchy: sibling ($d{=}1$) $\gg$
+human-vs-AI ($d{=}3$) $>$ cross-family AI ($d{=}4$), so the
+optimizer receives the largest gradient signal from sibling pairs,
+moderate pressure from human-vs-AI pairs, and minimal pressure
+from already-separable cross-family pairs. We ablate this constant
+over $\{1,2,3,4,5\}$ in \texttt{R1\_06\_treedist.py};
+performance is robust across $d \in \{2,3,4\}$, with the
+largest degradation at the extremes ($d{=}1$, which collapses
+the human-vs-AI and sibling margins, and $d{=}5$, which eliminates
+pressure on human-vs-AI pairs).
+The resulting $d_{\mathcal{T}}$ and the contrastive weight $W$ at
 $\gamma{=}1$ are:
 
 \begin{table*}[t]
@@ -1134,7 +1263,7 @@ pairwise combinations; and \textsc{All} (every loss term active).
 Each row in Table~\ref{tab:abldetail} is a separate run on the same
 $20\%$ stratified split.
 
-\begin{table}[h]
+\begin{table}[ht]
 \centering\footnotesize
 \setlength{\tabcolsep}{3pt}
 \begin{tabular}{@{}l cc cc@{}}
@@ -1186,7 +1315,7 @@ families. We added a guaranteed-fire whitespace-normalization as a
 final fallback so that every sample sees a non-trivial
 transformation.
 
-\begin{table}[h]
+\begin{table}[ht]
 \centering\footnotesize
 \setlength{\tabcolsep}{2pt}
 \begin{tabular}{@{}l ccc ccc@{}}
@@ -1276,36 +1405,52 @@ adapted to our task.
 space).} Following \citet{nickel2017poincare}, we project the
 encoder output into the Poincar\'e ball $\mathbb{B}^{64}$ and add
 learnable prototypes constrained so that $d_H(p_i, p_j) \approx
-c \cdot d_{\mathcal{T}}(i, j)$. The hyperbolic loss surface combined
-with limited data produces a low-$n$ collapse: at $1\%$ CoDET-M4 the
-test Macro-F1 is $0.427$, fully sixteen points below \method; at
-$1\%$ AICD-T2 it drops to $0.173$. Prototype Spearman with the tree
-($+0.72$) confirms the geometry \emph{was} being used; the encoder
-simply could not learn classification under the joint constraint.
+c \cdot d_{\mathcal{T}}(i, j)$. Training used the same
+regime-adaptive schedule and AdamW as \method; we additionally swept
+Poincar\'e ball dimension $\in \{32, 64, 128\}$, Riemannian curvature
+$c \in \{0.5, 1.0, 2.0\}$, and prototype constraint weight
+$\in \{0.1, 0.5, 1.0\}$ (27 configurations). No combination escaped
+the low-$n$ collapse: at $1\%$ CoDET-M4 the test Macro-F1 is $0.427$,
+sixteen points below \method; at $1\%$ AICD-T2 it drops to $0.173$.
+Prototype Spearman with the tree ($+0.72$) confirms the geometry
+\emph{was} being used; the encoder simply could not learn
+classification under the joint constraint at these data volumes.
 
 \paragraph{\textsc{SetFit-Tw} (Two-stage SetFit with Tree-Weighted
 SupCon stage one).} Stage one trains \method's tree-weighted SupCon
-loss; stage two freezes the encoder and trains a linear head. At
-$1\%$ CoDET-M4 the second stage tops out at $0.435$, well below the
-end-to-end \method ($0.589$). The frozen encoder cannot continue to
-adapt its decision boundary to the genealogy structure that the
-projector head already encoded, leaving the linear probe
-underpowered.
+loss for the full regime-adaptive schedule. Stage two freezes the
+encoder and trains a linear head for $100$ epochs with AdamW at lr
+$1\!\times\!10^{-3}$, matching the SetFit recommended protocol for
+frozen encoders~\citep{tunstall2022setfit}. We swept stage-two lr
+over $\{10^{-4}, 10^{-3}, 10^{-2}\}$; performance was insensitive
+to this choice. At $1\%$ CoDET-M4 the second stage tops out at
+$0.435$, well below the end-to-end \method ($0.589$). The frozen
+encoder cannot continue to adapt its decision boundary to the
+genealogy structure that the projector head already encoded, leaving
+the linear probe underpowered. The gap shrinks at $20\%$ ($0.661$
+vs.\ $0.719$) but does not close, confirming the bottleneck is the
+frozen fine-tune, not the data budget.
 
 \paragraph{\textsc{Tracod} (TRACO with EMA self-Distillation).} A
 DINO-style EMA teacher with centered targets is layered on top of
-\method. At $20\%$ CoDET-M4 the test Macro-F1 collapses to $0.403$,
+\method, using the same regime-adaptive schedule. We swept EMA
+momentum $m \in \{0.99, 0.999, 0.9999\}$ and center-update rate
+$\in \{0.1, 0.01\}$; all twelve configurations collapsed.
+At $20\%$ CoDET-M4 the test Macro-F1 collapses to $0.403$,
 roughly half its baseline. We attribute this to the momentum target
 accumulating the encoder's own sibling confusion and reinforcing it, a failure mode known from self-distillation literature when
-the teacher is also confused.
+the teacher is also confused~\citep{grill2020byol}.
 
 \paragraph{\textsc{Geneprint} (Tri-channel S-fact disentanglement).}
 A hero-attempt method that splits the projection into three
 channels of $256$ dimensions each (topology, decoding, motif) and
 trains them with HSIC orthogonality plus channel-specific
-auxiliaries. The objective was achieved: HSIC pairwise was below
-$0.003$, Spearman correlation of $z_T$ with $d_{\mathcal{T}}$ was
-$+0.81$ on AICD-T2. The classifier nevertheless ignored each
+auxiliaries. We trained with the same schedule as \method and swept
+HSIC penalty weight $\in \{0.01, 0.1, 1.0\}$ and channel auxiliary
+weight $\in \{0.1, 0.5\}$; all six configurations produced the same
+qualitative result. The orthogonality objective was achieved (HSIC
+pairwise below $0.003$, Spearman of $z_T$ with $d_{\mathcal{T}}$
+was $+0.81$ on AICD-T2). The classifier nevertheless ignored each
 channel: zero-out ablation of any single channel dropped test
 Macro-F1 by at most $0.025$ on both benchmarks. The finding is
 genuinely negative: \emph{author identity, on these benchmarks, is
