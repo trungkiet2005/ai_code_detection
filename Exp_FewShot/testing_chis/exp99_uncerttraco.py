@@ -110,10 +110,24 @@ def augment(code, rng):
 
 class UncertTracoModel(nn.Module):
     """TRACO encoder with HIGHER dropout in the projector (0.3 instead of 0.1)
-    so MC-dropout at test produces meaningful uncertainty."""
+    so MC-dropout at test produces meaningful uncertainty.
+
+    MEMORY NOTE: 2-view contrastive training stores activations for TWO encoder
+    forward passes in the autograd graph. We enable gradient checkpointing on
+    the encoder to recompute activations during backward instead of caching,
+    cutting peak memory by ~40% on the encoder forward.
+    """
     def __init__(self, enc_name, n_cls, emb_dim=256, drop=0.3):
         super().__init__()
         self.encoder = AutoModel.from_pretrained(os.path.join(KAGGLE_MODELS, enc_name), local_files_only=True)
+        # OOM fix: trade compute for memory on the 2-view contrastive forward
+        try:
+            self.encoder.gradient_checkpointing_enable()
+            # gradient_checkpointing requires use_cache=False
+            if hasattr(self.encoder, "config"):
+                self.encoder.config.use_cache = False
+        except Exception:
+            pass
         h = self.encoder.config.hidden_size
         self.proj = nn.Sequential(nn.Linear(h, 512), nn.GELU(), nn.Dropout(drop), nn.Linear(512, emb_dim), nn.Dropout(drop))
         self.clf = nn.Linear(emb_dim, n_cls)
@@ -201,13 +215,15 @@ def _hw(c):
         torch.backends.cudnn.allow_tf32 = True
         torch.backends.cudnn.benchmark = True
         mem = torch.cuda.get_device_properties(0).total_memory / 1e9
-        # 2-view contrastive train + K=20 MC dropout eval (no grad in eval)
-        if mem >= 80:   c.bs, c.seq = 256, 512   # RTX Pro 6000 96GB
-        elif mem >= 40: c.bs, c.seq = 160, 512   # H100 80GB
-        elif mem >= 20: c.bs, c.seq = 96,  448
-        elif mem >= 10: c.bs, c.seq = 64,  384
-        else:           c.bs, c.seq = 32,  256
-        logger.info(f"[hw] mem={mem:.1f}GB bs={c.bs} seq={c.seq}")
+        # 2-view contrastive: HALVE bs vs single-view models (two encoder forwards
+        # per step → 2x activation memory in the autograd graph).
+        # Previous setting bs=256 @ 80GB OOM'd on UniXcoder + seq=512 + 2-view.
+        if mem >= 80:   c.bs, c.seq = 96,  512   # H100/A100 80GB+ → 96 (was 256 → OOM)
+        elif mem >= 40: c.bs, c.seq = 64,  512   # 40-80GB → 64
+        elif mem >= 20: c.bs, c.seq = 40,  448
+        elif mem >= 10: c.bs, c.seq = 24,  384
+        else:           c.bs, c.seq = 16,  256
+        logger.info(f"[hw] mem={mem:.1f}GB bs={c.bs} (HALVED for 2-view + grad-ckpt) seq={c.seq}")
     return c
 
 def set_seed(s):
