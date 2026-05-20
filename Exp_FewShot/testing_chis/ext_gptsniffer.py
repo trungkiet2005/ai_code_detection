@@ -57,6 +57,35 @@ logger = logging.getLogger("ext_gptsniffer")
 
 PAPER_BASELINE = 0.6633
 
+GENE_ADJ_CODET = {0: [], 1: [3], 2: [], 3: [1], 4: [], 5: []}
+GENE_ADJ_AICD = {i: [(i // 3) * 3 + j for j in range(3) if (i // 3) * 3 + j != i] for i in range(12)}
+
+def _gene_distance(u, v, adj):
+    if u == v: return 0.0
+    queue = [(u, 0)]; visited = {u}
+    while queue:
+        curr, d = queue.pop(0)
+        for nb in adj.get(curr, []):
+            if nb == v: return d + 1.0
+            if nb not in visited:
+                visited.add(nb); queue.append((nb, d + 1))
+    return float("inf")
+
+def build_distance_matrix(n_cls, adj, default_dist=4.0):
+    D = torch.full((n_cls, n_cls), default_dist)
+    for i in range(n_cls):
+        for j in range(n_cls):
+            d = _gene_distance(i, j, adj)
+            if d < float("inf"): D[i, j] = d
+            elif (i == 0) != (j == 0): D[i, j] = 3.0
+    return D
+
+def build_sibling_mask(n_cls, adj):
+    M = torch.zeros(n_cls, n_cls)
+    for i in range(n_cls):
+        for j in adj.get(i, []): M[i, j] = 1.0
+    return M
+
 # =============================================================================
 # Config
 # =============================================================================
@@ -68,6 +97,7 @@ class Cfg:
     lr_enc: float = 5e-5          # faithful: gptsniffer.py line 104
     warmup: float = 0.10; wd: float = 0.01  # faithful: weight_decay=0.01
     device: str = "cuda"
+    gene_adj: dict = field(default_factory=dict)
 
 def adaptive_schedule(cfg):
     f = cfg.frac
@@ -192,8 +222,9 @@ class FSDS(TD):
 # Eval (rich metrics, same as exp84_cargo)
 # =============================================================================
 @torch.no_grad()
-def eval_pack(model, loader, cfg):
-    model.eval(); preds, labels, langs, sources = [], [], [], []
+def eval_pack(model, loader, cfg, sib_mask_np, dist_mat_cpu):
+    model.eval()
+    preds, labels, langs, sources = [], [], [], []
     for b in tqdm(loader, desc="Eval"):
         ids = b["input_ids"].to(cfg.device)
         mask = b["attention_mask"].to(cfg.device)
@@ -204,16 +235,25 @@ def eval_pack(model, loader, cfg):
         langs.extend(list(b.get("language", [""] * len(labs))))
         sources.extend(list(b.get("source", [""] * len(labs))))
     preds = np.array(preds); labels = np.array(labels); n_cls = cfg.n_cls
-    overall = {"accuracy": float(accuracy_score(labels, preds)),
-               "macro_f1": float(f1_score(labels, preds, average="macro", zero_division=0)),
-               "weighted_f1": float(f1_score(labels, preds, average="weighted", zero_division=0)),
-               "micro_f1": float(f1_score(labels, preds, average="micro", zero_division=0)),
-               "macro_precision": float(precision_score(labels, preds, average="macro", zero_division=0)),
-               "macro_recall": float(recall_score(labels, preds, average="macro", zero_division=0))}
-    per_class = {"f1": f1_score(labels, preds, average=None, zero_division=0, labels=list(range(n_cls))).tolist(),
-                 "precision": precision_score(labels, preds, average=None, zero_division=0, labels=list(range(n_cls))).tolist(),
-                 "recall": recall_score(labels, preds, average=None, zero_division=0, labels=list(range(n_cls))).tolist()}
+    overall = {
+        "accuracy": float(accuracy_score(labels, preds)),
+        "macro_f1": float(f1_score(labels, preds, average="macro", zero_division=0)),
+        "weighted_f1": float(f1_score(labels, preds, average="weighted", zero_division=0)),
+        "micro_f1": float(f1_score(labels, preds, average="micro", zero_division=0)),
+        "macro_precision": float(precision_score(labels, preds, average="macro", zero_division=0)),
+        "macro_recall": float(recall_score(labels, preds, average="macro", zero_division=0)),
+    }
+    per_class = {
+        "f1": f1_score(labels, preds, average=None, zero_division=0, labels=list(range(n_cls))).tolist(),
+        "precision": precision_score(labels, preds, average=None, zero_division=0, labels=list(range(n_cls))).tolist(),
+        "recall": recall_score(labels, preds, average=None, zero_division=0, labels=list(range(n_cls))).tolist(),
+    }
     cm = confusion_matrix(labels, preds, labels=list(range(n_cls)))
+    off_diag = int(cm.sum() - cm.trace())
+    sib_conf = int(sum(cm[i, j] for i in range(n_cls) for j in range(n_cls) if i != j and sib_mask_np[i, j] > 0))
+    sib_rate = sib_conf / max(off_diag, 1)
+    cross = int(sum(cm[i, j] for i in range(n_cls) for j in range(n_cls) if i != j and dist_mat_cpu[i, j] >= 3.0))
+    cross_rate = cross / max(off_diag, 1)
     per_lang, per_src = {}, {}
     if any(l for l in langs):
         la = np.array(langs)
@@ -223,9 +263,22 @@ def eval_pack(model, loader, cfg):
             if sel.sum() < 2: continue
             per_lang[L] = {"n": int(sel.sum()),
                            "macro_f1": float(f1_score(labels[sel], preds[sel], average="macro", zero_division=0)),
+                           "weighted_f1": float(f1_score(labels[sel], preds[sel], average="weighted", zero_division=0)),
                            "accuracy": float(accuracy_score(labels[sel], preds[sel]))}
-    return {"overall": overall, "per_class": per_class, "per_language": per_lang,
-            "per_source": per_src, "confusion_matrix": cm.tolist(), "n_samples": int(len(labels))}
+    if any(s for s in sources):
+        sa = np.array(sources)
+        for S in sorted(set(sources)):
+            if not S: continue
+            sel = (sa == S)
+            if sel.sum() < 2: continue
+            per_src[S] = {"n": int(sel.sum()),
+                          "macro_f1": float(f1_score(labels[sel], preds[sel], average="macro", zero_division=0)),
+                          "weighted_f1": float(f1_score(labels[sel], preds[sel], average="weighted", zero_division=0)),
+                          "accuracy": float(accuracy_score(labels[sel], preds[sel]))}
+    return {"overall": overall, "per_class": per_class, "per_language": per_lang, "per_source": per_src,
+            "confusion_matrix": cm.tolist(), "sibling_confusion_rate": float(sib_rate),
+            "cross_family_confusion_rate": float(cross_rate),
+            "off_diag_total": off_diag, "n_samples": int(len(labels))}
 
 # =============================================================================
 # Train
@@ -243,6 +296,9 @@ def run_exp(cfg, tag):
         tr_raw, vl_raw, ts_raw = _load_aicd("t2")
         tr_data = _conv_aicd(tr_raw); vl_data = _conv_aicd(vl_raw); ts_data = _conv_aicd(ts_raw)
     cfg.n_cls = max(tr_data["label"]) + 1
+    cfg.gene_adj = GENE_ADJ_CODET if cfg.benchmark == "codet_m4" else GENE_ADJ_AICD
+    dist_mat_cpu = build_distance_matrix(cfg.n_cls, cfg.gene_adj).numpy()
+    sib_mask_np = build_sibling_mask(cfg.n_cls, cfg.gene_adj).numpy()
     tok = AutoTokenizer.from_pretrained(os.path.join(KAGGLE_MODELS, cfg.enc), local_files_only=True)
     tr_ds = FSDS(tr_data, tok, cfg.seq, frac=cfg.frac, seed=cfg.seed)
     vl_ds = FSDS(vl_data, tok, cfg.seq, frac=1.0, seed=cfg.seed+1)
@@ -286,7 +342,7 @@ def run_exp(cfg, tag):
             scaler.step(optimizer); scaler.update(); scheduler.step()
             tot_loss += loss.item()
         avg_loss = tot_loss / max(1, len(tr_dl))
-        val_met = eval_pack(model, vl_dl, cfg)
+        val_met = eval_pack(model, vl_dl, cfg, sib_mask_np, dist_mat_cpu)
         v = val_met["overall"]["macro_f1"]; val_hist.append(v)
         logger.info(f"[epoch {ep+1}] loss={avg_loss:.4f} val={v:.4f}")
         if v > best_val:
@@ -294,7 +350,7 @@ def run_exp(cfg, tag):
             best_state = {k: v_.cpu().clone() for k, v_ in model.state_dict().items()}
 
     model.load_state_dict(best_state)
-    ts_met = eval_pack(model, ts_dl, cfg)
+    ts_met = eval_pack(model, ts_dl, cfg, sib_mask_np, dist_mat_cpu)
     test_macro = ts_met["overall"]["macro_f1"]; gap = best_val - test_macro
     logger.info(f"[final] val={best_val:.4f} test={test_macro:.4f} gap={gap:+.4f}")
 
@@ -340,14 +396,14 @@ def main():
     out_dir = os.path.join(_here, "results"); os.makedirs(out_dir, exist_ok=True)
     with open(os.path.join(out_dir, "ext_gptsniffer_results.json"), "w") as f:
         json.dump(results, f, indent=2)
-    print("\n" + "="*100)
-    print(f"{'Enc':<22} {'Bench':<12} {'Frac':>6} {'Ep':>4} {'Val':>8} {'Test':>8} {'Gap':>8} {'dPaper':>9} {'Wall':>8}")
-    print("-"*100)
+    print("\n" + "="*120)
+    print(f"{'Encoder':<22} {'Benchmark':<12} {'Frac':>6} {'Ep':>4} {'Val-F1':>8} {'Test-F1':>8} {'Gap':>8} {'dPaper':>9} {'Wall':>8}")
+    print("-"*120)
     for r in results:
         print(f"{r['enc']:<22} {r['bench']:<12} {r['frac']:>6.0%} {r['epochs']:>4d} "
               f"{r['val_macro']:>8.4f} {r['macro']:>8.4f} {r['val_test_gap']:>+8.4f} {r['dpaper']:>+9.4f} "
               f"{r['wall']:>8.0f}s")
-    print("="*100)
+    print("="*120)
 
 if __name__ == "__main__":
     main()
