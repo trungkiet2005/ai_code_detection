@@ -231,7 +231,8 @@ class FSDS(TD):
 
     def __getitem__(self, i):
         r   = self.data[i]
-        enc = self.tok.encode_plus(
+        # Newer transformers removed tokenizer.encode_plus(); use direct call.
+        enc = self.tok(
             r["code"][:5000],
             max_length=self.seq_len,
             padding="max_length",

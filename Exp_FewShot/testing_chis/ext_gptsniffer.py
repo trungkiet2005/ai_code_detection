@@ -209,9 +209,10 @@ class FSDS(TD):
     def __getitem__(self, i):
         r = self.data[i]
         code = r["code"][:5000]
-        # Faithful to gptsniffer.py line 68:
-        # tokenizer.encode_plus(code, padding='max_length', max_length=512, truncation=True)
-        enc = self.tok.encode_plus(code, padding="max_length", max_length=self.seq_len, truncation=True)
+        # Faithful to gptsniffer.py line 68 tokenizer.encode_plus(...).
+        # Newer transformers removed `.encode_plus`; call tokenizer directly instead
+        # (semantically identical for padding/truncation use).
+        enc = self.tok(code, padding="max_length", max_length=self.seq_len, truncation=True)
         return {"input_ids": torch.tensor(enc["input_ids"], dtype=torch.long),
                 "attention_mask": torch.tensor(enc["attention_mask"], dtype=torch.long),
                 "label": r["label"],

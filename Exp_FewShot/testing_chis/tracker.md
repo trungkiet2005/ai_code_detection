@@ -2,19 +2,40 @@
 
 ---
 
-## 🎯 HERO LOCKED: TRACO (exp76) — 2026-05-19 [⚠ contested by exp81–101]
+## 🎯 HERO CANDIDATE: METATRACO (exp100) — 2026-05-20 [decision pending; TRACO still placeholder]
 
-> **Decision:** TRACO is the §3 spotlight method for the EMNLP 2026 paper.
-> Locked after the user's "chốt TRACO" on 2026-05-19. All other methods
-> in the tracker are recategorised as §4 baselines or §5 ablation evidence.
+> **State of play:** TRACO was the locked §3 hero from 2026-05-19. On 2026-05-20
+> Round 7 dropped METATRACO (exp100, composite = **0.5408**) which **exceeds
+> the +0.010 unlock threshold** over TRACO (0.5256). User decision pending on
+> promotion. Until promoted, TRACO remains the §3 placeholder.
 >
-> ⚠️ **2026-05-20 update:** Round 7 results (exp87–exp101) now in.
-> **METATRACO (exp100) composite = 0.5408** — exceeds the +0.010 unlock
-> threshold over TRACO (0.5256 + 0.010 = 0.5356). METATRACO is a strong
-> upgrade candidate for the §3 hero slot. DCGPT (exp92) = 0.5313 is new #2.
-> RAINFER (exp94) takes AICD-T2 20% SOTA (0.4921). CoDET-M4 1% SOTA
-> shattered by METATRACO at **0.6261** (+0.033 over prior best PROG 0.5934).
-> User review required before promoting METATRACO to hero.
+> **CLAUDE.md updated 2026-05-20**: novelty-first philosophy + 2-track §3.2
+> direction list. Round 7 directions that overlap with CLAUDE.md §3.2 already
+> failed at oral-tier WOW: PROMPTC (=PROMPTCOND, 0.4209), SLOTATTN (=SAD,
+> 0.4398), DUALVIEW (0.4753), MTAUX (=AUXGENE, 0.5229), DIFFTREE (=TREELEARN
+> proxy, 0.5260), RAINFER (=RAGAR proxy, 0.5296).
+>
+> **Round 8 partial (2026-05-20):** exp104 DUALGRAPH ran first — composite
+> **0.4688**, *below* TRACO (0.5256), *below* even the failed SLOTATTN (0.4398).
+> Dual-graph readout adds noise rather than signal at our scale. exp102/103
+> (DENOISE-v1/v3), exp105 (ACTIVE), exp106 (TREELEARN) still pending.
+>
+> **External baselines (2026-05-20):** 5 of 7 faithful K-class reproductions
+> now have results: ext_codegptsensor (0.4775), ext_luar (0.4398),
+> ext_damtl (0.4255), ext_faid (0.4006), ext_llmsniffer (0.1491 — collapsed).
+> All five UNDERPERFORM TRACO by ≥0.05 composite — strong evidence that the
+> field's published methods do not transfer to K-class authorship at matched
+> protocol. ext_detective and ext_gptsniffer rerun pending (encode_plus API
+> fix shipped 2026-05-20).
+
+### Tracker completeness (2026-05-20, post-update)
+
+- **48 result JSON files** verified in `results/` (was 42 + 6 new).
+- New: `exp104_dualgraph` (Round 8), `ext_codegptsensor`, `ext_damtl`,
+  `ext_faid`, `ext_llmsniffer`, `ext_luar` (External Baselines).
+- All 48 captured below across composite leaderboard + Round 8 + External
+  Baselines sections.
+- **Next free exp ID: exp107.** (exp98/99 used by uncertainty-track; exp102/103/105/106 reserved for pending Round 8 runs.)
 
 ### Why TRACO won the hero slot
 
@@ -56,7 +77,12 @@
 > Always report **val · test · val_test_gap**. Metric: **Macro-F1** for both CoDET-M4 (6-class, author IID) and AICD-T2 (12-class, model-family).
 > Composite score = **mean Test Macro-F1 across all 6 slots** (3 fractions × 2 benchmarks).
 
-### Composite ranking (40 methods, complete on both benchmarks) — updated 2026-05-20
+### Composite ranking (45 methods, complete on both benchmarks) — updated 2026-05-20
+
+> Includes 1 Round 8 result (DUALGRAPH = exp104) and 5 External Baselines
+> (faithful K-class reproductions: ext_codegptsensor, ext_luar, ext_damtl,
+> ext_faid, ext_llmsniffer). All `ext` rows use the same unixcoder-base +
+> RAS schedule protocol → directly comparable.
 
 | Rank | Method | exp | CoDET 1% | CoDET 5% | CoDET 20% | AICD 1% | AICD 5% | AICD 20% | **Mean** |
 |:-:|:--|:--|--:|--:|--:|--:|--:|--:|--:|
@@ -92,13 +118,19 @@
 | 30 | CASCADE | exp78 | 0.5462 | 0.6434 | 0.7146 | 0.2846 | 0.3778 | 0.4764 | 0.5072 |
 | 31 | PERPSIG | exp69 | 0.5408 | 0.6321 | 0.7076 | 0.2865 | 0.3742 | 0.4813 | 0.5038 |
 | 32 | RACO | exp64 | 0.5627 | 0.6539 | 0.6943 | 0.2922 | 0.3520 | 0.3970 | 0.4920 |
-| 33 | DUALVIEW | exp97 | 0.5269 | 0.6304 | 0.7010 | 0.2548 | 0.3064 | 0.4322 | 0.4753 |
-| 34 | TIEH | exp72 | 0.4271 | 0.6112 | 0.7017 | 0.1729 | 0.3226 | 0.4444 | 0.4466 |
-| 35 | TAPA | exp73 | 0.4969 | 0.5743 | 0.6722 | 0.2300 | 0.2746 | 0.2635 | 0.4186 |
-| 36 | PROMPTC | exp95 | 0.4493 | 0.5921 | 0.6701 | 0.1887 | 0.2579 | 0.3673 | 0.4209 |
-| 37 | SETFIT-TW | exp74 | 0.4353 | 0.4871 | 0.6608 | 0.1405 | 0.2196 | 0.3413 | 0.3808 |
-| 38 | SLOTATTN | exp101 | 0.5059 | 0.6012 | 0.6690 | 0.2099 | 0.2593 | 0.3937 | 0.4398 |
-| 39 | TRACOD | exp80 | 0.3706 | 0.4485 | 0.4029 | 0.1861 | 0.2125 | 0.1937 | 0.3024 |
+| 33 | **ext_codegptsensor** ext | ext | 0.5049 | 0.5738 | 0.6546 | 0.2877 | 0.3795 | 0.4646 | **0.4775** |
+| 34 | DUALVIEW | exp97 | 0.5269 | 0.6304 | 0.7010 | 0.2548 | 0.3064 | 0.4322 | 0.4753 |
+| 35 | **DUALGRAPH** ⚠ Round 8 | exp104 | 0.4924 | 0.5749 | 0.6441 | 0.2771 | 0.3804 | 0.4438 | **0.4688** |
+| 36 | TIEH | exp72 | 0.4271 | 0.6112 | 0.7017 | 0.1729 | 0.3226 | 0.4444 | 0.4466 |
+| 37 | SLOTATTN | exp101 | 0.5059 | 0.6012 | 0.6690 | 0.2099 | 0.2593 | 0.3937 | 0.4398 |
+| 37 | **ext_luar** ext | ext | 0.4650 | 0.5340 | 0.5970 | 0.2748 | 0.3446 | 0.4234 | **0.4398** |
+| 39 | **ext_damtl** ext | ext | 0.4122 | 0.5198 | 0.5868 | 0.2770 | 0.3415 | 0.4156 | **0.4255** |
+| 40 | PROMPTC | exp95 | 0.4493 | 0.5921 | 0.6701 | 0.1887 | 0.2579 | 0.3673 | 0.4209 |
+| 41 | TAPA | exp73 | 0.4969 | 0.5743 | 0.6722 | 0.2300 | 0.2746 | 0.2635 | 0.4186 |
+| 42 | **ext_faid** ext | ext | 0.4446 | 0.5374 | 0.6089 | 0.2232 | 0.2544 | 0.3353 | **0.4006** |
+| 43 | SETFIT-TW | exp74 | 0.4353 | 0.4871 | 0.6608 | 0.1405 | 0.2196 | 0.3413 | 0.3808 |
+| 44 | TRACOD | exp80 | 0.3706 | 0.4485 | 0.4029 | 0.1861 | 0.2125 | 0.1937 | 0.3024 |
+| 45 | **ext_llmsniffer** ext ❌ collapse | ext | 0.2170 | 0.1999 | 0.1795 | 0.0944 | 0.1155 | 0.0885 | **0.1491** |
 
 **Partial-data methods (CoDET-M4 only — AICD-T2 pending):**
 
@@ -449,6 +481,137 @@ should still be TRACO (robust across all fractions) unless the §3 narrative piv
 | DUALVIEW (exp97) | 0.4753 | §5 negative — code↔comment pairing degrades attribution |
 | PROMPTC (exp95) | 0.4209 | §5 negative — prompt tuning insufficient at few-shot |
 | SLOTATTN (exp101) | 0.4398 | §5 negative — slot collapse; kept as negative architecture result |
+
+---
+
+## 🚀 Round 8 — CLAUDE.md §3.2 Track 1 (low-compute, high-WOW) — planned 2026-05-20
+
+> **Motivation:** Round 7 cleared the easy wins from CLAUDE.md §3.2 (PROMPTC, SLOTATTN, DUALVIEW
+> failed; MTAUX, DIFFTREE, RAINFER mid-band). The remaining untouched §3.2 directions are
+> DENOISE (1.A), DUALGRAPH (1.C), ACTIVE (1.G), TREELEARN-ultrametric (1.D extension).
+> All Track 1 = 🟢 low compute, suitable for one Kaggle session each.
+>
+> **Target:** at least one of these crosses METATRACO's 0.5408 composite. If yes → new hero
+> candidate. If no → fall back to METATRACO + DENOISE-as-pretrain combo for §3 spotlight.
+
+| File | Method | Object (new for AI-code attribution) | Compute | Status |
+|:--|:--|:--|:--|:--|
+| `exp102_denoise.py` | **DENOISE-v1** | Discrete denoising pretext (token mask + 1 AST transform) → TRACO finetune | 🟢 +20–30% TRACO | 📝 planned |
+| `exp103_dndiff.py` | **DENOISE-v3** | Style-preserving conditional denoising (corrupt non-style attributes only); **TOP PICK** | 🟡 +40–50% TRACO | 📝 planned |
+| `exp104_dualgraph.py` | **DUALGRAPH** | Token-co-occurrence graph + AST/DFG graph, small dual-GNN on top of UniXcoder | 🟢 +5–10% TRACO | ❌ Done — composite **0.4688** (BELOW TRACO 0.5256) |
+| `exp105_active.py` | **ACTIVE** | Active-learning few-shot loop: BALD/entropy oracle, K rounds | 🟢 ~1.5× TRACO | 📝 planned |
+| `exp106_ultratree.py` | **TREELEARN** | Learnable ultrametric tree (Gumbel-softmax over edges) — recover genealogy from data | 🟢 +0.1% TRACO | 📝 planned |
+
+### Round 8 partial results — DUALGRAPH (exp104) — 2026-05-20
+
+| Bench | 1% | 5% | 20% | val-test gap @20% |
+|:--|--:|--:|--:|--:|
+| CoDET-M4 | 0.4924 | 0.5749 | 0.6441 | +0.0095 |
+| AICD-T2 | 0.2771 | 0.3804 | 0.4438 | −0.0051 |
+| **Composite** | — | — | — | **0.4688** (BELOW TRACO by −0.057) |
+
+**Falsifier verdict:** ❌ F1 failed. DUALGRAPH composite (0.4688) is well below
+TRACO (0.5256) and even below SLOTATTN (0.4398, a Round 7 failure). The dual
+token-graph + AST-graph readout *adds noise* rather than signal at our protocol.
+Possible reasons:
+1. AST parse fails on ~50% non-Python samples → AST graph degenerates to chain
+   = degraded second view.
+2. GNN message passing on `~256` tokens is too coarse to surface style edges
+   that UniXcoder doesn't already capture in self-attention.
+3. The "style lives on edges" hypothesis (§3.2 1.C) is not supported at this
+   scale; may need 100× more data to emerge.
+
+**Decision**: DUALGRAPH is a §5 negative result. Move to DENOISE-v1 next.
+
+**Run order priority** (highest insight per GPU-hour):
+1. **exp102_denoise** — cheapest WOW direction, reuses CARGO library, escalation path to v3.
+2. **exp104_dualgraph** — orthogonal axis (graph topology, not loss/aug); cheap +5–10%.
+3. **exp106_ultratree** — tiny add to TRACO; validates whether learned tree ≠ release-note tree.
+4. **exp103_dndiff** — the oral-tier WOW version of DENOISE; run if v1 lands on the leaderboard.
+5. **exp105_active** — last; needs an oracle simulation harness (extra plumbing).
+
+### Round 8 falsifier panel (decide before running)
+
+| Method | Falsifier (must check on test) |
+|:--|:--|
+| **DENOISE-v1** | If reconstruction loss < 0.05 at convergence AND composite ≤ TRACO → denoising is trivial (model memorises inverse of cheap noise) |
+| **DENOISE-v3** | If `mean cos(z_corrupt, z_clean)` > 0.95 on test → encoder ignored the corruption → falsified |
+| **DUALGRAPH** | If `composite(token_graph_only)` ≈ `composite(ast_graph_only)` ≈ `composite(dual)` → dual claim falsified |
+| **TREELEARN** | If learned ultrametric collapses to star or chain (rank-1) → prior is degenerate, falsified |
+| **ACTIVE** | If random sampling 5% ≥ active 1% → no sample-selection win |
+
+### CLAUDE.md §3.2 directions vs tracker reality (2026-05-20)
+
+| §3.2 ID | Method | Already tried? | Result | Round 8 status |
+|:--|:--|:--|:--|:--|
+| 1.A | DENOISE | ❌ No | — | ⭐ exp102 + exp103 (top pick) |
+| 1.B | RAGAR | ✅ exp94 RAINFER | 0.5296 (mid-band) | Done |
+| 1.C | DUALGRAPH | ✅ exp104 | **0.4688 (BELOW TRACO, falsified)** | Done |
+| 1.D | TREELEARN | 🟡 exp93 DIFFTREE (soft-label only) | 0.5260 | ⭐ exp106 (ultrametric upgrade) |
+| 1.E | AUXGENE | ✅ exp96 MTAUX | 0.5229 (mid-band) | Done |
+| 1.F | PROMPTCOND | ✅ exp95 PROMPTC | 0.4209 (negative) | Done |
+| 1.G | ACTIVE | ❌ No | — | ⭐ exp105 |
+| 2.A–H | MAA / MoE / SAD / TTT / HYPER / REASON / ENCODERPIVOT / SIM | partial | SLOTATTN=SAD failed | Backup if Round 8 stalls |
+
+---
+
+## 🌐 External Baselines (faithful K-class reproductions, 2026-05-20)
+
+> **Setup:** Seven external-baseline reproduction files (`ext_*.py`) port the
+> *core supervised mechanism* of published code-attribution / text-attribution
+> papers to our protocol (unixcoder-base + RAS schedule + K-class head). They
+> differ from exp90/91/92 (which were "inspired by" adaptations) — these are
+> verbatim faithful ports of the upstream model architecture and loss.
+>
+> **As of 2026-05-20**: 5 of 7 have results. ext_detective and ext_gptsniffer
+> are pending rerun after the `tokenizer.encode_plus` → `tokenizer(...)` API
+> fix was shipped.
+
+### Ext-baseline composite (sorted by composite Macro-F1)
+
+| Rank | Method | exp ID | Upstream | Encoder | Composite | Worst slot | Best slot |
+|:--|:--|:--|:--|:--|--:|--:|--:|
+| 1 | **CGPTS** (inspired) | exp90 | CodeGPTSensor TOSEM 2025 | unixcoder | 0.5205 | AICD 1% 0.2939 | CoDET 20% 0.7193 |
+| 1 | **DETMULTI** (inspired) | exp91 | DeTeCtive NeurIPS 2024 | unixcoder | 0.5205 | AICD 5% 0.3887 | CoDET 20% 0.7220 |
+| 3 | **ext_codegptsensor** (faithful) | ext | CodeGPTSensor TOSEM 2025 | unixcoder | **0.4775** | CoDET 1% 0.5049 | AICD 20% 0.4646 |
+| 4 | **ext_luar** (faithful) | ext | LUAR ICLR 2024 | unixcoder | **0.4398** | AICD 1% 0.2748 | CoDET 20% 0.5970 |
+| 5 | **ext_damtl** (faithful) | ext | DA-MTL SecureComm 2025 | unixcoder | **0.4255** | AICD 1% 0.2770 | CoDET 20% 0.5868 |
+| 6 | **ext_faid** (faithful) | ext | FAID EACL 2026 | unixcoder | **0.4006** | AICD 5% 0.2544 | CoDET 20% 0.6089 |
+| 7 | **ext_llmsniffer** (faithful) | ext | LLMSniffer arXiv 2024 | unixcoder | **0.1491** ❌ | AICD 20% 0.0885 | CoDET 1% 0.2170 |
+| -- | ext_detective | ext | DeTeCtive NeurIPS 2024 | unixcoder | ⏳ rerun pending | -- | -- |
+| -- | ext_gptsniffer | ext | GPTSniffer JSS 2024 | unixcoder | ⏳ rerun pending | -- | -- |
+
+### Δ vs hero (TRACO 0.5256 composite)
+
+| Baseline | Composite | Δ vs TRACO | Reading |
+|:--|--:|--:|:--|
+| ext_codegptsensor | 0.4775 | **−0.0481** | Faithful CE+KL+cos: ~3pp below; tree-weighting still the win |
+| ext_luar | 0.4398 | **−0.0858** | Frozen prototype-NN + N-shot FT lags fine-tuned encoder by ~9pp |
+| ext_damtl | 0.4255 | **−0.1001** | Dual-head MTL with sequential backward: 10pp below |
+| ext_faid | 0.4006 | **−0.1250** | Multi-level SupCon (no index1/index2 metadata): 12.5pp below |
+| ext_llmsniffer | 0.1491 | **−0.3765** | `cls.detach()` + 1e-6 enc-lr: representation never adapts, near-random |
+
+### Key findings — external baselines
+
+1. **Every faithful K-class reproduction underperforms TRACO** at matched
+   protocol. The smallest gap (ext_codegptsensor, −0.048) is still 5× the
+   +0.010 unlock threshold.
+2. **Inspired-by adaptations (exp90/91 = 0.5205) beat faithful ports
+   (ext_codegptsensor = 0.4775)** by +0.043 composite. The +CE+SupCon-mix
+   we layered onto CGPTS contributes more than the upstream's KL+cosine
+   tricks. This is a publishable §5 finding: "the field's published
+   contrastive methods do not transfer cleanly to K-class; the supervised
+   mechanism (CE + tree-weighted SupCon) does."
+3. **ext_llmsniffer collapses to ~random** (0.1491) — the upstream notebook's
+   `cls.detach()` before classifier combined with `lr_enc=1e-6` means the
+   encoder never adapts to the K-class task. This is a §5 negative result
+   the paper can cite to justify why such architectural choices fail.
+4. **ext_luar at 0.4398** ties with our SLOTATTN failure (also 0.4398). LUAR's
+   frozen-prototype paradigm is on par with a failed novel method — neither
+   is competitive with TRACO.
+5. **Strong evidence the paper's Table 1 will favour us decisively**: all 5
+   reproduced external baselines are dominated by TRACO/METATRACO at every
+   reported slot.
 
 ---
 

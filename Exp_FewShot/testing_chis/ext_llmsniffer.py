@@ -418,8 +418,13 @@ def train_epoch(model, loader, opt, sch, scaler, cfg, supcon_fn):
             logits, cls = model(ids)
             # CE gradient → classifier only (cls detached inside model)
             loss_ce  = F.cross_entropy(logits, labs)
-            # SupCon gradient → encoder only (cls is un-detached)
-            loss_scl = supcon_fn(cls, labs)
+            # SupCon gradient → encoder only (cls is un-detached).
+            # Faithful to cpsniffer.ipynb: features = F.normalize(features, p=2, dim=1)
+            # is applied BEFORE the SupCon criterion (functionally equivalent to the
+            # internal normalize in SupConLoss, but we keep the pre-norm to bit-match
+            # the upstream training step).
+            cls_n    = F.normalize(cls, p=2, dim=1)
+            loss_scl = supcon_fn(cls_n, labs)
             loss     = loss_ce + loss_scl
         scaler.scale(loss).backward()
         scaler.unscale_(opt)
