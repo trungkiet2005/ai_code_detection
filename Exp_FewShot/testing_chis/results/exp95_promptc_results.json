@@ -1,0 +1,292 @@
+[
+  {
+    "tag": "exp95_promptc_unixcoder-base_codet_m4_f0.01",
+    "method": "PROMPTC",
+    "enc": "unixcoder-base",
+    "bench": "codet_m4",
+    "frac": 0.01,
+    "epochs": 10,
+    "lr_enc": 3e-05,
+    "lambda_probe": 0.1,
+    "prompt_chars": 256,
+    "val_macro": 0.45376079496561056,
+    "macro": 0.4492563236260639,
+    "weighted": 0.6841338479743826,
+    "acc": 0.7216823056300268,
+    "val_test_gap": 0.0045044713395466784,
+    "dpaper": -0.21404367637393612,
+    "prompt_only_macro": 0.4105916440258451,
+    "response_only_macro": 0.436375327442272,
+    "test_metrics": {
+      "joint": {
+        "accuracy": 0.7216823056300268,
+        "macro_f1": 0.4492563236260639,
+        "weighted_f1": 0.6841338479743826
+      },
+      "prompt_only": {
+        "accuracy": 0.7023500335120644,
+        "macro_f1": 0.4105916440258451,
+        "weighted_f1": 0.6538068014451425
+      },
+      "response_only": {
+        "accuracy": 0.7048634383378016,
+        "macro_f1": 0.436375327442272,
+        "weighted_f1": 0.6725411172031158
+      },
+      "n_samples": 47744
+    },
+    "val_history": [
+      0.11345856331954764,
+      0.20655433552832556,
+      0.3217951308722677,
+      0.3446831674823956,
+      0.402960410485979,
+      0.4298444795089215,
+      0.44316011053396503,
+      0.45360289413045957,
+      0.4527012623084699,
+      0.45376079496561056
+    ],
+    "timestamp": "2026-05-19 12:57:27",
+    "wall": 848.8
+  },
+  {
+    "tag": "exp95_promptc_unixcoder-base_codet_m4_f0.05",
+    "method": "PROMPTC",
+    "enc": "unixcoder-base",
+    "bench": "codet_m4",
+    "frac": 0.05,
+    "epochs": 6,
+    "lr_enc": 3e-05,
+    "lambda_probe": 0.1,
+    "prompt_chars": 256,
+    "val_macro": 0.5982811105162035,
+    "macro": 0.5921365486543783,
+    "weighted": 0.7464291540763262,
+    "acc": 0.7777312332439679,
+    "val_test_gap": 0.006144561861825215,
+    "dpaper": -0.07116345134562174,
+    "prompt_only_macro": 0.5060461606411759,
+    "response_only_macro": 0.5228617172218643,
+    "test_metrics": {
+      "joint": {
+        "accuracy": 0.7777312332439679,
+        "macro_f1": 0.5921365486543783,
+        "weighted_f1": 0.7464291540763262
+      },
+      "prompt_only": {
+        "accuracy": 0.75,
+        "macro_f1": 0.5060461606411759,
+        "weighted_f1": 0.7090966577553618
+      },
+      "response_only": {
+        "accuracy": 0.7456224865951743,
+        "macro_f1": 0.5228617172218643,
+        "weighted_f1": 0.7117640890248891
+      },
+      "n_samples": 47744
+    },
+    "val_history": [
+      0.3843979968281743,
+      0.4662361939591413,
+      0.5697889046318102,
+      0.5818367001282402,
+      0.589375716966735,
+      0.5982811105162035
+    ],
+    "timestamp": "2026-05-19 13:10:43",
+    "wall": 795.4
+  },
+  {
+    "tag": "exp95_promptc_unixcoder-base_codet_m4_f0.2",
+    "method": "PROMPTC",
+    "enc": "unixcoder-base",
+    "bench": "codet_m4",
+    "frac": 0.2,
+    "epochs": 6,
+    "lr_enc": 4e-05,
+    "lambda_probe": 0.1,
+    "prompt_chars": 256,
+    "val_macro": 0.6772257052486954,
+    "macro": 0.6701290163142909,
+    "weighted": 0.7911243217519811,
+    "acc": 0.8094420241286864,
+    "val_test_gap": 0.007096688934404516,
+    "dpaper": 0.006829016314290892,
+    "prompt_only_macro": 0.6154571959993691,
+    "response_only_macro": 0.6106509399079131,
+    "test_metrics": {
+      "joint": {
+        "accuracy": 0.8094420241286864,
+        "macro_f1": 0.6701290163142909,
+        "weighted_f1": 0.7911243217519811
+      },
+      "prompt_only": {
+        "accuracy": 0.7865281501340483,
+        "macro_f1": 0.6154571959993691,
+        "weighted_f1": 0.7585982279153382
+      },
+      "response_only": {
+        "accuracy": 0.7781710790884718,
+        "macro_f1": 0.6106509399079131,
+        "weighted_f1": 0.7508340663098596
+      },
+      "n_samples": 47744
+    },
+    "val_history": [
+      0.574203892447059,
+      0.6017769058800325,
+      0.6393929470798595,
+      0.6733251562996982,
+      0.6749080003842819,
+      0.6772257052486954
+    ],
+    "timestamp": "2026-05-19 13:40:15",
+    "wall": 1772.4
+  },
+  {
+    "tag": "exp95_promptc_unixcoder-base_aicd_t2_f0.01",
+    "method": "PROMPTC",
+    "enc": "unixcoder-base",
+    "bench": "aicd_t2",
+    "frac": 0.01,
+    "epochs": 10,
+    "lr_enc": 3e-05,
+    "lambda_probe": 0.1,
+    "prompt_chars": 256,
+    "val_macro": 0.18745263146946986,
+    "macro": 0.18874223896433598,
+    "weighted": 0.770612578911214,
+    "acc": 0.7943934485241181,
+    "val_test_gap": -0.0012896074948661185,
+    "dpaper": -0.47455776103566405,
+    "prompt_only_macro": 0.15887903919975324,
+    "response_only_macro": 0.16632364309147493,
+    "test_metrics": {
+      "joint": {
+        "accuracy": 0.7943934485241181,
+        "macro_f1": 0.18874223896433598,
+        "weighted_f1": 0.770612578911214
+      },
+      "prompt_only": {
+        "accuracy": 0.787544996400288,
+        "macro_f1": 0.15887903919975324,
+        "weighted_f1": 0.7373871375534372
+      },
+      "response_only": {
+        "accuracy": 0.7918916486681066,
+        "macro_f1": 0.16632364309147493,
+        "weighted_f1": 0.743806888718844
+      },
+      "n_samples": 111120
+    },
+    "val_history": [
+      0.06852562336166636,
+      0.13012164252407943,
+      0.13589647891827678,
+      0.15706215223252448,
+      0.1544168193379126,
+      0.17252007982889536,
+      0.18412841501781632,
+      0.18432317623209013,
+      0.18745263146946986,
+      0.1865835776441257
+    ],
+    "timestamp": "2026-05-19 14:11:06",
+    "wall": 1850.7
+  },
+  {
+    "tag": "exp95_promptc_unixcoder-base_aicd_t2_f0.05",
+    "method": "PROMPTC",
+    "enc": "unixcoder-base",
+    "bench": "aicd_t2",
+    "frac": 0.05,
+    "epochs": 6,
+    "lr_enc": 3e-05,
+    "lambda_probe": 0.1,
+    "prompt_chars": 256,
+    "val_macro": 0.25619933249305565,
+    "macro": 0.2579184684780738,
+    "weighted": 0.7993541476547319,
+    "acc": 0.8140658747300216,
+    "val_test_gap": -0.001719135985018161,
+    "dpaper": -0.4053815315219262,
+    "prompt_only_macro": 0.1987533249980152,
+    "response_only_macro": 0.24228410025173983,
+    "test_metrics": {
+      "joint": {
+        "accuracy": 0.8140658747300216,
+        "macro_f1": 0.2579184684780738,
+        "weighted_f1": 0.7993541476547319
+      },
+      "prompt_only": {
+        "accuracy": 0.805048596112311,
+        "macro_f1": 0.1987533249980152,
+        "weighted_f1": 0.7739152939329927
+      },
+      "response_only": {
+        "accuracy": 0.808918286537077,
+        "macro_f1": 0.24228410025173983,
+        "weighted_f1": 0.784777678301908
+      },
+      "n_samples": 111120
+    },
+    "val_history": [
+      0.16108001237817982,
+      0.17961810878725892,
+      0.19313624628019843,
+      0.22212114763711502,
+      0.2526415068438393,
+      0.25619933249305565
+    ],
+    "timestamp": "2026-05-19 14:40:44",
+    "wall": 1777.6
+  },
+  {
+    "tag": "exp95_promptc_unixcoder-base_aicd_t2_f0.2",
+    "method": "PROMPTC",
+    "enc": "unixcoder-base",
+    "bench": "aicd_t2",
+    "frac": 0.2,
+    "epochs": 6,
+    "lr_enc": 4e-05,
+    "lambda_probe": 0.1,
+    "prompt_chars": 256,
+    "val_macro": 0.36306590289679974,
+    "macro": 0.3672614822723376,
+    "weighted": 0.8339228807841141,
+    "acc": 0.8415766738660907,
+    "val_test_gap": -0.004195579375537883,
+    "dpaper": -0.2960385177276624,
+    "prompt_only_macro": 0.29032780683720766,
+    "response_only_macro": 0.33322341968221986,
+    "test_metrics": {
+      "joint": {
+        "accuracy": 0.8415766738660907,
+        "macro_f1": 0.3672614822723376,
+        "weighted_f1": 0.8339228807841141
+      },
+      "prompt_only": {
+        "accuracy": 0.8241360691144708,
+        "macro_f1": 0.29032780683720766,
+        "weighted_f1": 0.8050422230894941
+      },
+      "response_only": {
+        "accuracy": 0.8265028797696184,
+        "macro_f1": 0.33322341968221986,
+        "weighted_f1": 0.8140428534382452
+      },
+      "n_samples": 111120
+    },
+    "val_history": [
+      0.20133190389334601,
+      0.2570505062126445,
+      0.32191205973475095,
+      0.35050366194075905,
+      0.3582876960140253,
+      0.36306590289679974
+    ],
+    "timestamp": "2026-05-19 15:46:04",
+    "wall": 3919.9
+  }
+]
