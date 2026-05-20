@@ -189,8 +189,7 @@ class FSDS(TD):
 def _get_xcode_vec(encoder, input_ids, pad_id):
     """Mean-pool over non-padding tokens (faithful to model.py get_xcode_vec)."""
     mask = input_ids.ne(pad_id)
-    attn_mask = mask.unsqueeze(1) * mask.unsqueeze(2)
-    out = encoder(input_ids, attention_mask=attn_mask, output_hidden_states=True)
+    out = encoder(input_ids, attention_mask=mask, output_hidden_states=True)
     token_emb = out[0]
     vec = (token_emb * mask.unsqueeze(-1)).sum(1) / mask.sum(-1).unsqueeze(-1).clamp(min=1)
     return vec

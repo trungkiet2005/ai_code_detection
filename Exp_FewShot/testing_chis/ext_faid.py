@@ -117,8 +117,8 @@ class FAIDK(nn.Module):
         super().__init__();self.encoder=encoder;self.pad_id=pad_id;self.temperature=temperature
         self.a=a;self.b=b;self.c=c;self.head=ClassificationHead(hidden,n_cls)
     def _encode(self,input_ids):
-        mask=input_ids.ne(self.pad_id);attn=mask.unsqueeze(1)*mask.unsqueeze(2)
-        out=self.encoder(input_ids,attention_mask=attn,output_hidden_states=True);tok=out[0]
+        mask=input_ids.ne(self.pad_id)
+        out=self.encoder(input_ids,attention_mask=mask,output_hidden_states=True);tok=out[0]
         return (tok*mask.unsqueeze(-1)).sum(1)/mask.sum(-1).unsqueeze(-1).clamp(min=1)
     def forward(self,input_ids,labels):
         q=self._encode(input_ids);k=q.detach()

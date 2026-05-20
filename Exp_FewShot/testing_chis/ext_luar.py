@@ -96,8 +96,7 @@ def encode_all(encoder,loader,device,pad_id):
     with torch.no_grad():
         for b in tqdm(loader,desc="Encode"):
             ids=b["input_ids"].to(device);mask=ids.ne(pad_id)
-            attn=mask.unsqueeze(1)*mask.unsqueeze(2)
-            out=encoder(ids,attention_mask=attn,output_hidden_states=True);tok=out[0]
+            out=encoder(ids,attention_mask=mask,output_hidden_states=True);tok=out[0]
             vec=(tok*mask.unsqueeze(-1)).sum(1)/mask.sum(-1).unsqueeze(-1).clamp(min=1)
             embs.append(F.normalize(vec,dim=-1).cpu());l=b["label"]
             labs.extend(l.tolist() if torch.is_tensor(l) else list(l))
@@ -158,8 +157,8 @@ def run_exp(cfg,tag):
         for b in ft_dl:
             ids=b["input_ids"].to(cfg.device);labs=b["label"]
             if not torch.is_tensor(labs):labs=torch.tensor(labs,dtype=torch.long)
-            labs=labs.to(cfg.device);mask=ids.ne(pad_id);attn=mask.unsqueeze(1)*mask.unsqueeze(2)
-            out=encoder_ft(ids,attention_mask=attn,output_hidden_states=True);tok=out[0]
+            labs=labs.to(cfg.device);mask=ids.ne(pad_id)
+            out=encoder_ft(ids,attention_mask=mask,output_hidden_states=True);tok=out[0]
             vec=(tok*mask.unsqueeze(-1)).sum(1)/mask.sum(-1).unsqueeze(-1).clamp(min=1)
             logits=clf(vec);loss=F.cross_entropy(logits,labs)
             opt2.zero_grad();loss.backward();opt2.step();tot+=loss.item()
