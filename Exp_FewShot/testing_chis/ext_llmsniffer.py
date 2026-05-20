@@ -1,349 +1,213 @@
 # ext_llmsniffer — Faithful K-class reproduction of LLMSniffer (arXiv 2024)
 # =============================================================================
-# NAME       : LLMSniffer-K  (K-class author attribution adaptation)
-# UPSTREAM   : Dihan & Muhtasim, "LLMSniffer: Detecting LLM-Generated Code via
-#              GraphCodeBERT and Supervised Contrastive Learning", arXiv 2024
-#              https://github.com/mahirlabibdihan/LLMSniffer
-# FAITHFULNESS (from cpsniffer.ipynb):
-#   Encoder  : microsoft/graphcodebert-base (→ we use unixcoder-base, protocol)
-#   Architecture (CodeBERTBinaryClassifier):
-#     encoder(input_ids, attn_mask) → last_hidden_state[:, 0, :]  (CLS token)
-#     classifier = Sequential(
-#         Dropout(0.3),
-#         Linear(hidden, 128), BatchNorm1d(128), ReLU(),
-#         Dropout(0.3),
-#         Linear(128, 1)  ← binary; we extend to Linear(128, K)
-#     )
-#   Loss     : SupConLoss (temperature=0.07) on CLS embeddings ONLY
-#              CRITICAL: Original notebook cell 9 uses cls_output.DETACH() for classifier!
-#                line 408: `logits = self.classifier(cls_output.detach()).squeeze(-1)`
-#              → CE gradient does NOT flow to encoder. Encoder trained ONLY via SupCon.
-#              → Classifier trained ONLY via CE on detached features.
-#              We implement this faithfully:
-#                Phase 1 per batch: SupCon(CLS) → encoder gradient only
-#                Phase 2 per batch: CE(classifier(CLS.detach())) → head gradient only
-#              This is equivalent to the notebook's cls_output.detach().
-#   SupConLoss formula (exact copy from notebook):
-#     mask = (labels_i == labels_j)
-#     logits = (features_norm @ features_norm.T) / temperature
-#     log_prob = logits - log(sum(exp(logits) * mask))
-#     loss = -mean(sum(log_prob * mask, dim=1) / (mask_sum + eps))
-#   Optimizer: AdamW with differential LR:
-#     encoder params: lr=1e-6
-#     classifier params: lr=1e-4
-#     weight_decay=1e-2
-#   Training epochs: 35 (original); we use RAS with fewer for few-shot
-#   Batch_size: 16
-# CHANGES vs original:
-#   - GraphCodeBERT → UniXcoder-base (protocol parity)
-#   - Binary (Human/AI) → K-class attribution
-#   - Loss: SupCon only → SupCon + CE (joint; necessary for K-class)
-#   - Data: GPTSniffer/Whodunit datasets → CoDET-M4 / AICD-T2
-#   - Epochs: 35 → RAS schedule
+# UPSTREAM: "LLMSniffer: GraphCodeBERT + Supervised Contrastive Learning"
+# FAITHFULNESS: SupConLoss(τ=0.07), MLP head with cls.detach(), differential LR
+#   encoder=1e-6, head=1e-4. cls_output.detach() faithful to notebook cell 9 line 408.
 # =============================================================================
 from __future__ import annotations
-import os, sys, time, json, random, subprocess, importlib.util
-from dataclasses import dataclass
-
-os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
-
+KAGGLE_MODELS="/kaggle/input/datasets/chiboiz/ai-detection-encoders/models"
+import os,sys,time,json,random,subprocess,importlib.util,warnings,glob,math
+from dataclasses import dataclass; from typing import Dict
+os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF","expandable_segments:True")
 def _ensure(p):
-    if importlib.util.find_spec(p.split(".")[0]) is None:
-        subprocess.check_call([sys.executable, "-m", "pip", "install", "-q", p])
-for _p in ("numpy", "torch", "datasets", "transformers", "scikit-learn", "tqdm"):
-    _ensure(_p)
-
-import numpy as np
-import torch, torch.nn as nn, torch.nn.functional as F
-from torch.utils.data import Dataset as TD, DataLoader
-from sklearn.metrics import f1_score
-
-KAGGLE_MODELS = "/kaggle/input/datasets/chiboiz/ai-detection-encoders/models"
-KAGGLE_CODET  = "/kaggle/input/datasets/chiboiz/codetm4/dataset_without_comments.parquet"
-KAGGLE_AICD   = "/kaggle/input/datasets/chiboiz/ai-code-detection/AICD-Bench"
-PAPER_F1      = 0.6633
-
-import logging
-logging.basicConfig(format="%(asctime)s %(levelname)s %(message)s",
-                    datefmt="%H:%M:%S", level=logging.INFO)
-logger = logging.getLogger("ext_llmsniffer")
+    if importlib.util.find_spec(p.split(".")[0]) is None: subprocess.check_call([sys.executable,"-m","pip","install","-q",p])
+_ensure("numpy");_ensure("torch");_ensure("datasets");_ensure("transformers");_ensure("scikit-learn");_ensure("tqdm")
+import numpy as np; import torch,torch.nn as nn,torch.nn.functional as F
+from datasets import load_dataset
+from sklearn.metrics import accuracy_score,f1_score,precision_score,recall_score,confusion_matrix
+from torch.utils.data import Dataset as TD,DataLoader
+from transformers import AutoTokenizer,get_linear_schedule_with_warmup
+from tqdm import tqdm; from torch.cuda.amp import GradScaler
+warnings.filterwarnings("ignore")
+import logging; logging.basicConfig(level=logging.INFO,format="%(asctime)s %(message)s",stream=sys.stdout)
+logger=logging.getLogger("ext_llmsniffer"); PAPER_BASELINE=0.6633
 
 @dataclass
 class Cfg:
-    benchmark: str  = "codet_m4"
-    task:      str  = "author_iid"
-    frac:      float = 0.20
-    n_cls:     int  = 6
-    seed:      int  = 42
-    seq:       int  = 512
-    bs:        int  = 16            # original bs=16 (notebook line ~301)
-    epochs:    int  = 10
-    lr_enc:    float = 1e-6         # original encoder lr=1e-6 (notebook)
-    lr_head:   float = 1e-4         # original classifier lr=1e-4
-    wd:        float = 1e-2         # original weight_decay=1e-2
-    temperature: float = 0.07       # original SupConLoss temperature
-    warmup:    float = 0.10
-    device:    str  = "cuda"
+    benchmark:str="codet_m4";task:str="author";enc:str="unixcoder-base"
+    frac:float=0.20;n_cls:int=6;seed:int=42;bs:int=16;seq:int=512;epochs:int=10
+    lr_enc:float=1e-6;lr_head:float=1e-4;wd:float=1e-2;temperature:float=0.07
+    warmup:float=0.10;device:str="cuda"
 
-    def __post_init__(self):
-        # RAS
-        if self.frac <= 0.02:
-            self.epochs, self.warmup = 15, 0.20
-        elif self.frac <= 0.10:
-            self.epochs, self.warmup = 10, 0.15
-        else:
-            self.epochs, self.warmup = 8, 0.10
-        try:
-            mem = torch.cuda.get_device_properties(0).total_memory / 1e9
-            if mem >= 40: self.bs = 64
-            elif mem >= 20: self.bs = 32
-            else: self.bs = 16
-        except: pass
+def adaptive_schedule(cfg):
+    f=cfg.frac
+    if f<=0.02:cfg.epochs,cfg.warmup=15,0.20
+    elif f<=0.10:cfg.epochs,cfg.warmup=10,0.15
+    else:cfg.epochs,cfg.warmup=8,0.10
+    return cfg
+def _hw(cfg):
+    if torch.cuda.is_available():
+        torch.backends.cuda.matmul.allow_tf32=True;torch.backends.cudnn.allow_tf32=True
+        mem=torch.cuda.get_device_properties(0).total_memory/1e9
+        if mem>=40:cfg.bs=64
+        elif mem>=20:cfg.bs=32
+        else:cfg.bs=16
+        logger.info(f"[hw] mem={mem:.1f}GB bs={cfg.bs}")
+    return cfg
+def set_seed(s):
+    random.seed(s);np.random.seed(s);torch.manual_seed(s)
+    if torch.cuda.is_available():torch.cuda.manual_seed_all(s)
 
-# ── Data loading ──────────────────────────────────────────────────────────────
-def _load_codet(cfg):
-    import pandas as pd
-    df = pd.read_parquet(KAGGLE_CODET)
-    label_col = "author_id" if cfg.task == "author_iid" else "author_ood_id"
-    df = df[df[label_col].notna()].copy()
-    df["label"] = df[label_col].astype(int)
-    cfg.n_cls = df["label"].nunique()
-    splits = {}
-    for sp in ("train","val","test"):
-        sub = df[df["split"]==sp].copy()
-        if sp == "train":
-            rng = random.Random(cfg.seed)
-            keep = []
-            for lbl in sub["label"].unique():
-                idx = sub[sub["label"]==lbl].index.tolist()
-                keep.extend(rng.sample(idx, max(1, int(len(idx)*cfg.frac))))
-            sub = sub.loc[keep]
-        splits[sp] = sub[["code","label"]].to_dict("records")
-    return splits
+KAGGLE_CODET="/kaggle/input/datasets/chiboiz/codetm4/dataset_without_comments.parquet"
+KAGGLE_AICD="/kaggle/input/datasets/chiboiz/ai-code-detection/AICD-Bench"
+def _is_human(t): return str(t or "").strip().lower() in {"human","human_written","human-generated"}
+def _vocab(train):
+    names={str(r.get("model","")or"").strip() for r in train if not _is_human(r.get("target","")) and r.get("model","")}
+    return {n:i+1 for i,n in enumerate(sorted(names))}
+def _conv_codet(split,task,vocab):
+    def row(r):
+        code=""
+        for f in ("cleaned_code","code"):
+            v=r.get(f,"");
+            if isinstance(v,str) and v.strip():code=v;break
+        label=0 if _is_human(r.get("target","")) else vocab.get(str(r.get("model","")or"").strip(),-1)
+        return {"code":code,"label":label,"language":str(r.get("language","")).strip().lower(),"source":""}
+    return split.map(row,remove_columns=split.column_names).filter(lambda x:x["label"]>=0 and len(x["code"].strip())>0)
+def _conv_aicd(split):
+    def row(r): return {"code":str(r.get("code","")).strip(),"label":int(r.get("label",-1)),"language":"","source":""}
+    return split.map(row,remove_columns=split.column_names).filter(lambda x:x["label"]>=0 and len(x["code"].strip())>0)
+def _load_codet():
+    ds=load_dataset("parquet",data_files=KAGGLE_CODET,split="train")
+    if "split" in ds.column_names:
+        return (ds.filter(lambda x:str(x.get("split","")).lower()=="train"),ds.filter(lambda x:str(x.get("split","")).lower() in {"val","validation","dev"}),ds.filter(lambda x:str(x.get("split","")).lower()=="test"))
+    s=ds.train_test_split(test_size=0.1,seed=42);s2=s["train"].train_test_split(test_size=1/9,seed=42);return s2["train"],s2["test"],s["test"]
+def _load_aicd(task):
+    tn={"t1":"T1","t2":"T2","t3":"T3"}.get(task.lower());tp=os.path.join(KAGGLE_AICD,tn)
+    pf=sorted(glob.glob(os.path.join(tp,"**","*.parquet"),recursive=True))
+    ds=load_dataset("parquet",data_files=pf,split="train")
+    if "split" in ds.column_names:
+        tr=ds.filter(lambda x:str(x.get("split","")).lower()=="train");vl=ds.filter(lambda x:str(x.get("split","")).lower() in {"val","validation","dev"});ts=ds.filter(lambda x:str(x.get("split","")).lower()=="test")
+        if len(tr)>0 and len(vl)>0 and len(ts)>0:return tr,vl,ts
+    s=ds.train_test_split(test_size=0.1,seed=42);s2=s["train"].train_test_split(test_size=1/9,seed=42);return s2["train"],s2["test"],s["test"]
 
-def _load_aicd(cfg):
-    from datasets import load_from_disk
-    ds = load_from_disk(os.path.join(KAGGLE_AICD, "T2"))
-    splits = {}
-    for sp, key in [("train","train"),("val","validation"),("test","test")]:
-        data = [{"code": r["code"], "label": int(r["label"])} for r in ds[key]]
-        if sp == "train":
-            rng = random.Random(cfg.seed)
-            by_cls = {}
-            for d in data:
-                by_cls.setdefault(d["label"],[]).append(d)
-            keep = []
-            for lst in by_cls.values():
-                keep.extend(rng.sample(lst, max(1, int(len(lst)*cfg.frac))))
-            data = keep
-        splits[sp] = data
-    cfg.n_cls = len({d["label"] for d in splits["train"]})
-    return splits
+def _tokenize(code,tokenizer,max_len):
+    toks=tokenizer.tokenize(" ".join(code.split()))[:max_len-4]
+    toks=[tokenizer.cls_token,"<encoder_only>",tokenizer.sep_token]+toks+[tokenizer.sep_token]
+    ids=tokenizer.convert_tokens_to_ids(toks);ids+=[tokenizer.pad_token_id]*(max_len-len(ids));return ids[:max_len]
+class FSDS(TD):
+    def __init__(self,data,tok,seq_len,frac=1.0,seed=42):
+        self.data=data;self.tok=tok;self.seq_len=seq_len
+        if frac<1.0:
+            rng=random.Random(seed);labels=list(range(max(self.data["label"])+1));keep=[]
+            for lbl in labels:
+                idx=[i for i,x in enumerate(self.data["label"]) if x==lbl]
+                keep.extend(rng.sample(idx,min(max(1,int(len(idx)*frac)),len(idx))))
+            self.data=self.data.select(keep);logger.info(f"[FSDS] Sampled {len(self.data)} ({frac*100:.0f}%)")
+    def __len__(self):return len(self.data)
+    def __getitem__(self,i):
+        r=self.data[i];ids=_tokenize(r["code"][:5000],self.tok,self.seq_len)
+        return {"input_ids":torch.tensor(ids,dtype=torch.long),"label":r["label"]}
 
-def load_data(cfg):
-    return _load_codet(cfg) if cfg.benchmark == "codet_m4" else _load_aicd(cfg)
-
-# ── Tokenisation ──────────────────────────────────────────────────────────────
-def _tokenize(code, tokenizer, max_len):
-    toks = tokenizer.tokenize(" ".join(code.split()))[:max_len-4]
-    toks = [tokenizer.cls_token, "<encoder_only>", tokenizer.sep_token] + toks + [tokenizer.sep_token]
-    ids  = tokenizer.convert_tokens_to_ids(toks)
-    ids += [tokenizer.pad_token_id] * (max_len - len(ids))
-    return ids[:max_len]
-
-class CodeDataset(TD):
-    def __init__(self, recs, tok, seq):
-        self.recs, self.tok, self.seq = recs, tok, seq
-    def __len__(self): return len(self.recs)
-    def __getitem__(self, i):
-        r = self.recs[i]
-        ids = _tokenize(r["code"], self.tok, self.seq)
-        return torch.tensor(ids, dtype=torch.long), torch.tensor(r["label"], dtype=torch.long)
-
-# ── SupConLoss (exact copy from cpsniffer.ipynb lines 335-363) ───────────────
+# SupConLoss exact copy from cpsniffer.ipynb
 class SupConLoss(nn.Module):
-    """
-    Faithful copy from LLMSniffer cpsniffer.ipynb:
-      mask = (labels_i == labels_j)  [binary label mask — NxN]
-      features_normalized = features / features.norm(dim=1, keepdim=True)
-      logits = (features_norm @ features_norm.T) / temperature
-      logits -= max(logits, dim=1).values.detach()   [numerical stability]
-      exp_logits = exp(logits) * mask
-      log_prob = logits - log(exp_logits.sum(dim=1) + 1e-12)
-      loss = -mean( sum(log_prob * mask, dim=1) / (mask_sum + 1e-12) )
-    """
-    def __init__(self, temperature=0.07):
-        super().__init__()
-        self.temperature = temperature
-
-    def forward(self, features, labels):
-        batch_size = features.size(0)
-        mask = torch.eq(labels.unsqueeze(1), labels.unsqueeze(0)).float()
-        features_normalized = F.normalize(features, dim=1)
-        logits = (features_normalized @ features_normalized.T) / self.temperature
-        logits_max = torch.max(logits, dim=1, keepdim=True).values
-        logits = logits - logits_max.detach()
-        exp_logits = torch.exp(logits) * mask
-        log_prob = logits - torch.log(exp_logits.sum(dim=1, keepdim=True) + 1e-12)
-        mask_sum = mask.sum(dim=1)
-        mean_log_prob_pos = (log_prob * mask).sum(dim=1) / (mask_sum + 1e-12)
+    def __init__(self,temperature=0.07): super().__init__();self.temperature=temperature
+    def forward(self,features,labels):
+        mask=torch.eq(labels.unsqueeze(1),labels.unsqueeze(0)).float()
+        features_normalized=F.normalize(features,dim=1)
+        logits=(features_normalized@features_normalized.T)/self.temperature
+        logits_max=torch.max(logits,dim=1,keepdim=True).values
+        logits=logits-logits_max.detach()
+        exp_logits=torch.exp(logits)*mask
+        log_prob=logits-torch.log(exp_logits.sum(dim=1,keepdim=True)+1e-12)
+        mask_sum=mask.sum(dim=1)
+        mean_log_prob_pos=(log_prob*mask).sum(dim=1)/(mask_sum+1e-12)
         return -mean_log_prob_pos.mean()
 
-# ── Model: CodeBERTBinaryClassifier → K-class (faithful adaptation) ──────────
 class LLMSnifferK(nn.Module):
-    """
-    Faithful to cpsniffer.ipynb CodeBERTBinaryClassifier:
-      encoder → CLS token → Dropout(0.3) → Linear(H,128) → BN → ReLU
-              → Dropout(0.3) → Linear(128, K)  [binary→K-class]
-    Training (FAITHFUL to notebook cell 9, line 408):
-      cls_output = encoder(...).last_hidden_state[:, 0, :]   # raw CLS
-      logits = classifier(cls_output.detach())               # DETACH → CE only trains head
-      loss_supcon = SupCon(cls_output)                       # SupCon trains encoder only
-      → Encoder trained ONLY via SupConLoss.
-      → Classifier trained ONLY via CE on detached CLS.
-    """
-    def __init__(self, encoder, hidden, n_cls, pad_id):
-        super().__init__()
-        self.encoder = encoder
-        self.pad_id  = pad_id
-        # Faithful classifier head (notebook cell 9)
-        self.classifier = nn.Sequential(
-            nn.Dropout(0.3),
-            nn.Linear(hidden, 128),
-            nn.BatchNorm1d(128),
-            nn.ReLU(),
-            nn.Dropout(0.3),
-            nn.Linear(128, n_cls),   # K-class (binary→K)
-        )
+    """Faithful: cls.detach() for classifier (notebook line 408)."""
+    def __init__(self,encoder,hidden,n_cls,pad_id):
+        super().__init__();self.encoder=encoder;self.pad_id=pad_id
+        self.classifier=nn.Sequential(nn.Dropout(0.3),nn.Linear(hidden,128),nn.BatchNorm1d(128),nn.ReLU(),nn.Dropout(0.3),nn.Linear(128,n_cls))
+    def _cls(self,input_ids):
+        mask=input_ids.ne(self.pad_id)
+        out=self.encoder(input_ids,attention_mask=mask,output_hidden_states=True)
+        return out[0][:,0,:]
+    def forward(self,input_ids):
+        cls=self._cls(input_ids)
+        cls_detached=cls.detach()  # FAITHFUL: notebook line 408
+        logits=self.classifier(cls_detached)
+        return logits,cls
 
-    def _cls(self, input_ids):
-        mask = input_ids.ne(self.pad_id)
-        out  = self.encoder(input_ids, attention_mask=mask, output_hidden_states=True)
-        return out[0][:, 0, :]   # [CLS] token (notebook line 407)
+@torch.no_grad()
+def eval_pack(model,loader,cfg):
+    model.eval();preds,labels=[],[]
+    for b in tqdm(loader,desc="Eval"):
+        ids=b["input_ids"].to(cfg.device);logits,_=model(ids)
+        preds.extend(logits.argmax(-1).cpu().tolist())
+        labs=b["label"];labels.extend(labs.tolist() if torch.is_tensor(labs) else list(labs))
+    preds=np.array(preds);labels=np.array(labels);n_cls=cfg.n_cls
+    overall={"accuracy":float(accuracy_score(labels,preds)),"macro_f1":float(f1_score(labels,preds,average="macro",zero_division=0)),
+             "weighted_f1":float(f1_score(labels,preds,average="weighted",zero_division=0)),
+             "macro_precision":float(precision_score(labels,preds,average="macro",zero_division=0)),
+             "macro_recall":float(recall_score(labels,preds,average="macro",zero_division=0))}
+    cm=confusion_matrix(labels,preds,labels=list(range(n_cls)))
+    return {"overall":overall,"confusion_matrix":cm.tolist(),"n_samples":int(len(labels))}
 
-    def forward(self, input_ids):
-        cls = self._cls(input_ids)             # raw CLS — gradient alive for SupCon
-        cls_detached = cls.detach()            # DETACH → faithful to notebook line 408
-        logits = self.classifier(cls_detached) # CE only trains classifier, NOT encoder
-        return logits, cls   # logits (detached) + cls (for SupCon loss on encoder)
-
-# ── Evaluate ──────────────────────────────────────────────────────────────────
-def evaluate(model, loader, device):
-    model.eval()
-    preds, labs = [], []
-    with torch.no_grad():
-        for ids, y in loader:
-            ids, y = ids.to(device), y.to(device)
-            logits, _ = model(ids)
-            preds.extend(logits.argmax(-1).cpu().tolist())
-            labs.extend(y.cpu().tolist())
-    return f1_score(labs, preds, average="macro", zero_division=0)
-
-# ── Train ─────────────────────────────────────────────────────────────────────
-def train_one(cfg, splits):
-    from transformers import RobertaConfig, RobertaModel, RobertaTokenizer, \
-                              get_linear_schedule_with_warmup
-    from torch.cuda.amp import GradScaler, autocast
-
-    model_path = os.path.join(KAGGLE_MODELS, "unixcoder-base")
-    tokenizer  = RobertaTokenizer.from_pretrained(model_path, local_files_only=True)
-    config     = RobertaConfig.from_pretrained(model_path, local_files_only=True)
-    encoder    = RobertaModel.from_pretrained(model_path, local_files_only=True)
-    pad_id     = tokenizer.pad_token_id
-
-    model = LLMSnifferK(encoder, config.hidden_size, cfg.n_cls, pad_id).to(cfg.device)
-    supcon = SupConLoss(temperature=cfg.temperature).to(cfg.device)
-
-    tr_ds = CodeDataset(splits["train"], tokenizer, cfg.seq)
-    vl_ds = CodeDataset(splits["val"],   tokenizer, cfg.seq)
-    ts_ds = CodeDataset(splits["test"],  tokenizer, cfg.seq)
-    tr_dl = DataLoader(tr_ds, batch_size=cfg.bs,    shuffle=True,  num_workers=2, pin_memory=True)
-    vl_dl = DataLoader(vl_ds, batch_size=cfg.bs*2,  shuffle=False, num_workers=2)
-    ts_dl = DataLoader(ts_ds, batch_size=cfg.bs*2,  shuffle=False, num_workers=2)
-
-    # Differential LR: encoder=1e-6, classifier=1e-4 (notebook cell 10)
-    optimizer = torch.optim.AdamW([
-        {"params": model.encoder.parameters(),    "lr": cfg.lr_enc},
-        {"params": model.classifier.parameters(), "lr": cfg.lr_head},
-    ], weight_decay=cfg.wd)
-    total_steps  = cfg.epochs * len(tr_dl)
-    warmup_steps = int(total_steps * cfg.warmup)
-    scheduler    = get_linear_schedule_with_warmup(optimizer, warmup_steps, total_steps)
-    scaler       = GradScaler()
-
-    best_val, best_test = 0.0, 0.0
-    t0 = time.time()
+def run_exp(cfg,tag):
+    set_seed(cfg.seed);cfg=_hw(cfg);cfg=adaptive_schedule(cfg)
+    if cfg.benchmark=="codet_m4":
+        tr_raw,vl_raw,ts_raw=_load_codet();vocab=_vocab(tr_raw)
+        tr_data=_conv_codet(tr_raw,"author",vocab);vl_data=_conv_codet(vl_raw,"author",vocab);ts_data=_conv_codet(ts_raw,"author",vocab)
+    else:
+        tr_raw,vl_raw,ts_raw=_load_aicd("t2");tr_data=_conv_aicd(tr_raw);vl_data=_conv_aicd(vl_raw);ts_data=_conv_aicd(ts_raw)
+    cfg.n_cls=max(tr_data["label"])+1
+    tok=AutoTokenizer.from_pretrained(os.path.join(KAGGLE_MODELS,cfg.enc),local_files_only=True);pad_id=tok.pad_token_id
+    tr_ds=FSDS(tr_data,tok,cfg.seq,frac=cfg.frac,seed=cfg.seed);vl_ds=FSDS(vl_data,tok,cfg.seq);ts_ds=FSDS(ts_data,tok,cfg.seq)
+    lc=dict(batch_size=cfg.bs,num_workers=4,pin_memory=True)
+    tr_dl=DataLoader(tr_ds,shuffle=True,**lc);vl_dl=DataLoader(vl_ds,shuffle=False,**lc);ts_dl=DataLoader(ts_ds,shuffle=False,**lc)
+    from transformers import RobertaConfig,RobertaModel
+    config=RobertaConfig.from_pretrained(os.path.join(KAGGLE_MODELS,cfg.enc),local_files_only=True)
+    encoder=RobertaModel.from_pretrained(os.path.join(KAGGLE_MODELS,cfg.enc),local_files_only=True)
+    model=LLMSnifferK(encoder,config.hidden_size,cfg.n_cls,pad_id).to(cfg.device)
+    supcon=SupConLoss(temperature=cfg.temperature).to(cfg.device)
+    # Differential LR faithful to notebook
+    opt=torch.optim.AdamW([{"params":model.encoder.parameters(),"lr":cfg.lr_enc},{"params":model.classifier.parameters(),"lr":cfg.lr_head}],weight_decay=cfg.wd)
+    total_steps=max(1,len(tr_ds)//cfg.bs)*cfg.epochs
+    sch=get_linear_schedule_with_warmup(opt,int(total_steps*cfg.warmup),total_steps);scaler=GradScaler()
+    logger.info(f"[sched] frac={cfg.frac} ep={cfg.epochs} lr_enc={cfg.lr_enc} lr_head={cfg.lr_head} n_cls={cfg.n_cls} train={len(tr_ds)}")
+    best_val,best_state,val_hist=0.0,None,[]
     for ep in range(cfg.epochs):
-        model.train()
-        for ids, labs in tr_dl:
-            ids, labs = ids.to(cfg.device), labs.to(cfg.device)
-            optimizer.zero_grad()
-            with autocast(dtype=torch.bfloat16):
-                logits, cls = model(ids)
-                # FAITHFUL: cls is detached inside model.forward() for logits
-                # CE gradient → classifier head ONLY (encoder frozen from CE)
-                loss_ce  = F.cross_entropy(logits, labs)
-                # SupCon gradient → encoder ONLY (cls is NOT detached here)
-                loss_scl = supcon(cls, labs)
-                # Two separate gradient paths (faithful to notebook detach trick)
-                loss     = loss_ce + loss_scl
-            scaler.scale(loss).backward()
-            scaler.unscale_(optimizer)
-            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
-            scaler.step(optimizer); scaler.update(); scheduler.step()
-
-        val_f1 = evaluate(model, vl_dl, cfg.device)
-        if val_f1 >= best_val:
-            best_val  = val_f1
-            best_test = evaluate(model, ts_dl, cfg.device)
-        logger.info(f"[ep{ep+1}] val={val_f1:.4f} best_test={best_test:.4f}")
-
-    return {
-        "tag":          f"ext_llmsniffer_unixcoder-base_{cfg.benchmark}_f{cfg.frac}",
-        "method":       "LLMSniffer-K",
-        "upstream":     "arXiv 2024 (Dihan & Muhtasim)",
-        "note":         ("GraphCodeBERT+SupCon+MLP head. SupConLoss(τ=0.07) trains encoder; "
-                         "CE trains classifier via detached CLS (faithful to notebook cls_output.detach()). "
-                         "Encoder lr=1e-6, head lr=1e-4 (differential, faithful to paper)."),
-        "enc":          "unixcoder-base",
-        "bench":        cfg.benchmark,
-        "frac":         cfg.frac,
-        "epochs":       cfg.epochs,
-        "lr_enc":       cfg.lr_enc,
-        "lr_head":      cfg.lr_head,
-        "temperature":  cfg.temperature,
-        "val_macro":    best_val,
-        "macro":        best_test,
-        "val_test_gap": best_val - best_test,
-        "dpaper":       best_test - PAPER_F1,
-        "wall":         round(time.time() - t0, 1),
-    }
+        model.train();tot=0.0
+        for b in tqdm(tr_dl,desc=f"Train ep{ep+1}"):
+            ids=b["input_ids"].to(cfg.device);labs=b["label"]
+            if not torch.is_tensor(labs):labs=torch.tensor(labs,dtype=torch.long)
+            labs=labs.to(cfg.device);opt.zero_grad()
+            with torch.autocast(device_type="cuda",dtype=torch.bfloat16,enabled=(cfg.device=="cuda")):
+                logits,cls=model(ids)
+                loss_ce=F.cross_entropy(logits,labs)  # CE→head only (cls detached)
+                loss_scl=supcon(cls,labs)               # SupCon→encoder only
+                loss=loss_ce+loss_scl
+            scaler.scale(loss).backward();scaler.unscale_(opt);torch.nn.utils.clip_grad_norm_(model.parameters(),1.0)
+            scaler.step(opt);scaler.update();sch.step();tot+=loss.item()
+        val_met=eval_pack(model,vl_dl,cfg);v=val_met["overall"]["macro_f1"];val_hist.append(v)
+        logger.info(f"[epoch {ep+1}] loss={tot/max(1,len(tr_dl)):.4f} val={v:.4f}")
+        if v>best_val:best_val=v;best_state={k:v_.cpu().clone() for k,v_ in model.state_dict().items()}
+    model.load_state_dict(best_state)
+    ts_met=eval_pack(model,ts_dl,cfg);test_macro=ts_met["overall"]["macro_f1"];gap=best_val-test_macro
+    logger.info(f"[final] val={best_val:.4f} test={test_macro:.4f} gap={gap:+.4f}")
+    return {"tag":tag,"method":"LLMSniffer-K","upstream":"arXiv 2024","note":"SupCon(τ=0.07)+CE(detach). Encoder lr=1e-6, head lr=1e-4.",
+            "enc":cfg.enc,"bench":cfg.benchmark,"frac":cfg.frac,"epochs":cfg.epochs,"lr_enc":cfg.lr_enc,"lr_head":cfg.lr_head,"temperature":cfg.temperature,
+            "val_macro":best_val,"macro":test_macro,"weighted":ts_met["overall"]["weighted_f1"],"acc":ts_met["overall"]["accuracy"],
+            "val_test_gap":gap,"dpaper":test_macro-PAPER_BASELINE,"test_metrics":ts_met,"val_history":val_hist,"timestamp":time.strftime("%Y-%m-%d %H:%M:%S")}
 
 def main():
-    results = []
-    for bench, task, n_cls in [
-        ("codet_m4", "author_iid", 6),
-        ("aicd_t2",  "model_family", 12),
-    ]:
-        for frac in [0.01, 0.05, 0.20]:
-            cfg = Cfg(benchmark=bench, task=task, frac=frac, n_cls=n_cls)
-            splits = load_data(cfg)
-            logger.info(f"\n{'='*60}\n{bench} frac={frac} n_cls={cfg.n_cls} "
-                        f"train={len(splits['train'])}\n{'='*60}")
-            rec = train_one(cfg, splits)
-            results.append(rec)
-            logger.info(f"  val={rec['val_macro']:.4f}  test={rec['macro']:.4f}  "
-                        f"gap={rec['val_test_gap']:+.4f}  Δpaper={rec['dpaper']:+.4f}")
+    results=[]
+    for bench,task,n_cls in [("codet_m4","author",6),("aicd_t2","t2",12)]:
+        for frac in [0.01,0.05,0.20]:
+            cfg=Cfg(benchmark=bench,task=task,frac=frac,n_cls=n_cls);tag=f"ext_llmsniffer_{cfg.enc}_{bench}_f{frac}"
+            logger.info(f"=== {tag} ===");t0=time.time()
+            try:
+                res=run_exp(cfg,tag);res["wall"]=round(time.time()-t0,1);results.append(res)
+                logger.info(f"[{tag}] test={res['macro']:.4f} gap={res['val_test_gap']:+.4f} time={res['wall']:.0f}s")
+            except Exception as e:logger.error(f"[{tag}] FAILED: {e}");import traceback;traceback.print_exc()
+            import gc;gc.collect()
+            if torch.cuda.is_available():torch.cuda.empty_cache()
+    try:_here=os.path.dirname(os.path.realpath(__file__))
+    except NameError:_here=os.getcwd()
+    out_dir=os.path.join(_here,"results");os.makedirs(out_dir,exist_ok=True)
+    with open(os.path.join(out_dir,"ext_llmsniffer_results.json"),"w") as f:json.dump(results,f,indent=2)
+    print("\n"+"="*100)
+    for r in results:print(f"{r['enc']:<22} {r['bench']:<12} {r['frac']:>6.0%} {r['val_macro']:>8.4f} {r['macro']:>8.4f} {r['val_test_gap']:>+8.4f} {r['dpaper']:>+9.4f}")
+    print("="*100)
 
-    out_path = "results/ext_llmsniffer_results.json"
-    os.makedirs("results", exist_ok=True)
-    with open(out_path, "w") as f:
-        json.dump(results, f, indent=2)
-    logger.info(f"Saved → {out_path}")
-    print(f"\n{'Bench':<12} {'Frac':>6} {'Val':>8} {'Test':>8} {'Gap':>8} {'dPaper':>9}")
-    for r in results:
-        print(f"{r['bench']:<12} {r['frac']:>6.0%} {r['val_macro']:>8.4f} "
-              f"{r['macro']:>8.4f} {r['val_test_gap']:>+8.4f} {r['dpaper']:>+9.4f}")
-
-if __name__ == "__main__":
-    main()
+if __name__=="__main__":main()

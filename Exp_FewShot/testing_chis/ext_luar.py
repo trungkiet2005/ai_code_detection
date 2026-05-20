@@ -1,343 +1,209 @@
-# ext_luar — Faithful reproduction of LUAR few-shot style detection (ICLR 2024)
+# ext_luar — Faithful reproduction of LUAR (ICLR 2024)
 # =============================================================================
-# NAME       : LUAR-K  (K-class style-embedding + cosine-NN few-shot)
-# UPSTREAM   : Rivera Soto et al., "Few-Shot Detection of Machine-Generated Text
-#              using Style Representations", ICLR 2024
-#              https://github.com/LLNL/LUAR/tree/main/fewshot_iclr2024
-# FAITHFULNESS:
-#   Inference paradigm (evaluate.py PURE_EMBEDDING_METHODS branch):
-#     1. Extract style embeddings for SUPPORT set S (N shots per class)
-#        using LUAR RoBERTa encoder → mean-pool episodes
-#     2. Compute per-class prototype: mean of support embeddings
-#        (fewshot_helper.py calculate_nn_metrics → prototype centroid)
-#     3. Classify each QUERY by cosine similarity to closest prototype
-#        (1-NN over class prototypes)
-#     4. Report pAUC (partial AUC). We adapt to macro-F1 for parity with
-#        our other experiments.
-#   NO TRAINING in few-shot mode. The encoder is used frozen.
-#   Metric: cosine similarity (NOT euclidean, NOT dot product)
-#
-#   ADAPTATION notes for code/K-class setting:
-#   - Original: binary human-vs-machine, pAUC metric, text from Reddit/arXiv
-#   - Ours: K-class author attribution, macro-F1 metric, code from CoDET-M4/AICD-T2
-#   - Encoder: LUAR uses reddit-trained RoBERTa (CRUD checkpoint from GDrive).
-#     We use UniXcoder-base (same as all our experiments) as the style encoder.
-#     NOTE: UniXcoder is NOT style-trained; this is a significant deviation.
-#     We denote this as "LUAR-protocol" (nearest-centroid on frozen encoder).
-#     A second variant uses N-shot fine-tuning (adapts encoder to few-shot support).
-#   - "Few-shot fraction" mapping to LUAR's N-shot:
-#       frac=0.01 → ~N_support = small (exact N depends on class size)
-#       frac=0.05, 0.20 → larger N
-#     We use stratified sampling identical to our other baselines.
-#
-#   Two modes implemented:
-#   [A] LUAR-NN:   frozen encoder + prototype cosine NN (faithful to paper)
-#   [B] LUAR-FT:   like LUAR-NN but with N-shot fine-tuning on support (ablation)
-#
-# WHAT CHANGES vs original:
-#   - Encoder: LUAR CRUD → UniXcoder-base (no LUAR weights on Kaggle)
-#   - Task: binary pAUC → K-class macro-F1
-#   - Dataset: M4 text → CoDET-M4 / AICD-T2 code
-#   - Metric: pAUC → macro-F1 (note in JSON)
+# UPSTREAM : "LUAR: Linguistic Unified Authorship Representation"
+# FAITHFULNESS: Mode A=frozen prototype cosine-NN, Mode B=N-shot FT (5ep, lr=2e-5)
 # =============================================================================
 from __future__ import annotations
-import os, sys, time, json, random, subprocess, importlib.util
-from dataclasses import dataclass, field
-from typing import List
-
-os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
-
+KAGGLE_MODELS="/kaggle/input/datasets/chiboiz/ai-detection-encoders/models"
+import os,sys,time,json,random,subprocess,importlib.util,warnings,glob,math,copy
+from dataclasses import dataclass; from typing import Dict
+os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF","expandable_segments:True")
 def _ensure(p):
-    if importlib.util.find_spec(p.split(".")[0]) is None:
-        subprocess.check_call([sys.executable, "-m", "pip", "install", "-q", p])
-for _p in ("numpy", "torch", "datasets", "transformers", "scikit-learn", "tqdm"):
-    _ensure(_p)
-
-import numpy as np
-import torch, torch.nn.functional as F
-from torch.utils.data import Dataset as TD, DataLoader
-from sklearn.metrics import f1_score
-
-KAGGLE_MODELS = "/kaggle/input/datasets/chiboiz/ai-detection-encoders/models"
-KAGGLE_CODET  = "/kaggle/input/datasets/chiboiz/codetm4/dataset_without_comments.parquet"
-KAGGLE_AICD   = "/kaggle/input/datasets/chiboiz/ai-code-detection/AICD-Bench"
-PAPER_F1      = 0.6633
-
-import logging
-logging.basicConfig(format="%(asctime)s %(levelname)s %(message)s",
-                    datefmt="%H:%M:%S", level=logging.INFO)
-logger = logging.getLogger("ext_luar")
+    if importlib.util.find_spec(p.split(".")[0]) is None: subprocess.check_call([sys.executable,"-m","pip","install","-q",p])
+_ensure("numpy");_ensure("torch");_ensure("datasets");_ensure("transformers");_ensure("scikit-learn");_ensure("tqdm")
+import numpy as np; import torch,torch.nn as nn,torch.nn.functional as F
+from datasets import load_dataset
+from sklearn.metrics import accuracy_score,f1_score,precision_score,recall_score,confusion_matrix
+from torch.utils.data import Dataset as TD,DataLoader
+from transformers import AutoTokenizer
+from tqdm import tqdm
+warnings.filterwarnings("ignore")
+import logging; logging.basicConfig(level=logging.INFO,format="%(asctime)s %(message)s",stream=sys.stdout)
+logger=logging.getLogger("ext_luar"); PAPER_BASELINE=0.6633
 
 @dataclass
 class Cfg:
-    benchmark: str  = "codet_m4"
-    task:      str  = "author_iid"
-    frac:      float = 0.20
-    n_cls:     int  = 6
-    seed:      int  = 42
-    seq:       int  = 512
-    bs:        int  = 64       # for embedding extraction
-    # LUAR few-shot adaptation (mode B only)
-    ft_epochs: int  = 5        # --num_few_shot_epochs default
-    ft_lr:     float = 2e-5    # --adaptation_lr default
-    device:    str  = "cuda"
+    benchmark:str="codet_m4";task:str="author";enc:str="unixcoder-base"
+    frac:float=0.20;n_cls:int=6;seed:int=42;bs:int=64;seq:int=512
+    ft_epochs:int=5;ft_lr:float=2e-5  # faithful: adaptation_lr=2e-5, num_few_shot_epochs=5
+    device:str="cuda"
 
-# ── Data loading ──────────────────────────────────────────────────────────────
-def _load_codet(cfg):
-    import pandas as pd
-    df = pd.read_parquet(KAGGLE_CODET)
-    label_col = "author_id" if cfg.task == "author_iid" else "author_ood_id"
-    df = df[df[label_col].notna()].copy()
-    df["label"] = df[label_col].astype(int)
-    cfg.n_cls = df["label"].nunique()
-    splits = {}
-    for sp in ("train","val","test"):
-        sub = df[df["split"]==sp].copy()
-        if sp == "train":
-            rng = random.Random(cfg.seed)
-            keep = []
-            for lbl in sub["label"].unique():
-                idx = sub[sub["label"]==lbl].index.tolist()
-                keep.extend(rng.sample(idx, max(1, int(len(idx)*cfg.frac))))
-            sub = sub.loc[keep]
-        splits[sp] = sub[["code","label"]].to_dict("records")
-    return splits
+def _hw(cfg):
+    if torch.cuda.is_available():
+        torch.backends.cuda.matmul.allow_tf32=True;torch.backends.cudnn.allow_tf32=True
+        mem=torch.cuda.get_device_properties(0).total_memory/1e9
+        if mem>=40:cfg.bs=128
+        elif mem>=20:cfg.bs=64
+        else:cfg.bs=32
+        logger.info(f"[hw] mem={mem:.1f}GB bs={cfg.bs}")
+    return cfg
+def set_seed(s):
+    random.seed(s);np.random.seed(s);torch.manual_seed(s)
+    if torch.cuda.is_available():torch.cuda.manual_seed_all(s)
 
-def _load_aicd(cfg):
-    from datasets import load_from_disk
-    ds = load_from_disk(os.path.join(KAGGLE_AICD, "T2"))
-    splits = {}
-    for sp, key in [("train","train"),("val","validation"),("test","test")]:
-        data = [{"code": r["code"], "label": int(r["label"])} for r in ds[key]]
-        if sp == "train":
-            rng = random.Random(cfg.seed)
-            by_cls = {}
-            for d in data:
-                by_cls.setdefault(d["label"],[]).append(d)
-            keep = []
-            for lst in by_cls.values():
-                keep.extend(rng.sample(lst, max(1, int(len(lst)*cfg.frac))))
-            data = keep
-        splits[sp] = data
-    cfg.n_cls = len({d["label"] for d in splits["train"]})
-    return splits
+KAGGLE_CODET="/kaggle/input/datasets/chiboiz/codetm4/dataset_without_comments.parquet"
+KAGGLE_AICD="/kaggle/input/datasets/chiboiz/ai-code-detection/AICD-Bench"
+def _is_human(t): return str(t or "").strip().lower() in {"human","human_written","human-generated"}
+def _vocab(train):
+    names={str(r.get("model","")or"").strip() for r in train if not _is_human(r.get("target","")) and r.get("model","")}
+    return {n:i+1 for i,n in enumerate(sorted(names))}
+def _conv_codet(split,task,vocab):
+    def row(r):
+        code=""
+        for f in ("cleaned_code","code"):
+            v=r.get(f,"");
+            if isinstance(v,str) and v.strip():code=v;break
+        label=0 if _is_human(r.get("target","")) else vocab.get(str(r.get("model","")or"").strip(),-1)
+        return {"code":code,"label":label,"language":str(r.get("language","")).strip().lower(),"source":""}
+    return split.map(row,remove_columns=split.column_names).filter(lambda x:x["label"]>=0 and len(x["code"].strip())>0)
+def _conv_aicd(split):
+    def row(r): return {"code":str(r.get("code","")).strip(),"label":int(r.get("label",-1)),"language":"","source":""}
+    return split.map(row,remove_columns=split.column_names).filter(lambda x:x["label"]>=0 and len(x["code"].strip())>0)
+def _load_codet():
+    ds=load_dataset("parquet",data_files=KAGGLE_CODET,split="train")
+    if "split" in ds.column_names:
+        return (ds.filter(lambda x:str(x.get("split","")).lower()=="train"),ds.filter(lambda x:str(x.get("split","")).lower() in {"val","validation","dev"}),ds.filter(lambda x:str(x.get("split","")).lower()=="test"))
+    s=ds.train_test_split(test_size=0.1,seed=42);s2=s["train"].train_test_split(test_size=1/9,seed=42);return s2["train"],s2["test"],s["test"]
+def _load_aicd(task):
+    tn={"t1":"T1","t2":"T2","t3":"T3"}.get(task.lower());tp=os.path.join(KAGGLE_AICD,tn)
+    pf=sorted(glob.glob(os.path.join(tp,"**","*.parquet"),recursive=True))
+    ds=load_dataset("parquet",data_files=pf,split="train")
+    if "split" in ds.column_names:
+        tr=ds.filter(lambda x:str(x.get("split","")).lower()=="train");vl=ds.filter(lambda x:str(x.get("split","")).lower() in {"val","validation","dev"});ts=ds.filter(lambda x:str(x.get("split","")).lower()=="test")
+        if len(tr)>0 and len(vl)>0 and len(ts)>0:return tr,vl,ts
+    s=ds.train_test_split(test_size=0.1,seed=42);s2=s["train"].train_test_split(test_size=1/9,seed=42);return s2["train"],s2["test"],s["test"]
 
-def load_data(cfg):
-    return _load_codet(cfg) if cfg.benchmark == "codet_m4" else _load_aicd(cfg)
+def _tokenize(code,tokenizer,max_len):
+    toks=tokenizer.tokenize(" ".join(code.split()))[:max_len-4]
+    toks=[tokenizer.cls_token,"<encoder_only>",tokenizer.sep_token]+toks+[tokenizer.sep_token]
+    ids=tokenizer.convert_tokens_to_ids(toks);ids+=[tokenizer.pad_token_id]*(max_len-len(ids));return ids[:max_len]
+class FSDS(TD):
+    def __init__(self,data,tok,seq_len,frac=1.0,seed=42):
+        self.data=data;self.tok=tok;self.seq_len=seq_len
+        if frac<1.0:
+            rng=random.Random(seed);labels=list(range(max(self.data["label"])+1));keep=[]
+            for lbl in labels:
+                idx=[i for i,x in enumerate(self.data["label"]) if x==lbl]
+                keep.extend(rng.sample(idx,min(max(1,int(len(idx)*frac)),len(idx))))
+            self.data=self.data.select(keep);logger.info(f"[FSDS] Sampled {len(self.data)} ({frac*100:.0f}%)")
+    def __len__(self):return len(self.data)
+    def __getitem__(self,i):
+        r=self.data[i];ids=_tokenize(r["code"][:5000],self.tok,self.seq_len)
+        return {"input_ids":torch.tensor(ids,dtype=torch.long),"label":r["label"]}
 
-# ── Tokenisation (CLS <encoder_only> SEP format) ─────────────────────────────
-def _tokenize(code, tokenizer, max_len):
-    toks = tokenizer.tokenize(" ".join(code.split()))[:max_len-4]
-    toks = [tokenizer.cls_token, "<encoder_only>", tokenizer.sep_token] + toks + [tokenizer.sep_token]
-    ids  = tokenizer.convert_tokens_to_ids(toks)
-    ids += [tokenizer.pad_token_id] * (max_len - len(ids))
-    return ids[:max_len]
+def encode_all(encoder,loader,device,pad_id):
+    encoder.eval();embs,labs=[],[]
+    with torch.no_grad():
+        for b in tqdm(loader,desc="Encode"):
+            ids=b["input_ids"].to(device);mask=ids.ne(pad_id)
+            attn=mask.unsqueeze(1)*mask.unsqueeze(2)
+            out=encoder(ids,attention_mask=attn,output_hidden_states=True);tok=out[0]
+            vec=(tok*mask.unsqueeze(-1)).sum(1)/mask.sum(-1).unsqueeze(-1).clamp(min=1)
+            embs.append(F.normalize(vec,dim=-1).cpu());l=b["label"]
+            labs.extend(l.tolist() if torch.is_tensor(l) else list(l))
+    return torch.cat(embs,0),np.array(labs)
 
-class CodeDataset(TD):
-    def __init__(self, recs, tok, seq):
-        self.recs, self.tok, self.seq = recs, tok, seq
-    def __len__(self): return len(self.recs)
-    def __getitem__(self, i):
-        r = self.recs[i]
-        ids = _tokenize(r["code"], self.tok, self.seq)
-        return torch.tensor(ids, dtype=torch.long), torch.tensor(r["label"], dtype=torch.long)
+def prototype_nn(support_emb,support_lab,query_emb,n_cls):
+    protos=[]
+    for c in range(n_cls):
+        mask=(support_lab==c);
+        if mask.sum()>0:protos.append(support_emb[mask].mean(0))
+        else:protos.append(torch.zeros(support_emb.size(1)))
+    protos=F.normalize(torch.stack(protos),dim=-1)
+    sim=query_emb@protos.T;return sim.argmax(-1).numpy()
 
-# ── Embedding extraction (faithful to extract_luar_embeddings) ────────────────
 @torch.no_grad()
-def extract_embeddings(encoder, loader, device, pad_id):
-    """
-    Faithful to LUAR forward_utils.extract_luar_embeddings:
-    mean-pool non-padding token embeddings → L2-normalise.
-    """
-    encoder.eval()
-    all_emb, all_lab = [], []
-    for ids, labs in loader:
-        ids = ids.to(device)
-        mask = ids.ne(pad_id)
-        attn = mask.unsqueeze(1) * mask.unsqueeze(2)
-        out  = encoder(ids, attention_mask=attn, output_hidden_states=True)
-        tok  = out[0]
-        emb  = (tok * mask.unsqueeze(-1)).sum(1) / mask.sum(-1).unsqueeze(-1).clamp(min=1)
-        emb  = F.normalize(emb, dim=-1)   # L2-normalise (LUAR default)
-        all_emb.append(emb.cpu())
-        all_lab.extend(labs.tolist())
-    return torch.cat(all_emb, 0).numpy(), np.array(all_lab)
+def eval_proto(preds,labels,n_cls):
+    preds=np.array(preds);labels=np.array(labels)
+    return {"accuracy":float(accuracy_score(labels,preds)),"macro_f1":float(f1_score(labels,preds,average="macro",zero_division=0)),
+            "weighted_f1":float(f1_score(labels,preds,average="weighted",zero_division=0)),
+            "macro_precision":float(precision_score(labels,preds,average="macro",zero_division=0)),
+            "macro_recall":float(recall_score(labels,preds,average="macro",zero_division=0))}
 
-# ── Prototype cosine-NN (faithful to evaluate.py calculate_nn_metrics) ───────
-def prototype_cosine_nn(
-    support_emb: np.ndarray, support_lab: np.ndarray,
-    query_emb:   np.ndarray, query_lab:   np.ndarray,
-    n_cls: int,
-) -> float:
-    """
-    Compute per-class centroid from support, classify query by cosine NN.
-    Faithful to LUAR fewshot_helper.py calculate_nn_metrics:
-      prototype[c] = mean of support embeddings where label == c
-      pred = argmax_c cosine_sim(query, prototype[c])
-    """
-    classes = sorted(np.unique(support_lab).tolist())
-    prototypes = []
-    for c in classes:
-        mask = support_lab == c
-        proto = support_emb[mask].mean(0)
-        proto = proto / (np.linalg.norm(proto) + 1e-8)
-        prototypes.append(proto)
-    protos = np.stack(prototypes, 0)   # (K, H)
-    # cosine similarity: (N_q, K)
-    sim = query_emb @ protos.T
-    preds = classes[np.array([sim[i].argmax() for i in range(len(query_emb))])]
-    return f1_score(query_lab, preds, average="macro", zero_division=0)
+def run_exp(cfg,tag):
+    set_seed(cfg.seed);cfg=_hw(cfg)
+    if cfg.benchmark=="codet_m4":
+        tr_raw,vl_raw,ts_raw=_load_codet();vocab=_vocab(tr_raw)
+        tr_data=_conv_codet(tr_raw,"author",vocab);vl_data=_conv_codet(vl_raw,"author",vocab);ts_data=_conv_codet(ts_raw,"author",vocab)
+    else:
+        tr_raw,vl_raw,ts_raw=_load_aicd("t2");tr_data=_conv_aicd(tr_raw);vl_data=_conv_aicd(vl_raw);ts_data=_conv_aicd(ts_raw)
+    cfg.n_cls=max(tr_data["label"])+1
+    tok=AutoTokenizer.from_pretrained(os.path.join(KAGGLE_MODELS,cfg.enc),local_files_only=True);pad_id=tok.pad_token_id
+    tr_ds=FSDS(tr_data,tok,cfg.seq,frac=cfg.frac,seed=cfg.seed);vl_ds=FSDS(vl_data,tok,cfg.seq);ts_ds=FSDS(ts_data,tok,cfg.seq)
+    lc=dict(batch_size=cfg.bs,num_workers=4,pin_memory=True)
+    tr_dl=DataLoader(tr_ds,shuffle=False,**lc);vl_dl=DataLoader(vl_ds,shuffle=False,**lc);ts_dl=DataLoader(ts_ds,shuffle=False,**lc)
+    from transformers import RobertaModel
+    encoder=RobertaModel.from_pretrained(os.path.join(KAGGLE_MODELS,cfg.enc),local_files_only=True).to(cfg.device)
 
-# ── Mode A: Frozen encoder + prototype-NN ─────────────────────────────────────
-def run_luar_nn(cfg, splits, encoder, tokenizer, pad_id):
-    """Faithful to LUAR PURE_EMBEDDING_METHODS branch (no training)."""
-    tr_ds = CodeDataset(splits["train"], tokenizer, cfg.seq)
-    vl_ds = CodeDataset(splits["val"],   tokenizer, cfg.seq)
-    ts_ds = CodeDataset(splits["test"],  tokenizer, cfg.seq)
-    tr_dl = DataLoader(tr_ds, batch_size=cfg.bs, shuffle=False, num_workers=2)
-    vl_dl = DataLoader(vl_ds, batch_size=cfg.bs, shuffle=False, num_workers=2)
-    ts_dl = DataLoader(ts_ds, batch_size=cfg.bs, shuffle=False, num_workers=2)
+    # Mode A: frozen prototype-NN
+    logger.info("[Mode A] Frozen prototype-NN")
+    tr_emb,tr_lab=encode_all(encoder,tr_dl,cfg.device,pad_id)
+    vl_emb,vl_lab=encode_all(encoder,vl_dl,cfg.device,pad_id)
+    ts_emb,ts_lab=encode_all(encoder,ts_dl,cfg.device,pad_id)
+    vl_preds=prototype_nn(tr_emb,tr_lab,vl_emb,cfg.n_cls)
+    ts_preds=prototype_nn(tr_emb,tr_lab,ts_emb,cfg.n_cls)
+    nn_val=eval_proto(vl_preds,vl_lab,cfg.n_cls)
+    nn_test=eval_proto(ts_preds,ts_lab,cfg.n_cls)
+    logger.info(f"[Mode A] val={nn_val['macro_f1']:.4f} test={nn_test['macro_f1']:.4f}")
 
-    t0 = time.time()
-    support_emb, support_lab = extract_embeddings(encoder, tr_dl, cfg.device, pad_id)
-    val_emb,     val_lab     = extract_embeddings(encoder, vl_dl, cfg.device, pad_id)
-    test_emb,    test_lab    = extract_embeddings(encoder, ts_dl, cfg.device, pad_id)
-
-    val_f1  = prototype_cosine_nn(support_emb, support_lab, val_emb,  val_lab,  cfg.n_cls)
-    test_f1 = prototype_cosine_nn(support_emb, support_lab, test_emb, test_lab, cfg.n_cls)
-    return val_f1, test_f1, round(time.time()-t0, 1)
-
-# ── Mode B: N-shot fine-tuning on support (LUAR's MAML-style adaptation) ─────
-def run_luar_ft(cfg, splits, encoder, tokenizer, pad_id):
-    """
-    LUAR FAST_ADAPTATION_METHODS branch: fine-tune encoder on support set for
-    cfg.ft_epochs steps with lr=cfg.ft_lr, then prototype-NN.
-    Faithful to evaluate.py calculate_adaptation_metrics.
-    """
-    from transformers import get_linear_schedule_with_warmup
-    from torch.cuda.amp import GradScaler, autocast
-    import torch.nn as nn
-
-    tr_ds = CodeDataset(splits["train"], tokenizer, cfg.seq)
-    vl_ds = CodeDataset(splits["val"],   tokenizer, cfg.seq)
-    ts_ds = CodeDataset(splits["test"],  tokenizer, cfg.seq)
-    tr_dl = DataLoader(tr_ds, batch_size=min(cfg.bs, len(tr_ds)), shuffle=True,  num_workers=2)
-    vl_dl = DataLoader(vl_ds, batch_size=cfg.bs, shuffle=False, num_workers=2)
-    ts_dl = DataLoader(ts_ds, batch_size=cfg.bs, shuffle=False, num_workers=2)
-
-    # Linear head for adaptation
-    hidden = encoder.config.hidden_size
-    head   = nn.Linear(hidden, cfg.n_cls).to(cfg.device)
-    params = list(encoder.parameters()) + list(head.parameters())
-    optim  = torch.optim.AdamW(params, lr=cfg.ft_lr, weight_decay=0.0)
-    total  = cfg.ft_epochs * len(tr_dl)
-    sched  = get_linear_schedule_with_warmup(optim, 0, total)
-    scaler = GradScaler()
-
-    t0 = time.time()
-    encoder.train(); head.train()
+    # Mode B: N-shot fine-tune then prototype-NN
+    logger.info(f"[Mode B] N-shot FT (ep={cfg.ft_epochs}, lr={cfg.ft_lr})")
+    encoder_ft=copy.deepcopy(encoder)
+    ft_dl=DataLoader(tr_ds,shuffle=True,batch_size=min(cfg.bs,len(tr_ds)),num_workers=2,pin_memory=True)
+    opt=torch.optim.AdamW(encoder_ft.parameters(),lr=cfg.ft_lr)
+    clf=nn.Linear(encoder_ft.config.hidden_size,cfg.n_cls).to(cfg.device)
+    opt2=torch.optim.AdamW(list(encoder_ft.parameters())+list(clf.parameters()),lr=cfg.ft_lr)
     for ep in range(cfg.ft_epochs):
-        for ids, labs in tr_dl:
-            ids, labs = ids.to(cfg.device), labs.to(cfg.device)
-            optim.zero_grad()
-            with autocast(dtype=torch.bfloat16):
-                mask = ids.ne(pad_id)
-                attn = mask.unsqueeze(1) * mask.unsqueeze(2)
-                out  = encoder(ids, attention_mask=attn, output_hidden_states=True)
-                tok  = out[0]
-                emb  = (tok * mask.unsqueeze(-1)).sum(1) / mask.sum(-1).unsqueeze(-1).clamp(min=1)
-                loss = F.cross_entropy(head(emb), labs)
-            scaler.scale(loss).backward()
-            scaler.unscale_(optim)
-            torch.nn.utils.clip_grad_norm_(params, 1.0)
-            scaler.step(optim); scaler.update(); sched.step()
+        encoder_ft.train();clf.train();tot=0.0
+        for b in ft_dl:
+            ids=b["input_ids"].to(cfg.device);labs=b["label"]
+            if not torch.is_tensor(labs):labs=torch.tensor(labs,dtype=torch.long)
+            labs=labs.to(cfg.device);mask=ids.ne(pad_id);attn=mask.unsqueeze(1)*mask.unsqueeze(2)
+            out=encoder_ft(ids,attention_mask=attn,output_hidden_states=True);tok=out[0]
+            vec=(tok*mask.unsqueeze(-1)).sum(1)/mask.sum(-1).unsqueeze(-1).clamp(min=1)
+            logits=clf(vec);loss=F.cross_entropy(logits,labs)
+            opt2.zero_grad();loss.backward();opt2.step();tot+=loss.item()
+        logger.info(f"[Mode B ep{ep+1}] loss={tot/max(1,len(ft_dl)):.4f}")
+    tr_emb_ft,_=encode_all(encoder_ft,tr_dl,cfg.device,pad_id)
+    vl_emb_ft,_=encode_all(encoder_ft,vl_dl,cfg.device,pad_id)
+    ts_emb_ft,_=encode_all(encoder_ft,ts_dl,cfg.device,pad_id)
+    vl_preds_ft=prototype_nn(tr_emb_ft,tr_lab,vl_emb_ft,cfg.n_cls)
+    ts_preds_ft=prototype_nn(tr_emb_ft,tr_lab,ts_emb_ft,cfg.n_cls)
+    ft_val=eval_proto(vl_preds_ft,vl_lab,cfg.n_cls)
+    ft_test=eval_proto(ts_preds_ft,ts_lab,cfg.n_cls)
+    logger.info(f"[Mode B] val={ft_val['macro_f1']:.4f} test={ft_test['macro_f1']:.4f}")
 
-    # After fine-tuning: prototype-NN
-    support_emb, support_lab = extract_embeddings(encoder, tr_dl, cfg.device, pad_id)
-    val_emb,     val_lab     = extract_embeddings(encoder, vl_dl, cfg.device, pad_id)
-    test_emb,    test_lab    = extract_embeddings(encoder, ts_dl, cfg.device, pad_id)
+    # Pick best mode
+    best_mode="B" if ft_val["macro_f1"]>nn_val["macro_f1"] else "A"
+    best_val=max(nn_val["macro_f1"],ft_val["macro_f1"])
+    best_test=ft_test["macro_f1"] if best_mode=="B" else nn_test["macro_f1"]
+    best_met=ft_test if best_mode=="B" else nn_test
+    logger.info(f"[final] best_mode={best_mode} val={best_val:.4f} test={best_test:.4f}")
+    return {"tag":tag,"method":f"LUAR-{best_mode}","upstream":"ICLR 2024","note":f"Mode A=frozen prototype-NN, Mode B=N-shot FT. Best={best_mode}.",
+            "enc":cfg.enc,"bench":cfg.benchmark,"frac":cfg.frac,"ft_epochs":cfg.ft_epochs,"ft_lr":cfg.ft_lr,
+            "nn_val":nn_val["macro_f1"],"nn_test":nn_test["macro_f1"],"ft_val":ft_val["macro_f1"],"ft_test":ft_test["macro_f1"],
+            "val_macro":best_val,"macro":best_test,"weighted":best_met["weighted_f1"],"acc":best_met["accuracy"],
+            "val_test_gap":best_val-best_test,"dpaper":best_test-PAPER_BASELINE,
+            "test_metrics":{"overall":best_met},"timestamp":time.strftime("%Y-%m-%d %H:%M:%S")}
 
-    val_f1  = prototype_cosine_nn(support_emb, support_lab, val_emb,  val_lab,  cfg.n_cls)
-    test_f1 = prototype_cosine_nn(support_emb, support_lab, test_emb, test_lab, cfg.n_cls)
-    return val_f1, test_f1, round(time.time()-t0, 1)
-
-# ── Main ──────────────────────────────────────────────────────────────────────
 def main():
-    from transformers import RobertaConfig, RobertaModel, RobertaTokenizer
+    results=[]
+    for bench,task,n_cls in [("codet_m4","author",6),("aicd_t2","t2",12)]:
+        for frac in [0.01,0.05,0.20]:
+            cfg=Cfg(benchmark=bench,task=task,frac=frac,n_cls=n_cls);tag=f"ext_luar_{cfg.enc}_{bench}_f{frac}"
+            logger.info(f"=== {tag} ===");t0=time.time()
+            try:
+                res=run_exp(cfg,tag);res["wall"]=round(time.time()-t0,1);results.append(res)
+                logger.info(f"[{tag}] test={res['macro']:.4f} gap={res['val_test_gap']:+.4f} time={res['wall']:.0f}s")
+            except Exception as e:logger.error(f"[{tag}] FAILED: {e}");import traceback;traceback.print_exc()
+            import gc;gc.collect()
+            if torch.cuda.is_available():torch.cuda.empty_cache()
+    try:_here=os.path.dirname(os.path.realpath(__file__))
+    except NameError:_here=os.getcwd()
+    out_dir=os.path.join(_here,"results");os.makedirs(out_dir,exist_ok=True)
+    with open(os.path.join(out_dir,"ext_luar_results.json"),"w") as f:json.dump(results,f,indent=2)
+    print("\n"+"="*100)
+    for r in results:print(f"{r['enc']:<22} {r['bench']:<12} {r['frac']:>6.0%} NN={r['nn_test']:.4f} FT={r['ft_test']:.4f} best={r['macro']:.4f} {r['dpaper']:>+9.4f}")
+    print("="*100)
 
-    model_path = os.path.join(KAGGLE_MODELS, "unixcoder-base")
-    tokenizer  = RobertaTokenizer.from_pretrained(model_path, local_files_only=True)
-    pad_id     = tokenizer.pad_token_id
-
-    results = []
-    for bench, task, n_cls in [
-        ("codet_m4", "author_iid", 6),
-        ("aicd_t2",  "model_family", 12),
-    ]:
-        for frac in [0.01, 0.05, 0.20]:
-            cfg = Cfg(benchmark=bench, task=task, frac=frac, n_cls=n_cls)
-            splits = load_data(cfg)
-            logger.info(f"\n{'='*60}\n{bench} frac={frac} n_cls={cfg.n_cls} "
-                        f"train={len(splits['train'])}\n{'='*60}")
-
-            # Fresh encoder for each run
-            encoder = RobertaModel.from_pretrained(model_path, local_files_only=True).to(cfg.device)
-
-            # ── Mode A: Frozen NN (faithful to LUAR paper) ─────────────
-            val_a, test_a, wall_a = run_luar_nn(cfg, splits, encoder, tokenizer, pad_id)
-            rec_a = {
-                "tag":          f"ext_luar_nn_unixcoder-base_{bench}_f{frac}",
-                "method":       "LUAR-NN",
-                "mode":         "frozen_prototype_cosine_nn",
-                "upstream":     "ICLR 2024 (Rivera Soto et al.)",
-                "note":         "Frozen encoder, cosine prototype-NN. No training.",
-                "enc":          "unixcoder-base",
-                "bench":        bench,
-                "frac":         frac,
-                "val_macro":    val_a,
-                "macro":        test_a,
-                "val_test_gap": val_a - test_a,
-                "dpaper":       test_a - PAPER_F1,
-                "wall":         wall_a,
-            }
-            results.append(rec_a)
-            logger.info(f"  [NN]  val={val_a:.4f} test={test_a:.4f} gap={val_a-test_a:+.4f}")
-
-            # ── Mode B: N-shot FT + NN (MAML-style adaptation ablation) ─
-            encoder = RobertaModel.from_pretrained(model_path, local_files_only=True).to(cfg.device)
-            val_b, test_b, wall_b = run_luar_ft(cfg, splits, encoder, tokenizer, pad_id)
-            rec_b = {
-                "tag":          f"ext_luar_ft_unixcoder-base_{bench}_f{frac}",
-                "method":       "LUAR-FT",
-                "mode":         "fewshot_finetune_then_prototype_nn",
-                "upstream":     "ICLR 2024 (Rivera Soto et al.) — MAML-adaptation variant",
-                "note":         (f"N-shot CE fine-tuning ({cfg.ft_epochs}ep, lr={cfg.ft_lr}) "
-                                 f"on support set, then prototype cosine NN."),
-                "enc":          "unixcoder-base",
-                "bench":        bench,
-                "frac":         frac,
-                "ft_epochs":    cfg.ft_epochs,
-                "ft_lr":        cfg.ft_lr,
-                "val_macro":    val_b,
-                "macro":        test_b,
-                "val_test_gap": val_b - test_b,
-                "dpaper":       test_b - PAPER_F1,
-                "wall":         wall_b,
-            }
-            results.append(rec_b)
-            logger.info(f"  [FT]  val={val_b:.4f} test={test_b:.4f} gap={val_b-test_b:+.4f}")
-
-    out_path = "results/ext_luar_results.json"
-    os.makedirs("results", exist_ok=True)
-    with open(out_path, "w") as f:
-        json.dump(results, f, indent=2)
-    logger.info(f"\nSaved → {out_path}")
-
-    print(f"\n{'Method':<12} {'Bench':<12} {'Frac':>6} {'Val':>8} {'Test':>8} {'Gap':>8} {'dPaper':>9}")
-    for r in results:
-        print(f"{r['method']:<12} {r['bench']:<12} {r['frac']:>6.0%} "
-              f"{r['val_macro']:>8.4f} {r['macro']:>8.4f} "
-              f"{r['val_test_gap']:>+8.4f} {r['dpaper']:>+9.4f}")
-
-if __name__ == "__main__":
-    main()
+if __name__=="__main__":main()
