@@ -48,14 +48,17 @@
 > - exp103 DENOISE-v3 → 0.3236 (collapsed) ❌
 > - exp104 DUALGRAPH → 0.4688 (below band) ❌
 > - exp105 ACTIVE → 0.4546 (below band) ❌
-> - exp106 ULTRATREE → pending
-> Round 8 has not produced a hero. The active/diffusion/dual-graph axes
-> all failed. Moving to Round 9-11 architectural shifts.
+> - exp106 ULTRATREE → 0.5198 (below TRACO by 0.006) ❌
+> Round 8 has not produced a hero (5/5 falsified). The active/diffusion/
+> dual-graph/ultrametric axes all failed. Moving to Round 9-11 shifts.
+> Round 9 partial results: CHORUS exp111 → 0.4763 ❌, FOREST exp119 → 0.4340 ❌.
 
 ### Tracker completeness (2026-05-21, post-Round-12)
 
 - **72 result JSON files** verified in `results/` (was 56 + 16 Round 12 CPU-only).
 - New since last update:
+  - **Round 8 final**: exp106 ULTRATREE 0.5198 (5/5 Round 8 falsified).
+  - **Round 9 partial**: exp111 CHORUS 0.4763, exp119 FOREST 0.4340 (both below TRACO).
   - **Round 12 CPU-only bake-off**: exp133 GZIP-NCD, exp134 LIBRARIAN,
     exp135 POLYGLOT, exp137 STRINGKERNEL, exp138 BAYESCRAFT,
     exp139 TOPOSIG, exp140 KRONOS, exp141 PAGERANK, exp142 WAVELET,
@@ -137,7 +140,8 @@
 | 23 | CGPTS | exp90 | 0.5805 | 0.6722 | 0.7193 | 0.2939 | 0.3852 | 0.4721 | 0.5205 |
 | 23 | DETMULTI | exp91 | 0.5794 | 0.6725 | 0.7220 | 0.2917 | 0.3887 | 0.4689 | 0.5205 |
 | 25 | CAGHOST | exp88 | 0.5767 | 0.6600 | 0.7155 | 0.3000 | 0.3914 | 0.4770 | 0.5201 |
-| 26 | FARS | exp82 | 0.5787 | 0.6668 | 0.7197 | 0.2924 | 0.3884 | 0.4680 | 0.5190 |
+| 26 | **ULTRATREE** Round 8 🆕 | exp106 | 0.5729 | 0.6660 | 0.7176 | 0.2982 | 0.3945 | 0.4695 | **0.5198** |
+| 27 | FARS | exp82 | 0.5787 | 0.6668 | 0.7197 | 0.2924 | 0.3884 | 0.4680 | 0.5190 |
 | 27 | SCR | exp62 | 0.5585 | 0.6532 | 0.7185 | 0.3019 | 0.3949 | 0.4776 | 0.5174 |
 | 28 | TKL | exp63 | 0.5524 | 0.6549 | 0.7198 | 0.3012 | 0.3940 | 0.4776 | 0.5167 |
 | 29 | DECOFP | exp70 | 0.5483 | 0.6420 | 0.7158 | 0.2958 | 0.4108 | 0.4806 | 0.5155 |
@@ -153,7 +157,8 @@
 | 39 | PERPSIG | exp69 | 0.5408 | 0.6321 | 0.7076 | 0.2865 | 0.3742 | 0.4813 | 0.5038 |
 | 40 | RACO | exp64 | 0.5627 | 0.6539 | 0.6943 | 0.2922 | 0.3520 | 0.3970 | 0.4920 |
 | 41 | **ext_codegptsensor** ext | ext | 0.5049 | 0.5738 | 0.6546 | 0.2877 | 0.3795 | 0.4646 | **0.4775** |
-| 42 | DUALVIEW | exp97 | 0.5269 | 0.6304 | 0.7010 | 0.2548 | 0.3064 | 0.4322 | 0.4753 |
+| 42 | **CHORUS** Round 9 🆕 | exp111 | 0.5108 | 0.6146 | 0.6870 | 0.2657 | 0.3391 | 0.4408 | **0.4763** |
+| 43 | DUALVIEW | exp97 | 0.5269 | 0.6304 | 0.7010 | 0.2548 | 0.3064 | 0.4322 | 0.4753 |
 | 43 | **ext_detective** ext 🆕 | ext | 0.5268 | 0.6222 | 0.7065 | 0.2518 | 0.3167 | 0.4254 | **0.4749** |
 | 44 | **DENOISE-v1** Round 8 🆕 | exp102 | 0.4988 | 0.5699 | 0.6376 | 0.2889 | 0.3767 | 0.4547 | **0.4711** |
 | 45 | DUALGRAPH ⚠ Round 8 | exp104 | 0.4924 | 0.5749 | 0.6441 | 0.2771 | 0.3804 | 0.4438 | 0.4688 |
@@ -161,7 +166,8 @@
 | 47 | TIEH | exp72 | 0.4271 | 0.6112 | 0.7017 | 0.1729 | 0.3226 | 0.4444 | 0.4466 |
 | 48 | SLOTATTN | exp101 | 0.5059 | 0.6012 | 0.6690 | 0.2099 | 0.2593 | 0.3937 | 0.4398 |
 | 48 | **ext_luar** ext | ext | 0.4650 | 0.5340 | 0.5970 | 0.2748 | 0.3446 | 0.4234 | **0.4398** |
-| 50 | **ext_damtl** ext | ext | 0.4122 | 0.5198 | 0.5868 | 0.2770 | 0.3415 | 0.4156 | **0.4255** |
+| 50 | **FOREST** Round 9 🆕 | exp119 | 0.3770 | 0.6170 | 0.6923 | 0.2327 | 0.2647 | 0.4203 | **0.4340** |
+| 51 | **ext_damtl** ext | ext | 0.4122 | 0.5198 | 0.5868 | 0.2770 | 0.3415 | 0.4156 | **0.4255** |
 | 51 | PROMPTC | exp95 | 0.4493 | 0.5921 | 0.6701 | 0.1887 | 0.2579 | 0.3673 | 0.4209 |
 | 52 | TAPA | exp73 | 0.4969 | 0.5743 | 0.6722 | 0.2300 | 0.2746 | 0.2635 | 0.4186 |
 | 53 | **ext_faid** ext | ext | 0.4446 | 0.5374 | 0.6089 | 0.2232 | 0.2544 | 0.3353 | **0.4006** |
