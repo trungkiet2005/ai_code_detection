@@ -52,14 +52,18 @@
 > Round 8 has not produced a hero. The active/diffusion/dual-graph axes
 > all failed. Moving to Round 9-11 architectural shifts.
 
-### Tracker completeness (2026-05-21, post-update)
+### Tracker completeness (2026-05-21, post-Round-12)
 
-- **56 result JSON files** verified in `results/` (was 48 + 8 new).
+- **72 result JSON files** verified in `results/` (was 56 + 16 Round 12 CPU-only).
 - New since last update:
-  - **exp102/103/105** (Round 8 — all below band, falsified)
-  - **exp98/99** (Round 7 OOM fix completed: SPECEXPERT 0.5271, UNCERTTRACO 0.5341)
-  - **ext_detective** (0.4749) and **ext_gptsniffer** (0.5421 — composite #1)
-- **Next free exp ID: exp133+** (exp107-132 used by Round 9-11 implementations, all parse-clean but not yet run on Kaggle).
+  - **Round 12 CPU-only bake-off**: exp133 GZIP-NCD, exp134 LIBRARIAN,
+    exp135 POLYGLOT, exp137 STRINGKERNEL, exp138 BAYESCRAFT,
+    exp139 TOPOSIG, exp140 KRONOS, exp141 PAGERANK, exp142 WAVELET,
+    exp143 TROPICAL, exp144 TENSORTRAIN, exp145 RFOREST,
+    exp146 SCATTERPLOT, exp147 JEPACODE, exp148 MOETREE, exp149 SPECTRA.
+  - Best CPU-only composite: 0.3627 (RFOREST), −0.179 vs ext_gptsniffer.
+- **Next free exp ID: exp150+** (exp107-132 reserved for Round 9-11
+  encoder methods, all parse-clean but not yet run on Kaggle).
 
 ### Why TRACO won the hero slot
 
@@ -165,6 +169,80 @@
 | 55 | **DENOISE-v3** Round 8 🆕 ❌ | exp103 | 0.2794 | 0.4160 | 0.5642 | 0.1610 | 0.2057 | 0.3151 | **0.3236** |
 | 56 | TRACOD | exp80 | 0.3706 | 0.4485 | 0.4029 | 0.1861 | 0.2125 | 0.1937 | 0.3024 |
 | 57 | **ext_llmsniffer** ext ❌ collapse | ext | 0.2170 | 0.1999 | 0.1795 | 0.0944 | 0.1155 | 0.0885 | **0.1491** |
+
+---
+
+## 🧪 Round 12 — CPU-only "honest stylometry" bake-off (2026-05-21)
+
+> **Setup change:** Round 12 methods run **CPU-only, no neural encoder, no
+> GPU**. Each method is a single declarative claim about authorship from a
+> classical primitive (compression / kernel / topology / spectrum / etc.).
+> Cap 300 train, 400 test, 200 val per class. Same 2 benchmarks × 3 fracs
+> protocol. Composite = mean Macro-F1 across 6 slots.
+>
+> **Headline:** the BEST CPU-only method (RFOREST = 0.3627, STRINGKERNEL =
+> 0.3625) lands **−0.163 below TRACO (0.5256)** and **−0.179 below
+> ext_gptsniffer (0.5421)**. Encoder-based methods own this regime by a
+> comfortable margin. This is the paper's "honest CPU baselines" panel:
+> classical stylometry exists; it does not close the gap.
+
+| Rank | Method | exp | CoDET 1% | CoDET 5% | CoDET 20% | AICD 1% | AICD 5% | AICD 20% | **Mean** |
+|:-:|:--|:--|--:|--:|--:|--:|--:|--:|--:|
+| C-1 | **RFOREST** | exp145 | 0.4295 | 0.4847 | 0.4796 | 0.1995 | 0.2889 | 0.2941 | **0.3627** |
+| C-2 | **STRINGKERNEL** | exp137 | 0.4456 | 0.4704 | 0.4814 | 0.1981 | 0.2855 | 0.2941 | **0.3625** |
+| C-3 | **GZIP-NCD** | exp133 | 0.4396 | 0.4502 | 0.4560 | 0.1998 | 0.2582 | 0.2704 | **0.3457** |
+| C-4 | **LIBRARIAN** | exp134 | 0.4005 | 0.4107 | 0.4008 | 0.2100 | 0.2223 | 0.2370 | **0.3136** |
+| C-5 | BAYESCRAFT | exp138 | 0.3156 | 0.4054 | 0.4323 | 0.1247 | 0.1937 | 0.1839 | 0.2759 |
+| C-6 | PAGERANK | exp141 | 0.3629 | 0.3524 | 0.3335 | 0.1844 | 0.1786 | 0.1937 | 0.2676 |
+| C-7 | MOETREE | exp148 | 0.3454 | 0.3295 | 0.3330 | 0.1724 | 0.1845 | 0.1893 | 0.2590 |
+| C-8 | JEPACODE | exp147 | 0.3030 | 0.2918 | 0.3075 | 0.1352 | 0.1731 | 0.1733 | 0.2307 |
+| C-9 | TROPICAL | exp143 | 0.2551 | 0.2695 | 0.2751 | 0.1651 | 0.1721 | 0.1667 | 0.2173 |
+| C-10 | WAVELET | exp142 | 0.1925 | 0.2050 | 0.1851 | 0.1301 | 0.1241 | 0.1193 | 0.1594 |
+| C-11 | TOPOSIG ⚠ MST-fallback | exp139 | 0.1765 | 0.2083 | 0.2046 | 0.1234 | 0.1184 | 0.1224 | 0.1589 |
+| C-12 | KRONOS | exp140 | 0.1910 | 0.1960 | 0.1499 | 0.1249 | 0.1313 | 0.1103 | 0.1506 |
+| C-13 | POLYGLOT | exp135 | 0.1266 | 0.1286 | 0.1274 | 0.1085 | 0.0999 | 0.0974 | 0.1147 |
+| C-14 | SCATTERPLOT ❌ | exp146 | 0.1043 | 0.1100 | 0.1107 | 0.0251 | 0.0229 | 0.0235 | 0.0661 |
+| C-15 | SPECTRA ❌ | exp149 | 0.0494 | 0.0799 | 0.0476 | 0.0133 | 0.0128 | 0.0161 | 0.0365 |
+| C-16 | TENSORTRAIN ❌ collapse | exp144 | 0.0476 | 0.0476 | 0.0476 | 0.0128 | 0.0128 | 0.0128 | 0.0302 |
+
+### val-test gaps (Round 12, CPU-only)
+
+All 16 methods stay within $|gap| \le 0.030$ on every slot. No overfit
+audit concern across the CPU set; the gap is much smaller than the
+distance to TRACO, so the ranking is robust.
+
+### Round 12 takeaways
+
+1. **Two CPU baselines reach ~0.36 composite.** RFOREST (Caliskan-2015-style
+   stylometry + RandomForest) and STRINGKERNEL (Leslie-2002 spectrum kernel
+   + LinearSVC) tie within +0.0002. Both reach ≈70 % of TRACO's composite
+   from features alone — a non-trivial floor for classical methods.
+2. **Compression-based attribution (GZIP-NCD, LIBRARIAN) is real but weaker.**
+   GZIP-NCD (Cilibrasi-Vitanyi NCD + kNN) → 0.346; LIBRARIAN (per-author
+   zstd dictionaries, MAP-MDL bridge) → 0.314. Both confirm Jiang-2023's
+   "compression as a learning-free classifier" works on code, but at a
+   floor far below encoder-fine-tuning.
+3. **Topology / spectrum / tensor methods collapse.** SPECTRA (Laplacian
+   eigenvalues), TENSORTRAIN (non-neg PARAFAC), SCATTERPLOT (Sliced-
+   Wasserstein), POLYGLOT (multi-compressor spectrum) all underperform
+   even POLYGLOT-style fingerprint baselines. The novel-but-collapsed
+   methods become §5 "what doesn't work" negative-result rows.
+4. **TENSORTRAIN ran but the MU-NNCP factorisation collapsed to majority
+   class** at every slot (0.0476 / 0.0128 = trivial constant predictor).
+   The pure-numpy multiplicative-update fallback is too weak to recover
+   the trigram structure; the claim "tensor factorisation captures style"
+   is FALSIFIED at this implementation level.
+5. **TOPOSIG fell back to MST-only persistence** when gudhi failed to
+   install on offline Kaggle. The exact H_0 persistence + non-tree-edge
+   H_1 proxy still works, but the score is mid-pack — graph topology
+   alone does not separate authors.
+6. **Big-picture for the paper:** the 16 CPU-only rows collectively form
+   the strongest "no-neural-encoder" floor we have measured, and the gap
+   to ext_gptsniffer / TRACO (≈ 18 pp) is the empirical claim that
+   justifies the encoder pipeline. This panel goes into §4 (baselines)
+   AND §6 (negative results), not §3 (hero).
+
+### Next free expNN ID: exp150+
 
 **Partial-data methods (CoDET-M4 only — AICD-T2 pending):**
 

@@ -1,0 +1,1292 @@
+[
+  {
+    "tag": "exp149_spectra_codet_m4_f0.01",
+    "method": "SPECTRA",
+    "note": "Laplacian spectrum of per-author character-transition graphs. Attribution = argmin L2 distance between sorted top-k eigenvalue vectors. Permutation-invariant. CPU-only.",
+    "enc": "char-bigram(V=128)/Lspec(k=32)",
+    "bench": "codet_m4",
+    "frac": 0.01,
+    "train_size_after_cap": 1640,
+    "test_size_after_cap": 2400,
+    "val_macro": 0.04775549188156638,
+    "macro": 0.049419717059120793,
+    "weighted": 0.04941971705912079,
+    "acc": 0.1675,
+    "val_test_gap": -0.001664225177554414,
+    "dpaper": -0.6138802829408792,
+    "falsifier_F1_intra_inter_ratio": 0.13293124103291443,
+    "falsifier_F2_spectrum_minus_raw_macro": -0.2915636946848824,
+    "falsifier_F2_raw_macro": 0.3409834117440032,
+    "falsifier_F3_spearman_50pct_subsample": 0.9644718960005955,
+    "test_time_sec": 23.20661735534668,
+    "test_metrics": {
+      "overall": {
+        "accuracy": 0.1675,
+        "macro_f1": 0.049419717059120793,
+        "weighted_f1": 0.04941971705912079,
+        "micro_f1": 0.1675,
+        "macro_precision": 0.06493103982643732,
+        "macro_recall": 0.16749999999999998
+      },
+      "per_class": {
+        "f1": [
+          0.0,
+          0.0,
+          0.009779951100244499,
+          0.0,
+          0.0,
+          0.2867383512544803
+        ],
+        "precision": [
+          0.0,
+          0.0,
+          0.2222222222222222,
+          0.0,
+          0.0,
+          0.16736401673640167
+        ],
+        "recall": [
+          0.0,
+          0.0,
+          0.005,
+          0.0,
+          0.0,
+          1.0
+        ]
+      },
+      "per_language": {
+        "cpp": {
+          "n": 723,
+          "macro_f1": 0.05465116279069768,
+          "weighted_f1": 0.06394866351442632,
+          "accuracy": 0.1950207468879668
+        },
+        "java": {
+          "n": 791,
+          "macro_f1": 0.050574239222568436,
+          "weighted_f1": 0.04698000874872218,
+          "accuracy": 0.15802781289506954
+        },
+        "python": {
+          "n": 886,
+          "macro_f1": 0.04435746901500326,
+          "weighted_f1": 0.04085292857363731,
+          "accuracy": 0.15349887133182843
+        }
+      },
+      "per_source": {
+        "cf": {
+          "n": 515,
+          "macro_f1": 0.02324159021406728,
+          "weighted_f1": 0.010289480716130756,
+          "accuracy": 0.07378640776699029
+        },
+        "gh": {
+          "n": 719,
+          "macro_f1": 0.03218606312218204,
+          "weighted_f1": 0.022363582889423708,
+          "accuracy": 0.09874826147426982
+        },
+        "lc": {
+          "n": 1166,
+          "macro_f1": 0.08032899246058944,
+          "weighted_f1": 0.10092793649636667,
+          "accuracy": 0.25128644939965694
+        }
+      },
+      "confusion_matrix": [
+        [
+          0,
+          0,
+          7,
+          1,
+          0,
+          392
+        ],
+        [
+          0,
+          0,
+          0,
+          0,
+          0,
+          400
+        ],
+        [
+          0,
+          0,
+          2,
+          0,
+          0,
+          398
+        ],
+        [
+          0,
+          0,
+          0,
+          0,
+          0,
+          400
+        ],
+        [
+          0,
+          0,
+          0,
+          0,
+          0,
+          400
+        ],
+        [
+          0,
+          0,
+          0,
+          0,
+          0,
+          400
+        ]
+      ],
+      "sibling_confusion_rate": 0.0,
+      "cross_family_confusion_rate": 1.0,
+      "off_diag_total": 1998,
+      "n_samples": 2400,
+      "falsifier_F1_intra_mean": 0.8068574331026286,
+      "falsifier_F1_inter_mean": 0.10725655991896416,
+      "falsifier_F1_intra_inter_ratio": 0.13293124103291443,
+      "falsifier_F1_pass": false,
+      "falsifier_F2_raw_macro": 0.3409834117440032,
+      "falsifier_F2_spectrum_minus_raw_macro": -0.2915636946848824,
+      "falsifier_F2_pass": false,
+      "falsifier_F3_spearman_50pct_subsample": 0.9644718960005955,
+      "falsifier_F3_pass": true
+    },
+    "val_history": [
+      0.04775549188156638
+    ],
+    "timestamp": "2026-05-21 01:27:27",
+    "wall": 431.2
+  },
+  {
+    "tag": "exp149_spectra_codet_m4_f0.05",
+    "method": "SPECTRA",
+    "note": "Laplacian spectrum of per-author character-transition graphs. Attribution = argmin L2 distance between sorted top-k eigenvalue vectors. Permutation-invariant. CPU-only.",
+    "enc": "char-bigram(V=128)/Lspec(k=32)",
+    "bench": "codet_m4",
+    "frac": 0.05,
+    "train_size_after_cap": 1800,
+    "test_size_after_cap": 2400,
+    "val_macro": 0.07345245045895284,
+    "macro": 0.07988801739001751,
+    "weighted": 0.07988801739001751,
+    "acc": 0.17333333333333334,
+    "val_test_gap": -0.0064355669310646735,
+    "dpaper": -0.5834119826099825,
+    "falsifier_F1_intra_inter_ratio": 0.14499798617744403,
+    "falsifier_F2_spectrum_minus_raw_macro": -0.252818352841542,
+    "falsifier_F2_raw_macro": 0.3327063702315595,
+    "falsifier_F3_spearman_50pct_subsample": 0.9890952675567664,
+    "test_time_sec": 23.251665830612183,
+    "test_metrics": {
+      "overall": {
+        "accuracy": 0.17333333333333334,
+        "macro_f1": 0.07988801739001751,
+        "weighted_f1": 0.07988801739001751,
+        "micro_f1": 0.17333333333333334,
+        "macro_precision": 0.059980745640961584,
+        "macro_recall": 0.17333333333333334
+      },
+      "per_class": {
+        "f1": [
+          0.0,
+          0.0,
+          0.281975517095821,
+          0.0,
+          0.0,
+          0.197352587244284
+        ],
+        "precision": [
+          0.0,
+          0.0,
+          0.16962925342813612,
+          0.0,
+          0.0,
+          0.1902552204176334
+        ],
+        "recall": [
+          0.0,
+          0.0,
+          0.835,
+          0.0,
+          0.0,
+          0.205
+        ]
+      },
+      "per_language": {
+        "cpp": {
+          "n": 723,
+          "macro_f1": 0.06304361236197643,
+          "weighted_f1": 0.06188206307330379,
+          "accuracy": 0.14522821576763487
+        },
+        "java": {
+          "n": 791,
+          "macro_f1": 0.06580285107673643,
+          "weighted_f1": 0.059703364396319375,
+          "accuracy": 0.16055625790139064
+        },
+        "python": {
+          "n": 886,
+          "macro_f1": 0.09860154271918979,
+          "weighted_f1": 0.10669506978762057,
+          "accuracy": 0.2076749435665914
+        }
+      },
+      "per_source": {
+        "cf": {
+          "n": 515,
+          "macro_f1": 0.08028455284552845,
+          "weighted_f1": 0.1627515983897703,
+          "accuracy": 0.3067961165048544
+        },
+        "gh": {
+          "n": 719,
+          "macro_f1": 0.11515707453825857,
+          "weighted_f1": 0.16770887423348907,
+          "accuracy": 0.2851182197496523
+        },
+        "lc": {
+          "n": 1166,
+          "macro_f1": 0.03505291005291005,
+          "weighted_f1": 0.05284992784992785,
+          "accuracy": 0.045454545454545456
+        }
+      },
+      "confusion_matrix": [
+        [
+          0,
+          0,
+          355,
+          0,
+          0,
+          45
+        ],
+        [
+          0,
+          0,
+          300,
+          0,
+          0,
+          100
+        ],
+        [
+          0,
+          0,
+          334,
+          0,
+          0,
+          66
+        ],
+        [
+          0,
+          0,
+          337,
+          0,
+          0,
+          63
+        ],
+        [
+          0,
+          0,
+          325,
+          0,
+          0,
+          75
+        ],
+        [
+          0,
+          0,
+          318,
+          0,
+          0,
+          82
+        ]
+      ],
+      "sibling_confusion_rate": 0.0,
+      "cross_family_confusion_rate": 1.0,
+      "off_diag_total": 1984,
+      "n_samples": 2400,
+      "falsifier_F1_intra_mean": 0.8026249804160879,
+      "falsifier_F1_inter_mean": 0.1163790058160432,
+      "falsifier_F1_intra_inter_ratio": 0.14499798617744403,
+      "falsifier_F1_pass": false,
+      "falsifier_F2_raw_macro": 0.3327063702315595,
+      "falsifier_F2_spectrum_minus_raw_macro": -0.252818352841542,
+      "falsifier_F2_pass": false,
+      "falsifier_F3_spearman_50pct_subsample": 0.9890952675567664,
+      "falsifier_F3_pass": true
+    },
+    "val_history": [
+      0.07345245045895284
+    ],
+    "timestamp": "2026-05-21 01:32:41",
+    "wall": 314.1
+  },
+  {
+    "tag": "exp149_spectra_codet_m4_f0.2",
+    "method": "SPECTRA",
+    "note": "Laplacian spectrum of per-author character-transition graphs. Attribution = argmin L2 distance between sorted top-k eigenvalue vectors. Permutation-invariant. CPU-only.",
+    "enc": "char-bigram(V=128)/Lspec(k=32)",
+    "bench": "codet_m4",
+    "frac": 0.2,
+    "train_size_after_cap": 1800,
+    "test_size_after_cap": 2400,
+    "val_macro": 0.04765308553728854,
+    "macro": 0.04763606049779683,
+    "weighted": 0.04763606049779683,
+    "acc": 0.16666666666666666,
+    "val_test_gap": 1.7025039491705418e-05,
+    "dpaper": -0.6156639395022032,
+    "falsifier_F1_intra_inter_ratio": 0.13884299522305915,
+    "falsifier_F2_spectrum_minus_raw_macro": -0.2799391864249535,
+    "falsifier_F2_raw_macro": 0.32757524692275036,
+    "falsifier_F3_spearman_50pct_subsample": 0.9928292422728768,
+    "test_time_sec": 22.801474809646606,
+    "test_metrics": {
+      "overall": {
+        "accuracy": 0.16666666666666666,
+        "macro_f1": 0.04763606049779683,
+        "weighted_f1": 0.04763606049779683,
+        "micro_f1": 0.16666666666666666,
+        "macro_precision": 0.027789356676392943,
+        "macro_recall": 0.16666666666666666
+      },
+      "per_class": {
+        "f1": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.285816362986781
+        ],
+        "precision": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.16673614005835766
+        ],
+        "recall": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      },
+      "per_language": {
+        "cpp": {
+          "n": 723,
+          "macro_f1": 0.05439814814814815,
+          "weighted_f1": 0.06365260488704473,
+          "accuracy": 0.1950207468879668
+        },
+        "java": {
+          "n": 791,
+          "macro_f1": 0.044906900328587074,
+          "weighted_f1": 0.04189796768962991,
+          "accuracy": 0.1554993678887484
+        },
+        "python": {
+          "n": 886,
+          "macro_f1": 0.04435746901500326,
+          "weighted_f1": 0.04085292857363731,
+          "accuracy": 0.15349887133182843
+        }
+      },
+      "per_source": {
+        "cf": {
+          "n": 515,
+          "macro_f1": 0.022946859903381644,
+          "weighted_f1": 0.010158998170817505,
+          "accuracy": 0.07378640776699029
+        },
+        "gh": {
+          "n": 719,
+          "macro_f1": 0.02918781725888325,
+          "weighted_f1": 0.016806337058661566,
+          "accuracy": 0.09596662030598054
+        },
+        "lc": {
+          "n": 1166,
+          "macro_f1": 0.08032899246058944,
+          "weighted_f1": 0.10092793649636667,
+          "accuracy": 0.25128644939965694
+        }
+      },
+      "confusion_matrix": [
+        [
+          0,
+          0,
+          0,
+          0,
+          1,
+          399
+        ],
+        [
+          0,
+          0,
+          0,
+          0,
+          0,
+          400
+        ],
+        [
+          0,
+          0,
+          0,
+          0,
+          0,
+          400
+        ],
+        [
+          0,
+          0,
+          0,
+          0,
+          0,
+          400
+        ],
+        [
+          0,
+          0,
+          0,
+          0,
+          0,
+          400
+        ],
+        [
+          0,
+          0,
+          0,
+          0,
+          0,
+          400
+        ]
+      ],
+      "sibling_confusion_rate": 0.0,
+      "cross_family_confusion_rate": 1.0,
+      "off_diag_total": 2000,
+      "n_samples": 2400,
+      "falsifier_F1_intra_mean": 0.7997802072304865,
+      "falsifier_F1_inter_mean": 0.1110438794919997,
+      "falsifier_F1_intra_inter_ratio": 0.13884299522305915,
+      "falsifier_F1_pass": false,
+      "falsifier_F2_raw_macro": 0.32757524692275036,
+      "falsifier_F2_spectrum_minus_raw_macro": -0.2799391864249535,
+      "falsifier_F2_pass": false,
+      "falsifier_F3_spearman_50pct_subsample": 0.9928292422728768,
+      "falsifier_F3_pass": true
+    },
+    "val_history": [
+      0.04765308553728854
+    ],
+    "timestamp": "2026-05-21 01:38:16",
+    "wall": 335.2
+  },
+  {
+    "tag": "exp149_spectra_aicd_t2_f0.01",
+    "method": "SPECTRA",
+    "note": "Laplacian spectrum of per-author character-transition graphs. Attribution = argmin L2 distance between sorted top-k eigenvalue vectors. Permutation-invariant. CPU-only.",
+    "enc": "char-bigram(V=128)/Lspec(k=32)",
+    "bench": "aicd_t2",
+    "frac": 0.01,
+    "train_size_after_cap": 2291,
+    "test_size_after_cap": 4800,
+    "val_macro": 0.013515337587045066,
+    "macro": 0.013345259358723443,
+    "weighted": 0.013345259358723443,
+    "acc": 0.07916666666666666,
+    "val_test_gap": 0.00017007822832162262,
+    "dpaper": -0.6499547406412766,
+    "falsifier_F1_intra_inter_ratio": 0.09879853028070974,
+    "falsifier_F2_spectrum_minus_raw_macro": -0.14062912952739248,
+    "falsifier_F2_raw_macro": 0.15397438888611592,
+    "falsifier_F3_spearman_50pct_subsample": 0.9875052984550571,
+    "test_time_sec": 45.765631437301636,
+    "test_metrics": {
+      "overall": {
+        "accuracy": 0.07916666666666666,
+        "macro_f1": 0.013345259358723443,
+        "weighted_f1": 0.013345259358723443,
+        "micro_f1": 0.07916666666666666,
+        "macro_precision": 0.009298534164358264,
+        "macro_recall": 0.07916666666666666
+      },
+      "per_class": {
+        "f1": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.14804633811113294,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.012096774193548387,
+          0.0,
+          0.0
+        ],
+        "precision": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.08033240997229917,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.03125,
+          0.0,
+          0.0
+        ],
+        "recall": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.9425,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0075,
+          0.0,
+          0.0
+        ]
+      },
+      "per_language": {},
+      "per_source": {},
+      "confusion_matrix": [
+        [
+          0,
+          0,
+          0,
+          0,
+          395,
+          0,
+          0,
+          0,
+          0,
+          5,
+          0,
+          0
+        ],
+        [
+          2,
+          0,
+          1,
+          0,
+          385,
+          0,
+          0,
+          0,
+          0,
+          12,
+          0,
+          0
+        ],
+        [
+          0,
+          0,
+          0,
+          0,
+          390,
+          0,
+          0,
+          0,
+          0,
+          10,
+          0,
+          0
+        ],
+        [
+          1,
+          0,
+          0,
+          0,
+          389,
+          0,
+          0,
+          0,
+          0,
+          10,
+          0,
+          0
+        ],
+        [
+          1,
+          0,
+          1,
+          0,
+          377,
+          0,
+          0,
+          0,
+          0,
+          21,
+          0,
+          0
+        ],
+        [
+          1,
+          0,
+          0,
+          0,
+          392,
+          0,
+          0,
+          0,
+          0,
+          7,
+          0,
+          0
+        ],
+        [
+          0,
+          0,
+          0,
+          0,
+          394,
+          0,
+          0,
+          0,
+          0,
+          6,
+          0,
+          0
+        ],
+        [
+          0,
+          0,
+          0,
+          0,
+          392,
+          0,
+          0,
+          0,
+          0,
+          8,
+          0,
+          0
+        ],
+        [
+          3,
+          0,
+          0,
+          0,
+          383,
+          0,
+          0,
+          0,
+          0,
+          14,
+          0,
+          0
+        ],
+        [
+          0,
+          0,
+          0,
+          0,
+          397,
+          0,
+          0,
+          0,
+          0,
+          3,
+          0,
+          0
+        ],
+        [
+          1,
+          0,
+          0,
+          0,
+          399,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        [
+          0,
+          0,
+          0,
+          0,
+          400,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ]
+      ],
+      "sibling_confusion_rate": 0.17737556561085974,
+      "cross_family_confusion_rate": 0.8226244343891402,
+      "off_diag_total": 4420,
+      "n_samples": 4800,
+      "falsifier_F1_intra_mean": 0.7832997170054898,
+      "falsifier_F1_inter_mean": 0.07738886080943826,
+      "falsifier_F1_intra_inter_ratio": 0.09879853028070974,
+      "falsifier_F1_pass": false,
+      "falsifier_F2_raw_macro": 0.15397438888611592,
+      "falsifier_F2_spectrum_minus_raw_macro": -0.14062912952739248,
+      "falsifier_F2_pass": false,
+      "falsifier_F3_spearman_50pct_subsample": 0.9875052984550571,
+      "falsifier_F3_pass": true
+    },
+    "val_history": [
+      0.013515337587045066
+    ],
+    "timestamp": "2026-05-21 01:53:45",
+    "wall": 929.2
+  },
+  {
+    "tag": "exp149_spectra_aicd_t2_f0.05",
+    "method": "SPECTRA",
+    "note": "Laplacian spectrum of per-author character-transition graphs. Attribution = argmin L2 distance between sorted top-k eigenvalue vectors. Permutation-invariant. CPU-only.",
+    "enc": "char-bigram(V=128)/Lspec(k=32)",
+    "bench": "aicd_t2",
+    "frac": 0.05,
+    "train_size_after_cap": 3552,
+    "test_size_after_cap": 4800,
+    "val_macro": 0.013659569741745469,
+    "macro": 0.012822978777970123,
+    "weighted": 0.012822978777970123,
+    "acc": 0.08333333333333333,
+    "val_test_gap": 0.0008365909637753459,
+    "dpaper": -0.6504770212220299,
+    "falsifier_F1_intra_inter_ratio": 0.08088170566217522,
+    "falsifier_F2_spectrum_minus_raw_macro": -0.13336705044678512,
+    "falsifier_F2_raw_macro": 0.14619002922475524,
+    "falsifier_F3_spearman_50pct_subsample": 0.9898020837311209,
+    "test_time_sec": 47.05400347709656,
+    "test_metrics": {
+      "overall": {
+        "accuracy": 0.08333333333333333,
+        "macro_f1": 0.012822978777970123,
+        "weighted_f1": 0.012822978777970123,
+        "micro_f1": 0.08333333333333333,
+        "macro_precision": 0.0069458915051746895,
+        "macro_recall": 0.08333333333333333
+      },
+      "per_class": {
+        "f1": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.15387574533564147,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "precision": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.08335069806209627,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "recall": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          1.0,
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "per_language": {},
+      "per_source": {},
+      "confusion_matrix": [
+        [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          400,
+          0,
+          0,
+          0
+        ],
+        [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          400,
+          0,
+          0,
+          0
+        ],
+        [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          400,
+          0,
+          0,
+          0
+        ],
+        [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          400,
+          0,
+          0,
+          0
+        ],
+        [
+          0,
+          0,
+          0,
+          1,
+          0,
+          0,
+          0,
+          0,
+          399,
+          0,
+          0,
+          0
+        ],
+        [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          400,
+          0,
+          0,
+          0
+        ],
+        [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          400,
+          0,
+          0,
+          0
+        ],
+        [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          400,
+          0,
+          0,
+          0
+        ],
+        [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          400,
+          0,
+          0,
+          0
+        ],
+        [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          400,
+          0,
+          0,
+          0
+        ],
+        [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          400,
+          0,
+          0,
+          0
+        ],
+        [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          400,
+          0,
+          0,
+          0
+        ]
+      ],
+      "sibling_confusion_rate": 0.18204545454545454,
+      "cross_family_confusion_rate": 0.8179545454545455,
+      "off_diag_total": 4400,
+      "n_samples": 4800,
+      "falsifier_F1_intra_mean": 0.8002960142657282,
+      "falsifier_F1_inter_mean": 0.0647293066684526,
+      "falsifier_F1_intra_inter_ratio": 0.08088170566217522,
+      "falsifier_F1_pass": false,
+      "falsifier_F2_raw_macro": 0.14619002922475524,
+      "falsifier_F2_spectrum_minus_raw_macro": -0.13336705044678512,
+      "falsifier_F2_pass": false,
+      "falsifier_F3_spearman_50pct_subsample": 0.9898020837311209,
+      "falsifier_F3_pass": true
+    },
+    "val_history": [
+      0.013659569741745469
+    ],
+    "timestamp": "2026-05-21 02:07:20",
+    "wall": 815.4
+  },
+  {
+    "tag": "exp149_spectra_aicd_t2_f0.2",
+    "method": "SPECTRA",
+    "note": "Laplacian spectrum of per-author character-transition graphs. Attribution = argmin L2 distance between sorted top-k eigenvalue vectors. Permutation-invariant. CPU-only.",
+    "enc": "char-bigram(V=128)/Lspec(k=32)",
+    "bench": "aicd_t2",
+    "frac": 0.2,
+    "train_size_after_cap": 3600,
+    "test_size_after_cap": 4800,
+    "val_macro": 0.016962645679208632,
+    "macro": 0.01612573982785578,
+    "weighted": 0.01612573982785578,
+    "acc": 0.085,
+    "val_test_gap": 0.0008369058513528517,
+    "dpaper": -0.6471742601721442,
+    "falsifier_F1_intra_inter_ratio": 0.06612177312017016,
+    "falsifier_F2_spectrum_minus_raw_macro": -0.13203109664762994,
+    "falsifier_F2_raw_macro": 0.14815683647548572,
+    "falsifier_F3_spearman_50pct_subsample": 0.9898786064387339,
+    "test_time_sec": 46.45839595794678,
+    "test_metrics": {
+      "overall": {
+        "accuracy": 0.085,
+        "macro_f1": 0.01612573982785578,
+        "weighted_f1": 0.01612573982785578,
+        "micro_f1": 0.085,
+        "macro_precision": 0.06662415882770455,
+        "macro_recall": 0.085
+      },
+      "per_class": {
+        "f1": [
+          0.0,
+          0.009925558312655087,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.025500910746812388,
+          0.1580824088748019,
+          0.0
+        ],
+        "precision": [
+          0.0,
+          0.6666666666666666,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.04697986577181208,
+          0.0858433734939759,
+          0.0
+        ],
+        "recall": [
+          0.0,
+          0.005,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0175,
+          0.9975,
+          0.0
+        ]
+      },
+      "per_language": {},
+      "per_source": {},
+      "confusion_matrix": [
+        [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          5,
+          395,
+          0
+        ],
+        [
+          0,
+          2,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          16,
+          382,
+          0
+        ],
+        [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          16,
+          384,
+          0
+        ],
+        [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          15,
+          385,
+          0
+        ],
+        [
+          0,
+          1,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          34,
+          365,
+          0
+        ],
+        [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          9,
+          391,
+          0
+        ],
+        [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          14,
+          386,
+          0
+        ],
+        [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          14,
+          386,
+          0
+        ],
+        [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          18,
+          382,
+          0
+        ],
+        [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          7,
+          393,
+          0
+        ],
+        [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          1,
+          399,
+          0
+        ],
+        [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          400,
+          0
+        ]
+      ],
+      "sibling_confusion_rate": 0.18078324225865208,
+      "cross_family_confusion_rate": 0.819216757741348,
+      "off_diag_total": 4392,
+      "n_samples": 4800,
+      "falsifier_F1_intra_mean": 0.8061685859435869,
+      "falsifier_F1_inter_mean": 0.05330529633637025,
+      "falsifier_F1_intra_inter_ratio": 0.06612177312017016,
+      "falsifier_F1_pass": false,
+      "falsifier_F2_raw_macro": 0.14815683647548572,
+      "falsifier_F2_spectrum_minus_raw_macro": -0.13203109664762994,
+      "falsifier_F2_pass": false,
+      "falsifier_F3_spearman_50pct_subsample": 0.9898786064387339,
+      "falsifier_F3_pass": true
+    },
+    "val_history": [
+      0.016962645679208632
+    ],
+    "timestamp": "2026-05-21 02:22:16",
+    "wall": 895.9
+  }
+]

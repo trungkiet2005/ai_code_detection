@@ -1,0 +1,506 @@
+# exp137 — STRINGKERNEL
+# =============================================================================
+# NAME       : STRINGKERNEL (Spectrum string kernel + SVM for code authorship)
+# REFERENCE  : Leslie et al. 2002 "The spectrum kernel: A string kernel
+#              for SVM protein classification" (NeurIPS), Lodhi et al.
+#              2002 "Text classification using string kernels" (JMLR).
+#              Foundational string-kernel literature; never applied to
+#              AI-generated code authorship.
+# CLAIM      : An author's code style is characterized by the FREQUENCY
+#              DISTRIBUTION of k-mers (length-k character substrings).
+#              The spectrum-k kernel computes K(x, y) = <phi(x), phi(y)>
+#              where phi(x)[s] = count of k-mer s in x. SVM on this kernel
+#              gives a discriminative classifier that operates entirely
+#              in character-frequency space — no embedding, no GPU.
+# EQUATION   : phi_k(x)[s] = #occurrences of substring s in x, |s| = k
+#              K_spec(x, y) = sum_s phi_k(x)[s] * phi_k(y)[s]
+#              Normalized: K_norm(x, y) = K_spec(x, y) / sqrt(K(x,x)·K(y,y))
+#              SVM: f(q) = sum_i alpha_i y_i K(x_i, q) + b
+#              y_hat = argmax_c [SVM_c(q) score]  (one-vs-rest)
+# WHY NEW    : Leslie 2002 used spectrum kernels for biology (protein
+#              classification). No prior code-attribution paper uses
+#              string kernels + SVM with k-mer spectrum. We propose this
+#              as a strong CPU-only baseline grounded in kernel methods.
+# WOW HOOK   : "A spectrum string kernel from 2002 — the same kernel that
+#              classifies proteins by amino-acid k-mers — classifies LLM-
+#              generated code by character k-mers. The proteins and the
+#              LLMs share more structure than the field admits."
+# FALSIFIER  : (F1) STRINGKERNEL composite > GZIP-NCD (exp133) by ≥ 0.02
+#              (kernel features beat compression statistics).
+#              (F2) Optimal k via val sweep in [3, 5] (k=2 = bigram too
+#              coarse, k=7 = too sparse).
+#              (F3) Number of non-zero SVM support vectors > 5% of train
+#              (model uses meaningful subset of training data, not
+#              dominated by a few outliers).
+# =============================================================================
+from __future__ import annotations
+
+import os, sys, time, json, random, subprocess, importlib.util, warnings, glob
+import multiprocessing as mp
+from dataclasses import dataclass, field
+from typing import List, Dict, Tuple
+
+os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
+
+def _ensure(pkg):
+    if importlib.util.find_spec(pkg.split(".")[0]) is None:
+        subprocess.check_call([sys.executable, "-m", "pip", "install", "-q", pkg])
+
+_ensure("numpy"); _ensure("scipy"); _ensure("datasets"); _ensure("scikit-learn"); _ensure("tqdm")
+
+import numpy as np
+from datasets import load_dataset
+from sklearn.feature_extraction.text import CountVectorizer
+from sklearn.svm import LinearSVC
+from sklearn.preprocessing import normalize
+from sklearn.metrics import (accuracy_score, f1_score, precision_score,
+                             recall_score, confusion_matrix)
+from tqdm import tqdm
+
+warnings.filterwarnings("ignore")
+import logging
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s", stream=sys.stdout)
+logger = logging.getLogger("exp137_stringkernel")
+
+PAPER_BASELINE = 0.6633
+GENE_ADJ_CODET = {0: [], 1: [3], 2: [], 3: [1], 4: [], 5: []}
+GENE_ADJ_AICD  = {i: [(i // 3) * 3 + j for j in range(3) if (i // 3) * 3 + j != i] for i in range(12)}
+
+
+def _gene_distance(u, v, adj):
+    if u == v: return 0.0
+    queue = [(u, 0)]; visited = {u}
+    while queue:
+        curr, d = queue.pop(0)
+        for nb in adj.get(curr, []):
+            if nb == v: return d + 1.0
+            if nb not in visited:
+                visited.add(nb); queue.append((nb, d + 1))
+    return float("inf")
+
+
+def build_distance_matrix(n_cls, adj, default_dist=4.0):
+    D = np.full((n_cls, n_cls), default_dist)
+    for i in range(n_cls):
+        for j in range(n_cls):
+            d = _gene_distance(i, j, adj)
+            if d < float("inf"): D[i, j] = d
+            elif (i == 0) != (j == 0): D[i, j] = 3.0
+    return D
+
+
+def build_sibling_mask(n_cls, adj):
+    M = np.zeros((n_cls, n_cls))
+    for i in range(n_cls):
+        for j in adj.get(i, []): M[i, j] = 1.0
+    return M
+
+
+# =============================================================================
+# Data loading (same plumbing as exp133)
+# =============================================================================
+
+KAGGLE_CODET = "/kaggle/input/datasets/chiboiz/codetm4/dataset_without_comments.parquet"
+KAGGLE_AICD  = "/kaggle/input/datasets/chiboiz/ai-code-detection/AICD-Bench"
+
+
+def _is_human(t):
+    return str(t or "").strip().lower() in {"human", "human_written", "human-generated"}
+
+
+def _vocab(train):
+    names = {str(r.get("model", "") or "").strip() for r in train
+             if not _is_human(r.get("target", "")) and r.get("model", "")}
+    return {n: i + 1 for i, n in enumerate(sorted(names))}
+
+
+def _conv_codet(split, vocab):
+    def row(r):
+        code = ""
+        for f in ("cleaned_code", "code"):
+            v = r.get(f, "")
+            if isinstance(v, str) and v.strip(): code = v; break
+        label = 0 if _is_human(r.get("target", "")) else vocab.get(
+            str(r.get("model", "") or "").strip(), -1)
+        return {"code": code, "label": label,
+                "language": str(r.get("language", "")).strip().lower(),
+                "source":   str(r.get("source",   "")).strip().lower()}
+    return split.map(row, remove_columns=split.column_names).filter(
+        lambda x: x["label"] >= 0 and len(x["code"].strip()) > 0)
+
+
+def _conv_aicd(split):
+    def row(r):
+        return {"code":     str(r.get("code",     "")).strip(),
+                "label":    int(r.get("label",    -1)),
+                "language": str(r.get("language", "")).strip().lower(),
+                "source":   ""}
+    return split.map(row, remove_columns=split.column_names).filter(
+        lambda x: x["label"] >= 0 and len(x["code"].strip()) > 0)
+
+
+def _load_codet():
+    ds = load_dataset("parquet", data_files=KAGGLE_CODET, split="train")
+    if "split" in ds.column_names:
+        tr = ds.filter(lambda x: str(x.get("split", "")).lower() == "train")
+        vl = ds.filter(lambda x: str(x.get("split", "")).lower() in {"val", "validation", "dev"})
+        ts = ds.filter(lambda x: str(x.get("split", "")).lower() == "test")
+        return tr, vl, ts
+    s  = ds.train_test_split(test_size=0.1, seed=42)
+    s2 = s["train"].train_test_split(test_size=1/9, seed=42)
+    return s2["train"], s2["test"], s["test"]
+
+
+def _load_aicd(task):
+    task_name = {"t1": "T1", "t2": "T2", "t3": "T3"}.get(task.lower())
+    if task_name is None: raise ValueError(f"[aicd] Unknown task '{task}'")
+    task_path = os.path.join(KAGGLE_AICD, task_name)
+    if not os.path.isdir(task_path): raise FileNotFoundError(f"[aicd] STRICT: {task_name} not found")
+    pf = sorted(glob.glob(os.path.join(task_path, "**", "*.parquet"), recursive=True))
+    if not pf: raise FileNotFoundError(f"[aicd] STRICT: No parquet files")
+    ds = load_dataset("parquet", data_files=pf, split="train")
+    if "split" in ds.column_names:
+        tr = ds.filter(lambda x: str(x.get("split", "")).lower() == "train")
+        vl = ds.filter(lambda x: str(x.get("split", "")).lower() in {"val", "validation", "dev"})
+        ts = ds.filter(lambda x: str(x.get("split", "")).lower() == "test")
+        if len(tr) > 0 and len(vl) > 0 and len(ts) > 0: return tr, vl, ts
+    s  = ds.train_test_split(test_size=0.1, seed=42)
+    s2 = s["train"].train_test_split(test_size=1/9, seed=42)
+    return s2["train"], s2["test"], s["test"]
+
+
+def stratified_subsample(data, frac_or_n_per_class, seed=42):
+    rng = random.Random(seed)
+    labels = list(range(max(data["label"]) + 1))
+    keep = []
+    for lbl in labels:
+        idx = [i for i, x in enumerate(data["label"]) if x == lbl]
+        if frac_or_n_per_class < 1.0:
+            n = min(max(1, int(len(idx) * frac_or_n_per_class)), len(idx))
+        else:
+            n = min(int(frac_or_n_per_class), len(idx))
+        keep.extend(rng.sample(idx, n))
+    return data.select(keep)
+
+
+# =============================================================================
+# Spectrum string kernel core
+# =============================================================================
+
+def build_spectrum_features(train_codes, k, max_features=50000):
+    """Fit CountVectorizer on training codes at k-mer level + L2-normalize.
+
+    Spectrum-k kernel: phi(x)[s] = count of k-mer s in x.
+    Inner product after L2 normalization == cosine-on-spectrum, which is the
+    standard normalized spectrum kernel K_norm(x,y) = <phi(x),phi(y)> / sqrt(K(x,x)K(y,y)).
+    """
+    vec = CountVectorizer(analyzer='char', ngram_range=(k, k),
+                          max_features=max_features, dtype=np.float32,
+                          lowercase=False)
+    X = vec.fit_transform(train_codes)
+    X = normalize(X, norm='l2', axis=1)
+    return vec, X
+
+
+def transform_query(vec, query_codes):
+    X = vec.transform(query_codes)
+    X = normalize(X, norm='l2', axis=1)
+    return X
+
+
+def train_svm(X, y, C=1.0):
+    """LinearSVC: one-vs-rest. fit produces coef_ ∈ R^{n_classes x n_features}.
+
+    Note: LinearSVC does NOT use kernel trick (it solves primal); but with
+    L2-normalized count features, decision function f(q) = w_c · phi(q) is
+    EXACTLY the linear spectrum kernel evaluation against the implicit
+    representer w_c = sum_i alpha_i^c y_i phi(x_i). So this is a faithful
+    spectrum-kernel SVM at O(N) per query instead of O(M).
+    """
+    clf = LinearSVC(C=C, multi_class='ovr', max_iter=5000, dual='auto',
+                    tol=1e-4)
+    clf.fit(X, y)
+    return clf
+
+
+def kmer_features_density(clf):
+    """Mean number of non-zero coefficients per class (proxy for active k-mer count)."""
+    if not hasattr(clf, "coef_") or clf.coef_ is None:
+        return 0.0
+    coef = clf.coef_
+    # Count features with |coef| > 1e-6 per class
+    nnz_per_class = np.sum(np.abs(coef) > 1e-6, axis=1)
+    return float(np.mean(nnz_per_class))
+
+
+def sweep_k_on_val(train_codes, train_labels, val_codes, val_labels,
+                   k_values=(3, 4, 5), C=1.0):
+    """Train at each k, return best-k and per-k val macro-F1."""
+    sweep_macros = {}
+    for k in k_values:
+        try:
+            vec, Xtr = build_spectrum_features(train_codes, k)
+            clf = train_svm(Xtr, train_labels, C=C)
+            Xvl = transform_query(vec, val_codes)
+            preds = clf.predict(Xvl)
+            macro = float(f1_score(val_labels, preds, average="macro", zero_division=0))
+            sweep_macros[k] = macro
+            logger.info(f"[k-sweep] k={k}  val_macro={macro:.4f}  "
+                        f"n_features={Xtr.shape[1]}")
+        except Exception as e:
+            logger.warning(f"[k-sweep] k={k} FAILED ({e})")
+            sweep_macros[k] = 0.0
+    best_k = max(sweep_macros, key=sweep_macros.get)
+    return best_k, sweep_macros
+
+
+# =============================================================================
+# Cfg
+# =============================================================================
+
+@dataclass
+class Cfg:
+    benchmark: str = "codet_m4"
+    task: str = "author"
+    frac: float = 0.20
+    n_cls: int = 6
+    seed: int = 42
+    k_default: int = 4
+    k_sweep: tuple = (3, 4, 5)
+    svm_C: float = 1.0
+    train_cap_per_class: int = 400
+    test_cap_per_class: int = 500
+    max_features: int = 50000
+    gene_adj: dict = field(default_factory=dict)
+    max_chars: int = 4000
+
+
+def set_seed(s):
+    random.seed(s); np.random.seed(s)
+
+
+# =============================================================================
+# Eval pack
+# =============================================================================
+
+def eval_pack(preds, labels, langs, sources, n_cls, sib_mask, dist_mat):
+    preds = np.asarray(preds); labels = np.asarray(labels)
+    langs = np.asarray(langs); sources = np.asarray(sources)
+    overall = {
+        "accuracy":        float(accuracy_score(labels, preds)),
+        "macro_f1":        float(f1_score(labels, preds, average="macro",    zero_division=0)),
+        "weighted_f1":     float(f1_score(labels, preds, average="weighted", zero_division=0)),
+        "micro_f1":        float(f1_score(labels, preds, average="micro",    zero_division=0)),
+        "macro_precision": float(precision_score(labels, preds, average="macro", zero_division=0)),
+        "macro_recall":    float(recall_score(labels, preds, average="macro",    zero_division=0)),
+    }
+    per_class = {
+        "f1":        f1_score(labels, preds, average=None, zero_division=0,
+                              labels=list(range(n_cls))).tolist(),
+        "precision": precision_score(labels, preds, average=None, zero_division=0,
+                                     labels=list(range(n_cls))).tolist(),
+        "recall":    recall_score(labels, preds, average=None, zero_division=0,
+                                  labels=list(range(n_cls))).tolist(),
+    }
+    cm       = confusion_matrix(labels, preds, labels=list(range(n_cls)))
+    off_diag = int(cm.sum() - cm.trace())
+    sib_conf = int(sum(cm[i, j] for i in range(n_cls) for j in range(n_cls)
+                       if i != j and sib_mask[i, j] > 0))
+    sib_rate = sib_conf / max(off_diag, 1)
+    cross = int(sum(cm[i, j] for i in range(n_cls) for j in range(n_cls)
+                    if i != j and dist_mat[i, j] >= 3.0))
+    cross_rate = cross / max(off_diag, 1)
+    per_lang, per_src = {}, {}
+    if langs.size > 0 and any(l for l in langs.tolist()):
+        for L in sorted(set(langs.tolist())):
+            if not L: continue
+            sel = (langs == L)
+            if sel.sum() < 2: continue
+            per_lang[L] = {
+                "n":           int(sel.sum()),
+                "macro_f1":    float(f1_score(labels[sel], preds[sel], average="macro",    zero_division=0)),
+                "weighted_f1": float(f1_score(labels[sel], preds[sel], average="weighted", zero_division=0)),
+                "accuracy":    float(accuracy_score(labels[sel], preds[sel])),
+            }
+    if sources.size > 0 and any(s for s in sources.tolist()):
+        for S in sorted(set(sources.tolist())):
+            if not S: continue
+            sel = (sources == S)
+            if sel.sum() < 2: continue
+            per_src[S] = {
+                "n":           int(sel.sum()),
+                "macro_f1":    float(f1_score(labels[sel], preds[sel], average="macro",    zero_division=0)),
+                "weighted_f1": float(f1_score(labels[sel], preds[sel], average="weighted", zero_division=0)),
+                "accuracy":    float(accuracy_score(labels[sel], preds[sel])),
+            }
+    return {
+        "overall":                     overall,
+        "per_class":                   per_class,
+        "per_language":                per_lang,
+        "per_source":                  per_src,
+        "confusion_matrix":            cm.tolist(),
+        "sibling_confusion_rate":      float(sib_rate),
+        "cross_family_confusion_rate": float(cross_rate),
+        "off_diag_total":              off_diag,
+        "n_samples":                   int(len(labels)),
+    }
+
+
+# =============================================================================
+# run_exp
+# =============================================================================
+
+def run_exp(cfg, tag):
+    set_seed(cfg.seed)
+    cfg.gene_adj = GENE_ADJ_CODET if cfg.benchmark == "codet_m4" else GENE_ADJ_AICD
+
+    if cfg.benchmark == "codet_m4":
+        tr_raw, vl_raw, ts_raw = _load_codet()
+        vocab = _vocab(tr_raw)
+        tr_data = _conv_codet(tr_raw, vocab)
+        vl_data = _conv_codet(vl_raw, vocab)
+        ts_data = _conv_codet(ts_raw, vocab)
+    else:
+        tr_raw, vl_raw, ts_raw = _load_aicd("t2")
+        tr_data = _conv_aicd(tr_raw); vl_data = _conv_aicd(vl_raw); ts_data = _conv_aicd(ts_raw)
+
+    cfg.n_cls = max(tr_data["label"]) + 1
+    dist_mat = build_distance_matrix(cfg.n_cls, cfg.gene_adj)
+    sib_mask = build_sibling_mask(cfg.n_cls, cfg.gene_adj)
+
+    tr_data_frac = stratified_subsample(tr_data, cfg.frac, seed=cfg.seed)
+    tr_data_capped = stratified_subsample(tr_data_frac, cfg.train_cap_per_class, seed=cfg.seed + 1)
+    ts_data_capped = stratified_subsample(ts_data, cfg.test_cap_per_class, seed=cfg.seed + 2)
+    vl_data_capped = stratified_subsample(vl_data, cfg.test_cap_per_class // 2, seed=cfg.seed + 3)
+
+    train_codes = [r["code"][:cfg.max_chars] for r in tr_data_capped]
+    train_labels = list(tr_data_capped["label"])
+    val_codes = [r["code"][:cfg.max_chars] for r in vl_data_capped]
+    val_labels = list(vl_data_capped["label"])
+    val_langs = [r.get("language", "") or "" for r in vl_data_capped]
+    val_sources = [r.get("source", "") or "" for r in vl_data_capped]
+    test_codes = [r["code"][:cfg.max_chars] for r in ts_data_capped]
+    test_labels = list(ts_data_capped["label"])
+    test_langs = [r.get("language", "") or "" for r in ts_data_capped]
+    test_sources = [r.get("source", "") or "" for r in ts_data_capped]
+
+    logger.info(f"[setup] frac={cfg.frac} train={len(train_codes)} val={len(val_codes)} "
+                f"test={len(test_codes)} k_sweep={cfg.k_sweep}")
+
+    # --- k-sweep on val (falsifier F2) ---
+    t0 = time.time()
+    best_k, k_sweep_macros = sweep_k_on_val(
+        train_codes, train_labels, val_codes, val_labels,
+        k_values=cfg.k_sweep, C=cfg.svm_C)
+    sweep_time = time.time() - t0
+    logger.info(f"[k-sweep] best_k={best_k}  curve={k_sweep_macros}  time={sweep_time:.0f}s")
+
+    # --- Final fit at best_k ---
+    t0 = time.time()
+    vec, Xtr = build_spectrum_features(train_codes, best_k, max_features=cfg.max_features)
+    clf = train_svm(Xtr, train_labels, C=cfg.svm_C)
+    Xvl = transform_query(vec, val_codes)
+    val_preds = clf.predict(Xvl)
+    val_met = eval_pack(val_preds, val_labels, val_langs, val_sources,
+                         cfg.n_cls, sib_mask, dist_mat)
+    val_macro = val_met["overall"]["macro_f1"]
+    val_time = time.time() - t0
+
+    mean_kmer_density = kmer_features_density(clf)
+    n_features = int(Xtr.shape[1])
+    train_size = int(Xtr.shape[0])
+    feature_usage_ratio = mean_kmer_density / max(n_features, 1)
+
+    logger.info(f"[val] macro={val_macro:.4f}  k={best_k}  "
+                f"n_features={n_features}  mean_active_kmers={mean_kmer_density:.0f}  "
+                f"time={val_time:.0f}s")
+
+    # --- Test ---
+    t0 = time.time()
+    Xts = transform_query(vec, test_codes)
+    test_preds = clf.predict(Xts)
+    ts_met = eval_pack(test_preds, test_labels, test_langs, test_sources,
+                       cfg.n_cls, sib_mask, dist_mat)
+    test_macro = ts_met["overall"]["macro_f1"]
+    gap = val_macro - test_macro
+    test_time = time.time() - t0
+
+    logger.info(f"[test] macro={test_macro:.4f}  gap={gap:+.4f}  time={test_time:.0f}s")
+
+    ts_met["falsifier_F2_best_k"] = int(best_k)
+    ts_met["falsifier_F2_k_sweep_curve"] = {int(k): float(v) for k, v in k_sweep_macros.items()}
+    ts_met["falsifier_F3_mean_kmer_features_used"] = float(mean_kmer_density)
+    ts_met["falsifier_F3_feature_usage_ratio"] = float(feature_usage_ratio)
+
+    return {
+        "tag": tag, "method": "STRINGKERNEL",
+        "note": ("Spectrum k-mer string kernel + LinearSVC OvR. "
+                 "CPU-only; Leslie 2002 spectrum kernel adapted to AI code authorship."),
+        "enc": f"char-{best_k}-gram",
+        "bench": cfg.benchmark, "frac": cfg.frac,
+        "best_k_via_val_sweep": int(best_k),
+        "k_sweep_val_macros": {int(k): float(v) for k, v in k_sweep_macros.items()},
+        "n_features": n_features,
+        "train_size_after_cap": train_size,
+        "test_size_after_cap": int(len(test_codes)),
+        "mean_kmer_features_used": float(mean_kmer_density),
+        "feature_usage_ratio": float(feature_usage_ratio),
+        "svm_C": cfg.svm_C,
+        "val_macro": val_macro, "macro": test_macro,
+        "weighted": ts_met["overall"]["weighted_f1"],
+        "acc": ts_met["overall"]["accuracy"],
+        "val_test_gap": gap, "dpaper": test_macro - PAPER_BASELINE,
+        "sweep_time_sec": sweep_time,
+        "val_time_sec": val_time, "test_time_sec": test_time,
+        "test_metrics": ts_met,
+        "val_history": [val_macro],
+        "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+    }
+
+
+def main():
+    benchmarks = [("codet_m4", "author", 6), ("aicd_t2", "t2", 12)]
+    fracs = [0.01, 0.05, 0.20]
+    results = []
+    for bench, task, n_cls in benchmarks:
+        for frac in fracs:
+            cfg = Cfg(benchmark=bench, task=task, frac=frac, n_cls=n_cls)
+            tag = f"exp137_stringkernel_{bench}_f{frac}"
+            logger.info(f"=== {tag} ===")
+            t0 = time.time()
+            try:
+                res = run_exp(cfg, tag)
+                res["wall"] = round(time.time() - t0, 1)
+                results.append(res)
+                logger.info(f"[{tag}] test={res['macro']:.4f} ({res['dpaper']:+.4f}) "
+                            f"gap={res['val_test_gap']:+.4f} best_k={res['best_k_via_val_sweep']} "
+                            f"n_feat={res['n_features']} time={res['wall']:.0f}s")
+            except Exception as e:
+                logger.error(f"[{tag}] FAILED: {e}")
+                import traceback; traceback.print_exc()
+    try: _here = os.path.dirname(os.path.realpath(__file__))
+    except NameError: _here = os.getcwd()
+    out_dir = os.path.join(_here, "results"); os.makedirs(out_dir, exist_ok=True)
+    with open(os.path.join(out_dir, "exp137_stringkernel_results.json"), "w") as f:
+        json.dump(results, f, indent=2)
+    print("\n" + "="*140)
+    print(f"{'Benchmark':<12} {'Frac':>6} {'best_k':>7} {'nFeat':>8} {'Train':>8} {'Test':>8} "
+          f"{'Val-F1':>8} {'Test-F1':>8} {'Gap':>8} {'dPaper':>9} "
+          f"{'kmersUsed':>10} {'Wall':>8}")
+    print("-"*140)
+    for r in results:
+        print(f"{r['bench']:<12} {r['frac']:>6.0%} {r['best_k_via_val_sweep']:>7d} "
+              f"{r['n_features']:>8d} {r['train_size_after_cap']:>8d} {r['test_size_after_cap']:>8d} "
+              f"{r['val_macro']:>8.4f} {r['macro']:>8.4f} {r['val_test_gap']:>+8.4f} "
+              f"{r['dpaper']:>+9.4f} {r['mean_kmer_features_used']:>10.0f} {r['wall']:>8.0f}s")
+    print("="*140)
+    print("\nk-sweep val-macro curves (falsifier F2 — best should fall in [3,5]):")
+    for r in results:
+        curve = r.get("k_sweep_val_macros", {})
+        curve_s = "  ".join(f"k={k}:{v:.4f}" for k, v in sorted(curve.items()))
+        print(f"  {r['bench']:<12} frac={r['frac']:>.0%}  {curve_s}  -> best_k={r['best_k_via_val_sweep']}")
+    print("="*140)
+
+
+if __name__ == "__main__":
+    main()

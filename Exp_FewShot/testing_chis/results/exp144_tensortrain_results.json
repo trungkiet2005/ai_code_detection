@@ -1,0 +1,1388 @@
+[
+  {
+    "tag": "exp144_tensortrain_codet_m4_f0.01",
+    "method": "TENSORTRAIN",
+    "note": "Per-author 3D trigram tensor (V=64) factorised via non-negative PARAFAC (rank R=8). Attribution by projection onto each author's PARAFAC basis. CPU-only via tensorly; multi-linear algebra applied to code authorship for the first time.",
+    "enc": "trigram-tensor-V64-R8",
+    "bench": "codet_m4",
+    "frac": 0.01,
+    "rank": 8,
+    "vocab_size": 64,
+    "train_size_after_cap": 1640,
+    "test_size_after_cap": 2400,
+    "val_macro": 0.047619047619047616,
+    "macro": 0.047619047619047616,
+    "val_macro_flat_trigram": 0.38491264684307985,
+    "test_macro_flat_trigram": 0.3850878368985485,
+    "tt_minus_flat": -0.33746878927950086,
+    "weighted": 0.047619047619047616,
+    "acc": 0.16666666666666666,
+    "val_test_gap": 0.0,
+    "dpaper": -0.6156809523809523,
+    "rank_sweep_val_macros": {
+      "2": 0.2562445009300645,
+      "4": 0.047619047619047616,
+      "8": 0.047619047619047616,
+      "16": 0.047619047619047616
+    },
+    "own_basis_recon_err": NaN,
+    "other_basis_recon_err": NaN,
+    "other_over_own_ratio": NaN,
+    "factor_time_sec": 1.1660456657409668,
+    "query_build_time_sec": 12.636704683303833,
+    "val_time_sec": 5.224705219268799,
+    "test_time_sec": 10.055540084838867,
+    "test_metrics": {
+      "overall": {
+        "accuracy": 0.16666666666666666,
+        "macro_f1": 0.047619047619047616,
+        "weighted_f1": 0.047619047619047616,
+        "micro_f1": 0.16666666666666666,
+        "macro_precision": 0.027777777777777776,
+        "macro_recall": 0.16666666666666666
+      },
+      "per_class": {
+        "f1": [
+          0.2857142857142857,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "precision": [
+          0.16666666666666666,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "recall": [
+          1.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "per_language": {
+        "cpp": {
+          "n": 723,
+          "macro_f1": 0.03907203907203907,
+          "weighted_f1": 0.0311279315428693,
+          "accuracy": 0.13278008298755187
+        },
+        "java": {
+          "n": 791,
+          "macro_f1": 0.051336898395721926,
+          "weighted_f1": 0.056074690535908654,
+          "accuracy": 0.1820480404551201
+        },
+        "python": {
+          "n": 886,
+          "macro_f1": 0.05098789037603569,
+          "weighted_f1": 0.05524647264220572,
+          "accuracy": 0.18058690744920994
+        }
+      },
+      "per_source": {
+        "cf": {
+          "n": 515,
+          "macro_f1": 0.08309037900874636,
+          "weighted_f1": 0.16553539585043447,
+          "accuracy": 0.3320388349514563
+        },
+        "gh": {
+          "n": 719,
+          "macro_f1": 0.07673090649536045,
+          "weighted_f1": 0.13766741221003476,
+          "accuracy": 0.29902642559109877
+        },
+        "lc": {
+          "n": 1166,
+          "macro_f1": 0.0047457627118644066,
+          "weighted_f1": 0.0002849085676076402,
+          "accuracy": 0.012006861063464836
+        }
+      },
+      "confusion_matrix": [
+        [
+          400,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        [
+          400,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        [
+          400,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        [
+          400,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        [
+          400,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        [
+          400,
+          0,
+          0,
+          0,
+          0,
+          0
+        ]
+      ],
+      "sibling_confusion_rate": 0.0,
+      "cross_family_confusion_rate": 1.0,
+      "off_diag_total": 2000,
+      "n_samples": 2400,
+      "falsifier_F1_rank_sweep_val_macros": {
+        "2": 0.2562445009300645,
+        "4": 0.047619047619047616,
+        "8": 0.047619047619047616,
+        "16": 0.047619047619047616
+      },
+      "falsifier_F2_tensortrain_test_macro": 0.047619047619047616,
+      "falsifier_F2_flat_trigram_test_macro": 0.3850878368985485,
+      "falsifier_F2_tensortrain_minus_flat": -0.33746878927950086,
+      "falsifier_F3_own_basis_recon_err": NaN,
+      "falsifier_F3_other_basis_recon_err": NaN,
+      "falsifier_F3_other_over_own_ratio": NaN
+    },
+    "val_history": [
+      0.047619047619047616
+    ],
+    "timestamp": "2026-05-21 01:10:06",
+    "wall": 462.2
+  },
+  {
+    "tag": "exp144_tensortrain_codet_m4_f0.05",
+    "method": "TENSORTRAIN",
+    "note": "Per-author 3D trigram tensor (V=64) factorised via non-negative PARAFAC (rank R=8). Attribution by projection onto each author's PARAFAC basis. CPU-only via tensorly; multi-linear algebra applied to code authorship for the first time.",
+    "enc": "trigram-tensor-V64-R8",
+    "bench": "codet_m4",
+    "frac": 0.05,
+    "rank": 8,
+    "vocab_size": 64,
+    "train_size_after_cap": 1800,
+    "test_size_after_cap": 2400,
+    "val_macro": 0.047619047619047616,
+    "macro": 0.047619047619047616,
+    "val_macro_flat_trigram": 0.3475928770666567,
+    "test_macro_flat_trigram": 0.3683141228796858,
+    "tt_minus_flat": -0.3206950752606382,
+    "weighted": 0.047619047619047616,
+    "acc": 0.16666666666666666,
+    "val_test_gap": 0.0,
+    "dpaper": -0.6156809523809523,
+    "rank_sweep_val_macros": {
+      "2": 0.2324519195208984,
+      "4": 0.047619047619047616,
+      "8": 0.047619047619047616,
+      "16": 0.047619047619047616
+    },
+    "own_basis_recon_err": NaN,
+    "other_basis_recon_err": NaN,
+    "other_over_own_ratio": NaN,
+    "factor_time_sec": 1.1605725288391113,
+    "query_build_time_sec": 12.993371963500977,
+    "val_time_sec": 5.178236722946167,
+    "test_time_sec": 10.163535594940186,
+    "test_metrics": {
+      "overall": {
+        "accuracy": 0.16666666666666666,
+        "macro_f1": 0.047619047619047616,
+        "weighted_f1": 0.047619047619047616,
+        "micro_f1": 0.16666666666666666,
+        "macro_precision": 0.027777777777777776,
+        "macro_recall": 0.16666666666666666
+      },
+      "per_class": {
+        "f1": [
+          0.0,
+          0.2857142857142857,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "precision": [
+          0.0,
+          0.16666666666666666,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "recall": [
+          0.0,
+          1.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "per_language": {
+        "cpp": {
+          "n": 723,
+          "macro_f1": 0.048799685163321525,
+          "weighted_f1": 0.05021710340457983,
+          "accuracy": 0.1715076071922545
+        },
+        "java": {
+          "n": 791,
+          "macro_f1": 0.04859611231101512,
+          "weighted_f1": 0.049763401987259474,
+          "accuracy": 0.1706700379266751
+        },
+        "python": {
+          "n": 886,
+          "macro_f1": 0.04576436222005842,
+          "weighted_f1": 0.04369825105888197,
+          "accuracy": 0.15914221218961624
+        }
+      },
+      "per_source": {
+        "cf": {
+          "n": 515,
+          "macro_f1": 0.03530092592592592,
+          "weighted_f1": 0.02508764832793959,
+          "accuracy": 0.11844660194174757
+        },
+        "gh": {
+          "n": 719,
+          "macro_f1": 0.029573299535276723,
+          "weighted_f1": 0.01727508456859002,
+          "accuracy": 0.09735744089012517
+        },
+        "lc": {
+          "n": 1166,
+          "macro_f1": 0.07498257839721253,
+          "weighted_f1": 0.08649362602422887,
+          "accuracy": 0.2307032590051458
+        }
+      },
+      "confusion_matrix": [
+        [
+          0,
+          400,
+          0,
+          0,
+          0,
+          0
+        ],
+        [
+          0,
+          400,
+          0,
+          0,
+          0,
+          0
+        ],
+        [
+          0,
+          400,
+          0,
+          0,
+          0,
+          0
+        ],
+        [
+          0,
+          400,
+          0,
+          0,
+          0,
+          0
+        ],
+        [
+          0,
+          400,
+          0,
+          0,
+          0,
+          0
+        ],
+        [
+          0,
+          400,
+          0,
+          0,
+          0,
+          0
+        ]
+      ],
+      "sibling_confusion_rate": 0.2,
+      "cross_family_confusion_rate": 0.8,
+      "off_diag_total": 2000,
+      "n_samples": 2400,
+      "falsifier_F1_rank_sweep_val_macros": {
+        "2": 0.2324519195208984,
+        "4": 0.047619047619047616,
+        "8": 0.047619047619047616,
+        "16": 0.047619047619047616
+      },
+      "falsifier_F2_tensortrain_test_macro": 0.047619047619047616,
+      "falsifier_F2_flat_trigram_test_macro": 0.3683141228796858,
+      "falsifier_F2_tensortrain_minus_flat": -0.3206950752606382,
+      "falsifier_F3_own_basis_recon_err": NaN,
+      "falsifier_F3_other_basis_recon_err": NaN,
+      "falsifier_F3_other_over_own_ratio": NaN
+    },
+    "val_history": [
+      0.047619047619047616
+    ],
+    "timestamp": "2026-05-21 01:15:47",
+    "wall": 341.5
+  },
+  {
+    "tag": "exp144_tensortrain_codet_m4_f0.2",
+    "method": "TENSORTRAIN",
+    "note": "Per-author 3D trigram tensor (V=64) factorised via non-negative PARAFAC (rank R=8). Attribution by projection onto each author's PARAFAC basis. CPU-only via tensorly; multi-linear algebra applied to code authorship for the first time.",
+    "enc": "trigram-tensor-V64-R8",
+    "bench": "codet_m4",
+    "frac": 0.2,
+    "rank": 8,
+    "vocab_size": 64,
+    "train_size_after_cap": 1800,
+    "test_size_after_cap": 2400,
+    "val_macro": 0.047619047619047616,
+    "macro": 0.047619047619047616,
+    "val_macro_flat_trigram": 0.3833137428601881,
+    "test_macro_flat_trigram": 0.3758882534730383,
+    "tt_minus_flat": -0.32826920585399066,
+    "weighted": 0.047619047619047616,
+    "acc": 0.16666666666666666,
+    "val_test_gap": 0.0,
+    "dpaper": -0.6156809523809523,
+    "rank_sweep_val_macros": {
+      "2": 0.249201452031214,
+      "4": 0.047619047619047616,
+      "8": 0.047619047619047616,
+      "16": 0.047619047619047616
+    },
+    "own_basis_recon_err": NaN,
+    "other_basis_recon_err": NaN,
+    "other_over_own_ratio": NaN,
+    "factor_time_sec": 1.1567623615264893,
+    "query_build_time_sec": 12.728845357894897,
+    "val_time_sec": 5.360117673873901,
+    "test_time_sec": 10.467140674591064,
+    "test_metrics": {
+      "overall": {
+        "accuracy": 0.16666666666666666,
+        "macro_f1": 0.047619047619047616,
+        "weighted_f1": 0.047619047619047616,
+        "micro_f1": 0.16666666666666666,
+        "macro_precision": 0.027777777777777776,
+        "macro_recall": 0.16666666666666666
+      },
+      "per_class": {
+        "f1": [
+          0.2857142857142857,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "precision": [
+          0.16666666666666666,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "recall": [
+          1.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "per_language": {
+        "cpp": {
+          "n": 723,
+          "macro_f1": 0.03907203907203907,
+          "weighted_f1": 0.0311279315428693,
+          "accuracy": 0.13278008298755187
+        },
+        "java": {
+          "n": 791,
+          "macro_f1": 0.051336898395721926,
+          "weighted_f1": 0.056074690535908654,
+          "accuracy": 0.1820480404551201
+        },
+        "python": {
+          "n": 886,
+          "macro_f1": 0.05098789037603569,
+          "weighted_f1": 0.05524647264220572,
+          "accuracy": 0.18058690744920994
+        }
+      },
+      "per_source": {
+        "cf": {
+          "n": 515,
+          "macro_f1": 0.08309037900874636,
+          "weighted_f1": 0.16553539585043447,
+          "accuracy": 0.3320388349514563
+        },
+        "gh": {
+          "n": 719,
+          "macro_f1": 0.07673090649536045,
+          "weighted_f1": 0.13766741221003476,
+          "accuracy": 0.29902642559109877
+        },
+        "lc": {
+          "n": 1166,
+          "macro_f1": 0.0047457627118644066,
+          "weighted_f1": 0.0002849085676076402,
+          "accuracy": 0.012006861063464836
+        }
+      },
+      "confusion_matrix": [
+        [
+          400,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        [
+          400,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        [
+          400,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        [
+          400,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        [
+          400,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        [
+          400,
+          0,
+          0,
+          0,
+          0,
+          0
+        ]
+      ],
+      "sibling_confusion_rate": 0.0,
+      "cross_family_confusion_rate": 1.0,
+      "off_diag_total": 2000,
+      "n_samples": 2400,
+      "falsifier_F1_rank_sweep_val_macros": {
+        "2": 0.249201452031214,
+        "4": 0.047619047619047616,
+        "8": 0.047619047619047616,
+        "16": 0.047619047619047616
+      },
+      "falsifier_F2_tensortrain_test_macro": 0.047619047619047616,
+      "falsifier_F2_flat_trigram_test_macro": 0.3758882534730383,
+      "falsifier_F2_tensortrain_minus_flat": -0.32826920585399066,
+      "falsifier_F3_own_basis_recon_err": NaN,
+      "falsifier_F3_other_basis_recon_err": NaN,
+      "falsifier_F3_other_over_own_ratio": NaN
+    },
+    "val_history": [
+      0.047619047619047616
+    ],
+    "timestamp": "2026-05-21 01:21:47",
+    "wall": 359.1
+  },
+  {
+    "tag": "exp144_tensortrain_aicd_t2_f0.01",
+    "method": "TENSORTRAIN",
+    "note": "Per-author 3D trigram tensor (V=64) factorised via non-negative PARAFAC (rank R=8). Attribution by projection onto each author's PARAFAC basis. CPU-only via tensorly; multi-linear algebra applied to code authorship for the first time.",
+    "enc": "trigram-tensor-V64-R8",
+    "bench": "aicd_t2",
+    "frac": 0.01,
+    "rank": 8,
+    "vocab_size": 64,
+    "train_size_after_cap": 2291,
+    "test_size_after_cap": 4800,
+    "val_macro": 0.012820512820512822,
+    "macro": 0.012820512820512822,
+    "val_macro_flat_trigram": 0.19618821030688327,
+    "test_macro_flat_trigram": 0.19083471126007603,
+    "tt_minus_flat": -0.1780141984395632,
+    "weighted": 0.01282051282051282,
+    "acc": 0.08333333333333333,
+    "val_test_gap": 0.0,
+    "dpaper": -0.6504794871794872,
+    "rank_sweep_val_macros": {
+      "2": 0.0912112691711318,
+      "4": 0.012820512820512822,
+      "8": 0.012820512820512822,
+      "16": 0.012820512820512822
+    },
+    "own_basis_recon_err": NaN,
+    "other_basis_recon_err": NaN,
+    "other_over_own_ratio": NaN,
+    "factor_time_sec": 2.817028760910034,
+    "query_build_time_sec": 34.35435605049133,
+    "val_time_sec": 19.677908658981323,
+    "test_time_sec": 39.52712678909302,
+    "test_metrics": {
+      "overall": {
+        "accuracy": 0.08333333333333333,
+        "macro_f1": 0.012820512820512822,
+        "weighted_f1": 0.01282051282051282,
+        "micro_f1": 0.08333333333333333,
+        "macro_precision": 0.006944444444444444,
+        "macro_recall": 0.08333333333333333
+      },
+      "per_class": {
+        "f1": [
+          0.15384615384615385,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "precision": [
+          0.08333333333333333,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "recall": [
+          1.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "per_language": {},
+      "per_source": {},
+      "confusion_matrix": [
+        [
+          400,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        [
+          400,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        [
+          400,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        [
+          400,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        [
+          400,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        [
+          400,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        [
+          400,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        [
+          400,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        [
+          400,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        [
+          400,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        [
+          400,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        [
+          400,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ]
+      ],
+      "sibling_confusion_rate": 0.18181818181818182,
+      "cross_family_confusion_rate": 0.8181818181818182,
+      "off_diag_total": 4400,
+      "n_samples": 4800,
+      "falsifier_F1_rank_sweep_val_macros": {
+        "2": 0.0912112691711318,
+        "4": 0.012820512820512822,
+        "8": 0.012820512820512822,
+        "16": 0.012820512820512822
+      },
+      "falsifier_F2_tensortrain_test_macro": 0.012820512820512822,
+      "falsifier_F2_flat_trigram_test_macro": 0.19083471126007603,
+      "falsifier_F2_tensortrain_minus_flat": -0.1780141984395632,
+      "falsifier_F3_own_basis_recon_err": NaN,
+      "falsifier_F3_other_basis_recon_err": NaN,
+      "falsifier_F3_other_over_own_ratio": NaN
+    },
+    "val_history": [
+      0.012820512820512822
+    ],
+    "timestamp": "2026-05-21 01:39:53",
+    "wall": 1086.9
+  },
+  {
+    "tag": "exp144_tensortrain_aicd_t2_f0.05",
+    "method": "TENSORTRAIN",
+    "note": "Per-author 3D trigram tensor (V=64) factorised via non-negative PARAFAC (rank R=8). Attribution by projection onto each author's PARAFAC basis. CPU-only via tensorly; multi-linear algebra applied to code authorship for the first time.",
+    "enc": "trigram-tensor-V64-R8",
+    "bench": "aicd_t2",
+    "frac": 0.05,
+    "rank": 8,
+    "vocab_size": 64,
+    "train_size_after_cap": 3552,
+    "test_size_after_cap": 4800,
+    "val_macro": 0.012820512820512822,
+    "macro": 0.012820512820512822,
+    "val_macro_flat_trigram": 0.19658919122061413,
+    "test_macro_flat_trigram": 0.18575273217314522,
+    "tt_minus_flat": -0.1729322193526324,
+    "weighted": 0.01282051282051282,
+    "acc": 0.08333333333333333,
+    "val_test_gap": 0.0,
+    "dpaper": -0.6504794871794872,
+    "rank_sweep_val_macros": {
+      "2": 0.089092145206984,
+      "4": 0.012820512820512822,
+      "8": 0.012820512820512822,
+      "16": 0.012820512820512822
+    },
+    "own_basis_recon_err": NaN,
+    "other_basis_recon_err": NaN,
+    "other_over_own_ratio": NaN,
+    "factor_time_sec": 3.2620010375976562,
+    "query_build_time_sec": 42.819034576416016,
+    "val_time_sec": 30.086862564086914,
+    "test_time_sec": 42.99010372161865,
+    "test_metrics": {
+      "overall": {
+        "accuracy": 0.08333333333333333,
+        "macro_f1": 0.012820512820512822,
+        "weighted_f1": 0.01282051282051282,
+        "micro_f1": 0.08333333333333333,
+        "macro_precision": 0.006944444444444444,
+        "macro_recall": 0.08333333333333333
+      },
+      "per_class": {
+        "f1": [
+          0.15384615384615385,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "precision": [
+          0.08333333333333333,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "recall": [
+          1.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "per_language": {},
+      "per_source": {},
+      "confusion_matrix": [
+        [
+          400,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        [
+          400,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        [
+          400,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        [
+          400,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        [
+          400,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        [
+          400,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        [
+          400,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        [
+          400,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        [
+          400,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        [
+          400,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        [
+          400,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        [
+          400,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ]
+      ],
+      "sibling_confusion_rate": 0.18181818181818182,
+      "cross_family_confusion_rate": 0.8181818181818182,
+      "off_diag_total": 4400,
+      "n_samples": 4800,
+      "falsifier_F1_rank_sweep_val_macros": {
+        "2": 0.089092145206984,
+        "4": 0.012820512820512822,
+        "8": 0.012820512820512822,
+        "16": 0.012820512820512822
+      },
+      "falsifier_F2_tensortrain_test_macro": 0.012820512820512822,
+      "falsifier_F2_flat_trigram_test_macro": 0.18575273217314522,
+      "falsifier_F2_tensortrain_minus_flat": -0.1729322193526324,
+      "falsifier_F3_own_basis_recon_err": NaN,
+      "falsifier_F3_other_basis_recon_err": NaN,
+      "falsifier_F3_other_over_own_ratio": NaN
+    },
+    "val_history": [
+      0.012820512820512822
+    ],
+    "timestamp": "2026-05-21 01:56:09",
+    "wall": 975.7
+  },
+  {
+    "tag": "exp144_tensortrain_aicd_t2_f0.2",
+    "method": "TENSORTRAIN",
+    "note": "Per-author 3D trigram tensor (V=64) factorised via non-negative PARAFAC (rank R=8). Attribution by projection onto each author's PARAFAC basis. CPU-only via tensorly; multi-linear algebra applied to code authorship for the first time.",
+    "enc": "trigram-tensor-V64-R8",
+    "bench": "aicd_t2",
+    "frac": 0.2,
+    "rank": 8,
+    "vocab_size": 64,
+    "train_size_after_cap": 3600,
+    "test_size_after_cap": 4800,
+    "val_macro": 0.012820512820512822,
+    "macro": 0.012820512820512822,
+    "val_macro_flat_trigram": 0.17010824330607588,
+    "test_macro_flat_trigram": 0.1634497600018312,
+    "tt_minus_flat": -0.15062924718131837,
+    "weighted": 0.01282051282051282,
+    "acc": 0.08333333333333333,
+    "val_test_gap": 0.0,
+    "dpaper": -0.6504794871794872,
+    "rank_sweep_val_macros": {
+      "2": 0.12834258999070847,
+      "4": 0.012820512820512822,
+      "8": 0.012820512820512822,
+      "16": 0.012820512820512822
+    },
+    "own_basis_recon_err": NaN,
+    "other_basis_recon_err": NaN,
+    "other_over_own_ratio": NaN,
+    "factor_time_sec": 3.3351171016693115,
+    "query_build_time_sec": 44.91654419898987,
+    "val_time_sec": 20.98288083076477,
+    "test_time_sec": 40.66814184188843,
+    "test_metrics": {
+      "overall": {
+        "accuracy": 0.08333333333333333,
+        "macro_f1": 0.012820512820512822,
+        "weighted_f1": 0.01282051282051282,
+        "micro_f1": 0.08333333333333333,
+        "macro_precision": 0.006944444444444444,
+        "macro_recall": 0.08333333333333333
+      },
+      "per_class": {
+        "f1": [
+          0.15384615384615385,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "precision": [
+          0.08333333333333333,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "recall": [
+          1.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "per_language": {},
+      "per_source": {},
+      "confusion_matrix": [
+        [
+          400,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        [
+          400,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        [
+          400,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        [
+          400,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        [
+          400,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        [
+          400,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        [
+          400,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        [
+          400,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        [
+          400,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        [
+          400,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        [
+          400,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        [
+          400,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ]
+      ],
+      "sibling_confusion_rate": 0.18181818181818182,
+      "cross_family_confusion_rate": 0.8181818181818182,
+      "off_diag_total": 4400,
+      "n_samples": 4800,
+      "falsifier_F1_rank_sweep_val_macros": {
+        "2": 0.12834258999070847,
+        "4": 0.012820512820512822,
+        "8": 0.012820512820512822,
+        "16": 0.012820512820512822
+      },
+      "falsifier_F2_tensortrain_test_macro": 0.012820512820512822,
+      "falsifier_F2_flat_trigram_test_macro": 0.1634497600018312,
+      "falsifier_F2_tensortrain_minus_flat": -0.15062924718131837,
+      "falsifier_F3_own_basis_recon_err": NaN,
+      "falsifier_F3_other_basis_recon_err": NaN,
+      "falsifier_F3_other_over_own_ratio": NaN
+    },
+    "val_history": [
+      0.012820512820512822
+    ],
+    "timestamp": "2026-05-21 02:13:53",
+    "wall": 1063.7
+  }
+]
