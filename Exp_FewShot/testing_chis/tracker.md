@@ -2,40 +2,64 @@
 
 ---
 
-## 🎯 HERO CANDIDATE: METATRACO (exp100) — 2026-05-20 [decision pending; TRACO still placeholder]
+## 🚨 PARADIGM SHIFT 2026-05-21: ext_gptsniffer (faithful CE-only baseline) BEATS METATRACO
 
-> **State of play:** TRACO was the locked §3 hero from 2026-05-19. On 2026-05-20
-> Round 7 dropped METATRACO (exp100, composite = **0.5408**) which **exceeds
-> the +0.010 unlock threshold** over TRACO (0.5256). User decision pending on
-> promotion. Until promoted, TRACO remains the §3 placeholder.
+> **The headline number from the latest Kaggle run:**
+> ext_gptsniffer composite = **0.5421** — slightly above METATRACO (0.5408).
+> ext_gptsniffer is a FAITHFUL reproduction of GPTSniffer (Nguyen et al., JSS
+> 2024): `AutoModelForSequenceClassification` + CE only, no contrastive, no
+> tree weighting, no MAML. The simplest possible setup beats every contrastive
+> method we built.
 >
-> **CLAUDE.md updated 2026-05-20**: novelty-first philosophy + 2-track §3.2
-> direction list. Round 7 directions that overlap with CLAUDE.md §3.2 already
-> failed at oral-tier WOW: PROMPTC (=PROMPTCOND, 0.4209), SLOTATTN (=SAD,
-> 0.4398), DUALVIEW (0.4753), MTAUX (=AUXGENE, 0.5229), DIFFTREE (=TREELEARN
-> proxy, 0.5260), RAINFER (=RAGAR proxy, 0.5296).
+> **What this means for the paper:**
+> 1. Our "tree-weighted SupCon is the right inductive prior" story needs
+>    rethinking. A pure CE classifier on UniXcoder matches or beats every
+>    contrastive variant at matched protocol.
+> 2. The 11pp gap we previously claimed over "the strongest baseline" was
+>    an artefact of Group A baselines using ModernBERT + old schedule;
+>    once the baseline is run under our protocol, it lands inside our band.
+> 3. The saturation diagnosis from §3.1 is now sharper: at 20% data
+>    EVERYTHING converges to ≈ 0.71–0.72 on CoDET-M4 (top 12 methods).
 >
-> **Round 8 partial (2026-05-20):** exp104 DUALGRAPH ran first — composite
-> **0.4688**, *below* TRACO (0.5256), *below* even the failed SLOTATTN (0.4398).
-> Dual-graph readout adds noise rather than signal at our scale. exp102/103
-> (DENOISE-v1/v3), exp105 (ACTIVE), exp106 (TREELEARN) still pending.
->
-> **External baselines (2026-05-20):** 5 of 7 faithful K-class reproductions
-> now have results: ext_codegptsensor (0.4775), ext_luar (0.4398),
-> ext_damtl (0.4255), ext_faid (0.4006), ext_llmsniffer (0.1491 — collapsed).
-> All five UNDERPERFORM TRACO by ≥0.05 composite — strong evidence that the
-> field's published methods do not transfer to K-class authorship at matched
-> protocol. ext_detective and ext_gptsniffer rerun pending (encode_plus API
-> fix shipped 2026-05-20).
+> **Hero status now:**
+> ext_gptsniffer 0.5421 > METATRACO 0.5408 > exp99 UNCERTTRACO 0.5341 >
+> exp92 DCGPT 0.5313 > exp83 PROG 0.5296 > exp94 RAINFER 0.5296.
+> The top three are within ≤ 0.013 of each other. The contrastive direction
+> is not winning by a clear margin.
 
-### Tracker completeness (2026-05-20, post-update)
+## 🎯 HERO CANDIDATE: under review — 2026-05-21
 
-- **48 result JSON files** verified in `results/` (was 42 + 6 new).
-- New: `exp104_dualgraph` (Round 8), `ext_codegptsensor`, `ext_damtl`,
-  `ext_faid`, `ext_llmsniffer`, `ext_luar` (External Baselines).
-- All 48 captured below across composite leaderboard + Round 8 + External
-  Baselines sections.
-- **Next free exp ID: exp107.** (exp98/99 used by uncertainty-track; exp102/103/105/106 reserved for pending Round 8 runs.)
+> **State of play:**
+> - **TRACO** (exp76, 0.5256): paper §3 placeholder; story-defining
+> - **METATRACO** (exp100, 0.5408): composite leader through 2026-05-20
+> - **ext_gptsniffer** (0.5421): faithful CE baseline now composite leader
+> - **exp99 UNCERTTRACO** (0.5341): adds MC-dropout selective prediction
+> - **exp98 SPECEXPERT** (0.5271): per-family sibling experts
+>
+> User decision required on §3 narrative. Options:
+> (A) Keep TRACO §3, report ext_gptsniffer as the "honest baseline shock"
+>     finding — the contrast is itself the paper's contribution.
+> (B) Pivot §3 to METATRACO (composite #2, +0.0152 over TRACO).
+> (C) Wait for Round 9-11 results (9 new heros: CHORALE/PRISM/RESONANCE/
+>     JEPA/DRIFT/VICReg/MoSAE/MAE/SINKHORN). Whichever wins becomes §3.
+>
+> **Round 8 verdict (all done):**
+> - exp102 DENOISE-v1 → 0.4711 (below band) ❌
+> - exp103 DENOISE-v3 → 0.3236 (collapsed) ❌
+> - exp104 DUALGRAPH → 0.4688 (below band) ❌
+> - exp105 ACTIVE → 0.4546 (below band) ❌
+> - exp106 ULTRATREE → pending
+> Round 8 has not produced a hero. The active/diffusion/dual-graph axes
+> all failed. Moving to Round 9-11 architectural shifts.
+
+### Tracker completeness (2026-05-21, post-update)
+
+- **56 result JSON files** verified in `results/` (was 48 + 8 new).
+- New since last update:
+  - **exp102/103/105** (Round 8 — all below band, falsified)
+  - **exp98/99** (Round 7 OOM fix completed: SPECEXPERT 0.5271, UNCERTTRACO 0.5341)
+  - **ext_detective** (0.4749) and **ext_gptsniffer** (0.5421 — composite #1)
+- **Next free exp ID: exp133+** (exp107-132 used by Round 9-11 implementations, all parse-clean but not yet run on Kaggle).
 
 ### Why TRACO won the hero slot
 
@@ -77,60 +101,70 @@
 > Always report **val · test · val_test_gap**. Metric: **Macro-F1** for both CoDET-M4 (6-class, author IID) and AICD-T2 (12-class, model-family).
 > Composite score = **mean Test Macro-F1 across all 6 slots** (3 fractions × 2 benchmarks).
 
-### Composite ranking (45 methods, complete on both benchmarks) — updated 2026-05-20
+### Composite ranking (53 methods, complete on both benchmarks) — updated 2026-05-21
 
-> Includes 1 Round 8 result (DUALGRAPH = exp104) and 5 External Baselines
-> (faithful K-class reproductions: ext_codegptsensor, ext_luar, ext_damtl,
-> ext_faid, ext_llmsniffer). All `ext` rows use the same unixcoder-base +
-> RAS schedule protocol → directly comparable.
+> Includes Round 8 results (DUALGRAPH, DENOISE-v1, DENOISE-v3, ACTIVE) and
+> ALL 7 External Baselines now (added ext_detective and ext_gptsniffer with
+> the encode_plus fix). Plus exp98 SPECEXPERT and exp99 UNCERTTRACO after
+> the OOM fix. All rows use the same unixcoder-base + RAS schedule.
 
 | Rank | Method | exp | CoDET 1% | CoDET 5% | CoDET 20% | AICD 1% | AICD 5% | AICD 20% | **Mean** |
 |:-:|:--|:--|--:|--:|--:|--:|--:|--:|--:|
-| 🥇 | **METATRACO** ⚡ | exp100 | **0.6261** | 0.6461 | 0.7059 | **0.3793** | 0.4086 | 0.4790 | **0.5408** |
-| 🥈 | **DCGPT** | exp92 | 0.5984 | 0.6555 | **0.7257** | 0.3062 | **0.4148** | 0.4871 | **0.5313** |
-| 🥉 | **PROG** | exp83 | 0.5934 | 0.6692 | **0.7242** | 0.2964 | **0.4182** | 0.4760 | **0.5296** |
-| 🥉 | **RAINFER** | exp94 | 0.5900 | 0.6635 | 0.7212 | 0.3013 | 0.4092 | **0.4921** | **0.5296** |
-| 5 | CARMIX | exp86 | 0.5931 | **0.6736** | 0.7216 | 0.3068 | 0.4001 | 0.4816 | 0.5295 |
-| 6 | CARBO | exp85 | 0.5869 | 0.6703 | 0.7194 | **0.3090** | 0.4005 | 0.4848 | 0.5285 |
-| 7 | CONFUSE | exp81 | 0.5903 | 0.6723 | 0.7201 | 0.2983 | 0.3976 | 0.4849 | 0.5273 |
-| 8 | DIFFTREE | exp93 | 0.5812 | 0.6652 | 0.7195 | 0.3044 | 0.4061 | 0.4798 | 0.5260 |
-| 9 | TRACO ⭐ hero | exp76 | 0.5887 | 0.6622 | 0.7186 | 0.2965 | 0.3998 | 0.4876 | 0.5256 |
-| 10 | CARCURR | exp89 | 0.5873 | 0.6613 | 0.7161 | 0.3039 | 0.4012 | 0.4819 | 0.5253 |
-| 11 | CARGO v1 (no-op bug) | exp81 | 0.5872 | 0.6601 | 0.7143 | 0.3065 | 0.4030 | 0.4797 | 0.5251 |
-| 12 | CAARC | exp87 | 0.5857 | 0.6599 | 0.7165 | 0.3061 | 0.4004 | 0.4803 | 0.5248 |
-| 13 | MTAUX | exp96 | 0.5760 | 0.6552 | 0.7111 | 0.3097 | 0.4041 | 0.4811 | 0.5229 |
-| 14 | CARGO v2 (no-op fix) | exp84 | 0.5816 | 0.6601 | 0.7147 | 0.3038 | 0.4005 | 0.4746 | 0.5225 |
-| 15 | CGPTS | exp90 | 0.5805 | 0.6722 | 0.7193 | 0.2939 | 0.3852 | 0.4721 | 0.5205 |
-| 15 | DETMULTI | exp91 | 0.5794 | 0.6725 | 0.7220 | 0.2917 | 0.3887 | 0.4689 | 0.5205 |
-| 17 | CAGHOST | exp88 | 0.5767 | 0.6600 | 0.7155 | 0.3000 | 0.3914 | 0.4770 | 0.5201 |
-| 18 | FARS | exp82 | 0.5787 | 0.6668 | 0.7197 | 0.2924 | 0.3884 | 0.4680 | 0.5190 |
-| 19 | SCR | exp62 | 0.5585 | 0.6532 | 0.7185 | 0.3019 | 0.3949 | 0.4776 | 0.5174 |
-| 20 | TKL | exp63 | 0.5524 | 0.6549 | 0.7198 | 0.3012 | 0.3940 | 0.4776 | 0.5167 |
-| 21 | DECOFP | exp70 | 0.5483 | 0.6420 | 0.7158 | 0.2958 | 0.4108 | 0.4806 | 0.5155 |
-| 22 | TOURN | exp67 | 0.5465 | 0.6525 | 0.7198 | 0.2972 | 0.3929 | 0.4835 | 0.5154 |
-| 23 | DTKE | exp66 | 0.5501 | 0.6439 | 0.7114 | 0.2948 | 0.3980 | 0.4882 | 0.5144 |
-| 24 | PTR | exp61 | 0.5574 | 0.6399 | 0.7091 | 0.2942 | 0.4014 | 0.4824 | 0.5141 |
-| 25 | HTKA | exp60 | 0.5444 | 0.6363 | 0.7092 | 0.2913 | 0.3988 | 0.4843 | 0.5107 |
-| 26 | STYLO | exp68 | 0.5359 | 0.6437 | 0.7094 | 0.2916 | 0.3971 | 0.4801 | 0.5096 |
-| 27 | CRONOS | exp77 | 0.5351 | 0.6456 | 0.7115 | 0.2940 | 0.3908 | 0.4790 | 0.5093 |
-| 28 | MAGE | exp79 | 0.5395 | 0.6430 | 0.7106 | 0.2937 | 0.3914 | 0.4758 | 0.5090 |
-| 29 | GENEPRINT | exp71 | 0.5460 | 0.6424 | 0.7051 | 0.2927 | 0.3847 | 0.4805 | 0.5086 |
-| 30 | CASCADE | exp78 | 0.5462 | 0.6434 | 0.7146 | 0.2846 | 0.3778 | 0.4764 | 0.5072 |
-| 31 | PERPSIG | exp69 | 0.5408 | 0.6321 | 0.7076 | 0.2865 | 0.3742 | 0.4813 | 0.5038 |
-| 32 | RACO | exp64 | 0.5627 | 0.6539 | 0.6943 | 0.2922 | 0.3520 | 0.3970 | 0.4920 |
-| 33 | **ext_codegptsensor** ext | ext | 0.5049 | 0.5738 | 0.6546 | 0.2877 | 0.3795 | 0.4646 | **0.4775** |
-| 34 | DUALVIEW | exp97 | 0.5269 | 0.6304 | 0.7010 | 0.2548 | 0.3064 | 0.4322 | 0.4753 |
-| 35 | **DUALGRAPH** ⚠ Round 8 | exp104 | 0.4924 | 0.5749 | 0.6441 | 0.2771 | 0.3804 | 0.4438 | **0.4688** |
-| 36 | TIEH | exp72 | 0.4271 | 0.6112 | 0.7017 | 0.1729 | 0.3226 | 0.4444 | 0.4466 |
-| 37 | SLOTATTN | exp101 | 0.5059 | 0.6012 | 0.6690 | 0.2099 | 0.2593 | 0.3937 | 0.4398 |
-| 37 | **ext_luar** ext | ext | 0.4650 | 0.5340 | 0.5970 | 0.2748 | 0.3446 | 0.4234 | **0.4398** |
-| 39 | **ext_damtl** ext | ext | 0.4122 | 0.5198 | 0.5868 | 0.2770 | 0.3415 | 0.4156 | **0.4255** |
-| 40 | PROMPTC | exp95 | 0.4493 | 0.5921 | 0.6701 | 0.1887 | 0.2579 | 0.3673 | 0.4209 |
-| 41 | TAPA | exp73 | 0.4969 | 0.5743 | 0.6722 | 0.2300 | 0.2746 | 0.2635 | 0.4186 |
-| 42 | **ext_faid** ext | ext | 0.4446 | 0.5374 | 0.6089 | 0.2232 | 0.2544 | 0.3353 | **0.4006** |
-| 43 | SETFIT-TW | exp74 | 0.4353 | 0.4871 | 0.6608 | 0.1405 | 0.2196 | 0.3413 | 0.3808 |
-| 44 | TRACOD | exp80 | 0.3706 | 0.4485 | 0.4029 | 0.1861 | 0.2125 | 0.1937 | 0.3024 |
-| 45 | **ext_llmsniffer** ext ❌ collapse | ext | 0.2170 | 0.1999 | 0.1795 | 0.0944 | 0.1155 | 0.0885 | **0.1491** |
+| 🥇 | **ext_gptsniffer** 🚨 | ext | 0.6216 | 0.6716 | 0.7189 | 0.3446 | **0.4198** | 0.4761 | **0.5421** |
+| 🥈 | **METATRACO** ⚡ | exp100 | **0.6261** | 0.6461 | 0.7059 | **0.3793** | 0.4086 | 0.4790 | **0.5408** |
+| 🥉 | **UNCERTTRACO** | exp99 | 0.5937 | **0.6697** | **0.7223** | 0.3111 | 0.4101 | **0.4975** | **0.5341** |
+| 4 | **DCGPT** | exp92 | 0.5984 | 0.6555 | 0.7257 | 0.3062 | 0.4148 | 0.4871 | **0.5313** |
+| 5 | **PROG** | exp83 | 0.5934 | 0.6692 | **0.7242** | 0.2964 | 0.4182 | 0.4760 | **0.5296** |
+| 5 | **RAINFER** | exp94 | 0.5900 | 0.6635 | 0.7212 | 0.3013 | 0.4092 | **0.4921** | **0.5296** |
+| 7 | CARMIX | exp86 | 0.5931 | **0.6736** | 0.7216 | 0.3068 | 0.4001 | 0.4816 | 0.5295 |
+| 8 | CARBO | exp85 | 0.5869 | 0.6703 | 0.7194 | **0.3090** | 0.4005 | 0.4848 | 0.5285 |
+| 9 | CONFUSE | exp81 | 0.5903 | 0.6723 | 0.7201 | 0.2983 | 0.3976 | 0.4849 | 0.5273 |
+| 10 | **SPECEXPERT** | exp98 | 0.5954 | 0.6637 | 0.7170 | 0.3063 | 0.4059 | 0.4742 | **0.5271** |
+| 13 | CARMIX | exp86 | 0.5931 | **0.6736** | 0.7216 | 0.3068 | 0.4001 | 0.4816 | 0.5295 |
+| 14 | CARBO | exp85 | 0.5869 | 0.6703 | 0.7194 | **0.3090** | 0.4005 | 0.4848 | 0.5285 |
+| 15 | CONFUSE | exp81 | 0.5903 | 0.6723 | 0.7201 | 0.2983 | 0.3976 | 0.4849 | 0.5273 |
+| 16 | DIFFTREE | exp93 | 0.5812 | 0.6652 | 0.7195 | 0.3044 | 0.4061 | 0.4798 | 0.5260 |
+| 17 | TRACO ⭐ hero | exp76 | 0.5887 | 0.6622 | 0.7186 | 0.2965 | 0.3998 | 0.4876 | 0.5256 |
+| 18 | CARCURR | exp89 | 0.5873 | 0.6613 | 0.7161 | 0.3039 | 0.4012 | 0.4819 | 0.5253 |
+| 19 | CARGO v1 (no-op bug) | exp81 | 0.5872 | 0.6601 | 0.7143 | 0.3065 | 0.4030 | 0.4797 | 0.5251 |
+| 20 | CAARC | exp87 | 0.5857 | 0.6599 | 0.7165 | 0.3061 | 0.4004 | 0.4803 | 0.5248 |
+| 21 | MTAUX | exp96 | 0.5760 | 0.6552 | 0.7111 | 0.3097 | 0.4041 | 0.4811 | 0.5229 |
+| 22 | CARGO v2 (no-op fix) | exp84 | 0.5816 | 0.6601 | 0.7147 | 0.3038 | 0.4005 | 0.4746 | 0.5225 |
+| 23 | CGPTS | exp90 | 0.5805 | 0.6722 | 0.7193 | 0.2939 | 0.3852 | 0.4721 | 0.5205 |
+| 23 | DETMULTI | exp91 | 0.5794 | 0.6725 | 0.7220 | 0.2917 | 0.3887 | 0.4689 | 0.5205 |
+| 25 | CAGHOST | exp88 | 0.5767 | 0.6600 | 0.7155 | 0.3000 | 0.3914 | 0.4770 | 0.5201 |
+| 26 | FARS | exp82 | 0.5787 | 0.6668 | 0.7197 | 0.2924 | 0.3884 | 0.4680 | 0.5190 |
+| 27 | SCR | exp62 | 0.5585 | 0.6532 | 0.7185 | 0.3019 | 0.3949 | 0.4776 | 0.5174 |
+| 28 | TKL | exp63 | 0.5524 | 0.6549 | 0.7198 | 0.3012 | 0.3940 | 0.4776 | 0.5167 |
+| 29 | DECOFP | exp70 | 0.5483 | 0.6420 | 0.7158 | 0.2958 | 0.4108 | 0.4806 | 0.5155 |
+| 30 | TOURN | exp67 | 0.5465 | 0.6525 | 0.7198 | 0.2972 | 0.3929 | 0.4835 | 0.5154 |
+| 31 | DTKE | exp66 | 0.5501 | 0.6439 | 0.7114 | 0.2948 | 0.3980 | 0.4882 | 0.5144 |
+| 32 | PTR | exp61 | 0.5574 | 0.6399 | 0.7091 | 0.2942 | 0.4014 | 0.4824 | 0.5141 |
+| 33 | HTKA | exp60 | 0.5444 | 0.6363 | 0.7092 | 0.2913 | 0.3988 | 0.4843 | 0.5107 |
+| 34 | STYLO | exp68 | 0.5359 | 0.6437 | 0.7094 | 0.2916 | 0.3971 | 0.4801 | 0.5096 |
+| 35 | CRONOS | exp77 | 0.5351 | 0.6456 | 0.7115 | 0.2940 | 0.3908 | 0.4790 | 0.5093 |
+| 36 | MAGE | exp79 | 0.5395 | 0.6430 | 0.7106 | 0.2937 | 0.3914 | 0.4758 | 0.5090 |
+| 37 | GENEPRINT | exp71 | 0.5460 | 0.6424 | 0.7051 | 0.2927 | 0.3847 | 0.4805 | 0.5086 |
+| 38 | CASCADE | exp78 | 0.5462 | 0.6434 | 0.7146 | 0.2846 | 0.3778 | 0.4764 | 0.5072 |
+| 39 | PERPSIG | exp69 | 0.5408 | 0.6321 | 0.7076 | 0.2865 | 0.3742 | 0.4813 | 0.5038 |
+| 40 | RACO | exp64 | 0.5627 | 0.6539 | 0.6943 | 0.2922 | 0.3520 | 0.3970 | 0.4920 |
+| 41 | **ext_codegptsensor** ext | ext | 0.5049 | 0.5738 | 0.6546 | 0.2877 | 0.3795 | 0.4646 | **0.4775** |
+| 42 | DUALVIEW | exp97 | 0.5269 | 0.6304 | 0.7010 | 0.2548 | 0.3064 | 0.4322 | 0.4753 |
+| 43 | **ext_detective** ext 🆕 | ext | 0.5268 | 0.6222 | 0.7065 | 0.2518 | 0.3167 | 0.4254 | **0.4749** |
+| 44 | **DENOISE-v1** Round 8 🆕 | exp102 | 0.4988 | 0.5699 | 0.6376 | 0.2889 | 0.3767 | 0.4547 | **0.4711** |
+| 45 | DUALGRAPH ⚠ Round 8 | exp104 | 0.4924 | 0.5749 | 0.6441 | 0.2771 | 0.3804 | 0.4438 | 0.4688 |
+| 46 | **ACTIVE** Round 8 🆕 | exp105 | 0.3771 | 0.5753 | 0.6497 | 0.2842 | 0.3719 | 0.4997 | **0.4596** |
+| 47 | TIEH | exp72 | 0.4271 | 0.6112 | 0.7017 | 0.1729 | 0.3226 | 0.4444 | 0.4466 |
+| 48 | SLOTATTN | exp101 | 0.5059 | 0.6012 | 0.6690 | 0.2099 | 0.2593 | 0.3937 | 0.4398 |
+| 48 | **ext_luar** ext | ext | 0.4650 | 0.5340 | 0.5970 | 0.2748 | 0.3446 | 0.4234 | **0.4398** |
+| 50 | **ext_damtl** ext | ext | 0.4122 | 0.5198 | 0.5868 | 0.2770 | 0.3415 | 0.4156 | **0.4255** |
+| 51 | PROMPTC | exp95 | 0.4493 | 0.5921 | 0.6701 | 0.1887 | 0.2579 | 0.3673 | 0.4209 |
+| 52 | TAPA | exp73 | 0.4969 | 0.5743 | 0.6722 | 0.2300 | 0.2746 | 0.2635 | 0.4186 |
+| 53 | **ext_faid** ext | ext | 0.4446 | 0.5374 | 0.6089 | 0.2232 | 0.2544 | 0.3353 | **0.4006** |
+| 54 | SETFIT-TW | exp74 | 0.4353 | 0.4871 | 0.6608 | 0.1405 | 0.2196 | 0.3413 | 0.3808 |
+| 55 | **DENOISE-v3** Round 8 🆕 ❌ | exp103 | 0.2794 | 0.4160 | 0.5642 | 0.1610 | 0.2057 | 0.3151 | **0.3236** |
+| 56 | TRACOD | exp80 | 0.3706 | 0.4485 | 0.4029 | 0.1861 | 0.2125 | 0.1937 | 0.3024 |
+| 57 | **ext_llmsniffer** ext ❌ collapse | ext | 0.2170 | 0.1999 | 0.1795 | 0.0944 | 0.1155 | 0.0885 | **0.1491** |
 
 **Partial-data methods (CoDET-M4 only — AICD-T2 pending):**
 
@@ -138,16 +172,21 @@
 |:--|:--|--:|--:|--:|
 | RACL | exp75 | 0.5621 | 0.6457 | 0.6873 |
 
-### Per-slot SOTA (gold per cell) — updated 2026-05-20 with Round 7
+### Per-slot SOTA (gold per cell) — updated 2026-05-21 with new Round 7/8 + ext_gptsniffer
 
 | Slot | SOTA method | Score | Δ over previous SOTA | Runner-up |
 |:--|:--|--:|--:|:--|
-| CoDET-M4 1% | **METATRACO** (exp100) | **0.6261** | +0.033 (was PROG 0.5934) | DCGPT 0.5984, PROG 0.5934 |
-| CoDET-M4 5% | **CARMIX** (exp86) | **0.6736** | unchanged | DETMULTI 0.6725, CONFUSE 0.6723 |
-| CoDET-M4 20% | **DCGPT** (exp92) | **0.7257** | +0.002 (was PROG 0.7242) | PROG 0.7242, CARMIX 0.7216 |
-| AICD-T2 1% | **METATRACO** (exp100) | **0.3793** | +0.070 (was CARBO 0.3090) | CARBO 0.3090, MTAUX 0.3097 |
-| AICD-T2 5% | **PROG** (exp83) | **0.4182** | unchanged | DCGPT 0.4148, DIFFTREE 0.4061 |
-| AICD-T2 20% | **RAINFER** (exp94) | **0.4921** | +0.004 (was DTKE 0.4882) | DCGPT 0.4871, CARBO 0.4848 |
+| CoDET-M4 1% | **METATRACO** (exp100) | **0.6261** | unchanged | ext_gptsniffer 0.6216, DCGPT 0.5984 |
+| CoDET-M4 5% | **CARMIX** (exp86) | **0.6736** | unchanged | ext_gptsniffer 0.6716, DETMULTI 0.6725 |
+| CoDET-M4 20% | **DCGPT** (exp92) | **0.7257** | unchanged | UNCERTTRACO 0.7223, DETMULTI 0.7220 |
+| AICD-T2 1% | **METATRACO** (exp100) | **0.3793** | unchanged | ext_gptsniffer 0.3446 |
+| AICD-T2 5% | **ext_gptsniffer** 🚨 | **0.4198** | +0.002 (was PROG 0.4182) | PROG 0.4182, DCGPT 0.4148 |
+| AICD-T2 20% | **UNCERTTRACO** 🆕 | **0.4975** | +0.005 (was RAINFER 0.4921) | RAINFER 0.4921, DTKE 0.4882 |
+
+> **ext_gptsniffer now holds 1 per-slot SOTA (AICD 5%)** and is runner-up at
+> 3 other slots — extremely uncomfortable for a "faithful published baseline"
+> that uses CE only. UNCERTTRACO (exp99) takes a new per-slot SOTA at
+> AICD-T2 20% via MC-dropout selective prediction.
 
 > **Five of six per-slot SOTAs flipped** between the previous tracker
 > snapshot and this one. PROG (exp83) holds three slots, CARMIX one,
